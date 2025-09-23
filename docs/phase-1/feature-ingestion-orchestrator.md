@@ -55,5 +55,6 @@ Provide a unified ingestion orchestrator that schedules connector jobs, manages 
 - Update operator runbooks with orchestrator usage.
 - Share telemetry schema with analytics team for Phase 2 insights.
 - Integrate lessons into future ingestion expansions (cloud drives, RSS).
+- Implementation reference: `src/futurnal/orchestrator/` (queue + scheduler) with coverage in `tests/orchestrator/`.
 
 

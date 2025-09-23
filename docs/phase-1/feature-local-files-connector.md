@@ -54,5 +54,6 @@ Enable users to ingest local directories into Futurnal with deterministic schedu
 - Update `DEVELOPMENT_GUIDE.md` with connector usage notes.
 - Capture metrics baselines for ingestion throughput in shared telemetry doc.
 - Feed lessons learned into other connector feature docs.
+- Implementation reference: see `src/futurnal/ingestion/local/connector.py` and related tests in `tests/ingestion/local/`.
 
 

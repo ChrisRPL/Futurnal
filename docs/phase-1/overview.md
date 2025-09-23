@@ -16,7 +16,7 @@ Each feature below has a dedicated playbook in `docs/phase-1/feature-*.md` descr
 
 | Order | Feature | Outcome | Primary Dependencies |
 | --- | --- | --- | --- |
-| 1 | [Local Files Connector](feature-local-files-connector.md) | Baseline ingestion loop for filesystem sources | Unstructured.io parsing, ingestion scheduler |
+| 1 | [Local Files Connector](feature-local-files-connector.md) | Baseline ingestion loop for filesystem sources | Unstructured.io parsing, ingestion orchestrator |
 | 2 | [Obsidian Vault Connector](feature-obsidian-connector.md) | Vault-aware ingestion with link preservation | Local connector primitives |
 | 3 | [IMAP Email Connector](feature-imap-connector.md) | Email ingestion with selective sync | Scheduler, metadata normalizer |
 | 4 | [GitHub Repository Connector](feature-github-connector.md) | Repository mirror with code/document segregation | Scheduler, normalizer |
