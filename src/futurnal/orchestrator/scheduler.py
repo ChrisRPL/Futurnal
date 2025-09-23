@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,10 +15,11 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from croniter import croniter
 
-from ..ingestion.local.connector import LocalFilesConnector
+from ..ingestion.local.connector import ElementSink, LocalFilesConnector
 from ..ingestion.local.config import LocalIngestionSource
 from ..ingestion.local.state import StateStore
 from .models import IngestionJob, JobPriority, JobType
+from .metrics import TelemetryRecorder
 from .queue import JobQueue
 
 logger = logging.getLogger(__name__)
@@ -40,15 +42,18 @@ class IngestionOrchestrator:
         state_store: StateStore,
         workspace_dir: str,
         loop: Optional[asyncio.AbstractEventLoop] = None,
+        element_sink: ElementSink | None = None,
+        telemetry: TelemetryRecorder | None = None,
     ) -> None:
         self._job_queue = job_queue
         self._connector = LocalFilesConnector(
-            workspace_dir=workspace_dir, state_store=state_store
+            workspace_dir=workspace_dir, state_store=state_store, element_sink=element_sink
         )
         self._loop = loop or asyncio.get_event_loop()
         self._scheduler = AsyncIOScheduler(event_loop=self._loop)
         self._sources: Dict[str, SourceRegistration] = {}
         self._running = False
+        self._telemetry = telemetry
 
     def register_source(self, registration: SourceRegistration) -> None:
         if registration.schedule != "@manual" and not croniter.is_valid(registration.schedule):
@@ -124,13 +129,21 @@ class IngestionOrchestrator:
     async def _process_job(self, job: IngestionJob) -> None:
         logger.info("Processing job %s", job.job_id)
         self._job_queue.mark_running(job.job_id)
+        start = time.perf_counter()
         try:
             await self._execute_job(job)
         except Exception:  # noqa: BLE001
             logger.exception("Job %s failed", job.job_id)
             self._job_queue.mark_failed(job.job_id)
+            # TODO: emit audit log entry when privacy module is available
+            if self._telemetry:
+                self._telemetry.record(job.job_id, time.perf_counter() - start, "failed")
         else:
             self._job_queue.mark_completed(job.job_id)
+            duration = time.perf_counter() - start
+            logger.info("Job %s completed in %.2fs", job.job_id, duration)
+            if self._telemetry:
+                self._telemetry.record(job.job_id, duration, "succeeded")
 
     async def _execute_job(self, job: IngestionJob) -> None:
         if job.job_type == JobType.LOCAL_FILES:

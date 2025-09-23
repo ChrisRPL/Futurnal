@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Protocol
 
 from unstructured.partition.auto import partition
 
@@ -12,18 +12,32 @@ from .config import LocalIngestionSource
 from .scanner import FileSnapshot, detect_deletions, walk_directory
 from .state import FileRecord, StateStore, compute_sha256
 
+
+class ElementSink(Protocol):
+    """Sink interface for handling parsed elements."""
+
+    def handle(self, element: dict) -> None:
+        ...
+
 logger = logging.getLogger(__name__)
 
 
 class LocalFilesConnector:
     """Connector responsible for ingesting local files into Futurnal pipelines."""
 
-    def __init__(self, *, workspace_dir: Path | str, state_store: StateStore) -> None:
+    def __init__(
+        self,
+        *,
+        workspace_dir: Path | str,
+        state_store: StateStore,
+        element_sink: ElementSink | None = None,
+    ) -> None:
         self._workspace_dir = Path(workspace_dir)
         self._workspace_dir.mkdir(parents=True, exist_ok=True)
         self._parsed_dir = self._workspace_dir / "parsed"
         self._parsed_dir.mkdir(parents=True, exist_ok=True)
         self._state_store = state_store
+        self._element_sink = element_sink
 
     def crawl_source(self, source: LocalIngestionSource) -> List[FileRecord]:
         """Perform a crawl of the provided source returning updated records."""
@@ -52,7 +66,10 @@ class LocalFilesConnector:
             logger.debug("Parsing %s", record.path)
             elements = partition(filename=str(record.path), strategy="fast", include_metadata=True)
             for element in elements:
-                yield self._persist_element(source, record, element)
+                parsed = self._persist_element(source, record, element)
+                if self._element_sink is not None:
+                    self._element_sink.handle(parsed)
+                yield parsed
 
     def _persist_element(self, source: LocalIngestionSource, record: FileRecord, element) -> dict:
         storage_path = self._parsed_dir / f"{record.sha256}.json"

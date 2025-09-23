@@ -56,5 +56,6 @@ Provide a unified ingestion orchestrator that schedules connector jobs, manages 
 - Share telemetry schema with analytics team for Phase 2 insights.
 - Integrate lessons into future ingestion expansions (cloud drives, RSS).
 - Implementation reference: `src/futurnal/orchestrator/` (queue + scheduler) with coverage in `tests/orchestrator/`.
+- Telemetry recorder stub: `src/futurnal/orchestrator/metrics.py` captures job durations for baseline metrics.
 
 
