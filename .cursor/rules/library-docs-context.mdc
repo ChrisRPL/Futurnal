@@ -1,0 +1,9 @@
+---
+description: Require Context7 and Brave research before integrating third-party SDKs or libraries
+---
+# Library & SDK Research Rule
+
+- Before adopting or extending any third-party library/SDK, resolve its documentation via the Context7 MCP (`mcp_context7_resolve-library-id` → `mcp_context7_get-library-docs`) to capture the latest API guidance.
+- Supplement documentation review with Brave MCP web search (or equivalent `@Web` research) to spot best practices, known issues, and recent changes.
+- Summarize key findings in implementation notes or feature docs so future contributors understand the chosen integration strategy.
+

@@ -1,0 +1,10 @@
+---
+globs: **/*.tsx,**/*.jsx,**/*.css,**/*.scss
+description: Use Magic MCP for UI design inspiration tasks
+---
+# UI Design Inspiration Rule
+
+- When planning or modifying any UI component or surface, call `mcp_21st-devmagic_21st_magic_component_inspiration` to gather design references before writing code.
+- If you need implementation-ready snippets, follow up with `mcp_21st-devmagic_21st_magic_component_builder` so the chosen pattern lands in the codebase accurately.
+- Note the selected inspirations in feature docs or PR notes to keep the team aligned with Futurnal's aesthetic.
+
