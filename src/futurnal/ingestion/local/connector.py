@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import uuid
+from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List, Protocol
+from typing import Iterable, List, Protocol, runtime_checkable
 
 from unstructured.partition.auto import partition
 
@@ -12,11 +15,14 @@ from .config import LocalIngestionSource
 from .scanner import FileSnapshot, detect_deletions, walk_directory
 from .state import FileRecord, StateStore, compute_sha256
 
-
+@runtime_checkable
 class ElementSink(Protocol):
     """Sink interface for handling parsed elements."""
 
     def handle(self, element: dict) -> None:
+        ...
+
+    def handle_deletion(self, element: dict) -> None:  # pragma: no cover - optional
         ...
 
 logger = logging.getLogger(__name__)
@@ -36,6 +42,8 @@ class LocalFilesConnector:
         self._workspace_dir.mkdir(parents=True, exist_ok=True)
         self._parsed_dir = self._workspace_dir / "parsed"
         self._parsed_dir.mkdir(parents=True, exist_ok=True)
+        self._quarantine_dir = self._workspace_dir / "quarantine"
+        self._quarantine_dir.mkdir(parents=True, exist_ok=True)
         self._state_store = state_store
         self._element_sink = element_sink
 
@@ -52,11 +60,11 @@ class LocalFilesConnector:
             follow_symlinks=source.follow_symlinks,
         ):
             current_paths.append(snapshot.path)
-            record = self._process_snapshot(snapshot)
+            record = self._process_snapshot(source, snapshot)
             if record:
                 snapshots.append(record)
 
-        self._handle_deletions(current_paths)
+        self._handle_deletions(source, current_paths)
         return snapshots
 
     def ingest(self, source: LocalIngestionSource) -> Iterable[dict]:
@@ -64,25 +72,67 @@ class LocalFilesConnector:
 
         for record in self.crawl_source(source):
             logger.debug("Parsing %s", record.path)
-            elements = partition(filename=str(record.path), strategy="fast", include_metadata=True)
+            try:
+                elements = partition(
+                    filename=str(record.path), strategy="fast", include_metadata=True
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Partition failed for %s", record.path)
+                self._quarantine(record.path, "partition_error", str(exc), source.name)
+                continue
             for element in elements:
-                parsed = self._persist_element(source, record, element)
+                try:
+                    parsed = self._persist_element(source, record, element)
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("Persist failed for %s", record.path)
+                    self._quarantine(record.path, "persist_error", str(exc), source.name)
+                    continue
                 if self._element_sink is not None:
-                    self._element_sink.handle(parsed)
+                    try:
+                        self._element_sink.handle(parsed)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.exception("Sink handling failed for %s", record.path)
+                        self._quarantine(record.path, "sink_error", str(exc), source.name)
+                        continue
                 yield parsed
 
     def _persist_element(self, source: LocalIngestionSource, record: FileRecord, element) -> dict:
         storage_path = self._parsed_dir / f"{record.sha256}.json"
-        storage_path.write_text(str(element))
+        if hasattr(element, "to_dict"):
+            payload = element.to_dict()
+        elif isinstance(element, dict):
+            payload = element
+        else:
+            payload = {"text": str(element)}
+
+        payload.setdefault("metadata", {})
+        payload["metadata"].update(
+            {
+                "source": source.name,
+                "path": str(record.path),
+                "sha256": record.sha256,
+                "size_bytes": record.size,
+                "modified_at": datetime.utcfromtimestamp(record.mtime).isoformat(),
+                "ingested_at": datetime.utcnow().isoformat(),
+            }
+        )
+
+        storage_path.write_text(json.dumps(payload, ensure_ascii=False))
         return {
             "source": source.name,
             "path": str(record.path),
             "sha256": record.sha256,
             "element_path": str(storage_path),
+            "size_bytes": record.size,
         }
 
-    def _process_snapshot(self, snapshot: FileSnapshot) -> FileRecord | None:
-        current_hash = compute_sha256(snapshot.path)
+    def _process_snapshot(self, source: LocalIngestionSource, snapshot: FileSnapshot) -> FileRecord | None:
+        try:
+            current_hash = compute_sha256(snapshot.path)
+        except (FileNotFoundError, PermissionError, OSError) as exc:
+            logger.warning("Skipping snapshot for %s due to hash error: %s", snapshot.path, exc)
+            self._quarantine(snapshot.path, "hash_error", str(exc), source.name)
+            return None
         existing = self._state_store.fetch(snapshot.path)
         if existing and existing.sha256 == current_hash and existing.mtime == snapshot.mtime:
             logger.debug("Skipping unchanged file %s", snapshot.path)
@@ -97,11 +147,56 @@ class LocalFilesConnector:
         self._state_store.upsert(record)
         return record
 
-    def _handle_deletions(self, current_paths: Iterable[Path]) -> None:
-        previous_paths = [record.path for record in self._state_store.iter_all()]
-        removed = detect_deletions(previous_paths, current_paths)
+    def _handle_deletions(
+        self, source: LocalIngestionSource, current_paths: Iterable[Path]
+    ) -> None:
+        tracked = {record.path.resolve(): record for record in self._state_store.iter_all()}
+        removed = detect_deletions(tracked.keys(), current_paths)
         for path in removed:
+            record = tracked[path]
             logger.debug("Removing deleted file %s", path)
-            self._state_store.remove(path)
+            self._state_store.remove(record.path)
+            self._notify_sink_of_deletion(source, record)
+            self._cleanup_parsed(record.sha256)
+
+    def _notify_sink_of_deletion(self, source: LocalIngestionSource, record: FileRecord) -> None:
+        if self._element_sink and hasattr(self._element_sink, "handle_deletion"):
+            try:
+                self._element_sink.handle_deletion(
+                    {
+                        "source": source.name,
+                        "path": str(record.path),
+                        "sha256": record.sha256,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Deletion sink handling failed for %s", record.path)
+                self._quarantine(record.path, "sink_deletion_error", str(exc), source.name)
+
+    def _cleanup_parsed(self, sha256: str) -> None:
+        storage_path = self._parsed_dir / f"{sha256}.json"
+        if storage_path.exists():
+            storage_path.unlink()
+
+    def _quarantine(self, path: Path, reason: str, detail: str, source_name: str | None = None) -> None:
+        payload = {
+            "path": str(path),
+            "reason": reason,
+            "detail": detail,
+            "timestamp": datetime.utcnow().isoformat(),
+            "retry_count": 0,
+            "last_retry_at": None,
+            "notes": [],
+            "source": source_name,
+        }
+        identifier = uuid.uuid4().hex
+        if path.exists():
+            try:
+                identifier = compute_sha256(path)
+            except Exception:  # pragma: no cover - hashing failure
+                logger.debug("Falling back to UUID for quarantine file of %s", path)
+        quarantine_file = self._quarantine_dir / f"{identifier}.json"
+        quarantine_file.write_text(json.dumps(payload, ensure_ascii=False))
+        logger.warning("Quarantined file %s due to %s", path, reason)
 
 

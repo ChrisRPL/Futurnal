@@ -16,5 +16,8 @@ where = ["src"]
 addopts = "-ra"
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    "performance: mark performance benchmark tests",
+]
 
 

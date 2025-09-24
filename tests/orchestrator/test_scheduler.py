@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from futurnal.ingestion.local.state import StateStore
 from futurnal.orchestrator.models import JobPriority
 from futurnal.orchestrator.queue import JobQueue
 from futurnal.orchestrator.scheduler import IngestionOrchestrator, SourceRegistration
+from futurnal.pipeline import NormalizationSink
 
 
 class MemoryStateStore(StateStore):
@@ -38,10 +40,34 @@ async def test_manual_job_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         fake_partition,
     )
 
+    class StubPKGWriter:
+        def __init__(self) -> None:
+            self.documents = []
+
+        def write_document(self, payload: dict) -> None:
+            self.documents.append(payload)
+
+        def remove_document(self, sha256: str) -> None:  # pragma: no cover - unused
+            self.documents = [doc for doc in self.documents if doc["sha256"] != sha256]
+
+    class StubVectorWriter:
+        def __init__(self) -> None:
+            self.embeddings = []
+
+        def write_embedding(self, payload: dict) -> None:
+            self.embeddings.append(payload)
+
+        def remove_embedding(self, sha256: str) -> None:  # pragma: no cover - unused
+            self.embeddings = [emb for emb in self.embeddings if emb["sha256"] != sha256]
+
+    pkg_writer = StubPKGWriter()
+    vector_writer = StubVectorWriter()
+    sink = NormalizationSink(pkg_writer=pkg_writer, vector_writer=vector_writer)
     orchestrator = IngestionOrchestrator(
         job_queue=queue,
         state_store=state_store,
         workspace_dir=str(tmp_path / "workspace"),
+        element_sink=sink,
     )
 
     root = tmp_path / "root"
@@ -57,7 +83,23 @@ async def test_manual_job_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     await orchestrator.shutdown()
 
     # Ensure parsed file exists
-    parsed_dir = tmp_path / "workspace" / "parsed"
     assert fake_partition.calls
+    assert pkg_writer.documents
+    assert vector_writer.embeddings
+    telemetry_dir = tmp_path / "workspace" / "telemetry"
+    assert telemetry_dir.exists()
+    log_file = telemetry_dir / "telemetry.log"
+    summary_file = telemetry_dir / "telemetry_summary.json"
+    assert log_file.exists()
+    assert summary_file.exists()
+    summary = json.loads(summary_file.read_text())
+    assert summary["overall"]["jobs"] == 1
+    assert summary["statuses"]["succeeded"]["files"] >= 1
+    audit_dir = tmp_path / "workspace" / "audit"
+    audit_file = audit_dir / "audit.log"
+    assert audit_file.exists()
+    content = audit_file.read_text()
+    assert "notes" in content
+    assert "succeeded" in content
 
 

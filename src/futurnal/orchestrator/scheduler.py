@@ -8,17 +8,22 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Awaitable, Callable, Dict, Optional
+from pathlib import Path
+from typing import Awaitable, Callable, Dict, Iterable, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from croniter import croniter
 
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
+
 from ..ingestion.local.connector import ElementSink, LocalFilesConnector
 from ..ingestion.local.config import LocalIngestionSource
 from ..ingestion.local.state import StateStore
 from .models import IngestionJob, JobPriority, JobType
+from .audit import AuditLogger
 from .metrics import TelemetryRecorder
 from .queue import JobQueue
 
@@ -45,15 +50,21 @@ class IngestionOrchestrator:
         element_sink: ElementSink | None = None,
         telemetry: TelemetryRecorder | None = None,
     ) -> None:
+        self._workspace_dir = Path(workspace_dir)
+        self._workspace_dir.mkdir(parents=True, exist_ok=True)
         self._job_queue = job_queue
         self._connector = LocalFilesConnector(
-            workspace_dir=workspace_dir, state_store=state_store, element_sink=element_sink
+            workspace_dir=self._workspace_dir, state_store=state_store, element_sink=element_sink
         )
         self._loop = loop or asyncio.get_event_loop()
         self._scheduler = AsyncIOScheduler(event_loop=self._loop)
         self._sources: Dict[str, SourceRegistration] = {}
         self._running = False
-        self._telemetry = telemetry
+        self._telemetry = telemetry or TelemetryRecorder(self._workspace_dir / "telemetry")
+        self._audit_logger = AuditLogger(self._workspace_dir / "audit")
+        self._max_retries = 3
+        self._retry_backoff_seconds = 60
+        self._observer: Optional[Observer] = None
 
     def register_source(self, registration: SourceRegistration) -> None:
         if registration.schedule != "@manual" and not croniter.is_valid(registration.schedule):
@@ -69,6 +80,7 @@ class IngestionOrchestrator:
                 replace_existing=True,
             )
         logger.info("Registered source %s", registration.source.name)
+        self._register_file_watch(registration.source)
 
     def register_interval_source(
         self, registration: SourceRegistration, *, seconds: int
@@ -87,6 +99,7 @@ class IngestionOrchestrator:
             return
         self._scheduler.start()
         self._loop.create_task(self._worker_loop())
+        self._start_observer()
         self._running = True
         logger.info("Ingestion orchestrator started")
 
@@ -94,6 +107,10 @@ class IngestionOrchestrator:
         if not self._running:
             return
         self._scheduler.shutdown(wait=False)
+        if self._observer:
+            self._observer.stop()
+            self._observer.join(timeout=5)
+            self._observer = None
         self._running = False
         logger.info("Ingestion orchestrator stopped")
 
@@ -130,35 +147,108 @@ class IngestionOrchestrator:
         logger.info("Processing job %s", job.job_id)
         self._job_queue.mark_running(job.job_id)
         start = time.perf_counter()
+        files_processed = 0
+        bytes_processed = 0
         try:
-            await self._execute_job(job)
+            files_processed, bytes_processed = await self._execute_job(job)
         except Exception:  # noqa: BLE001
             logger.exception("Job %s failed", job.job_id)
             self._job_queue.mark_failed(job.job_id)
-            # TODO: emit audit log entry when privacy module is available
             if self._telemetry:
-                self._telemetry.record(job.job_id, time.perf_counter() - start, "failed")
+                self._telemetry.record(
+                    job.job_id,
+                    time.perf_counter() - start,
+                    "failed",
+                    files_processed=files_processed,
+                    bytes_processed=bytes_processed,
+                )
+            self._record_audit_event(job, "failed")
+            await self._maybe_retry(job)
         else:
             self._job_queue.mark_completed(job.job_id)
             duration = time.perf_counter() - start
             logger.info("Job %s completed in %.2fs", job.job_id, duration)
             if self._telemetry:
-                self._telemetry.record(job.job_id, duration, "succeeded")
+                self._telemetry.record(
+                    job.job_id,
+                    duration,
+                    "succeeded",
+                    files_processed=files_processed,
+                    bytes_processed=bytes_processed,
+                )
+            self._record_audit_event(job, "succeeded")
 
     async def _execute_job(self, job: IngestionJob) -> None:
         if job.job_type == JobType.LOCAL_FILES:
-            await self._ingest_local(job)
+            return await self._ingest_local(job)
         else:
             raise ValueError(f"Unsupported job type {job.job_type}")
 
     async def _ingest_local(self, job: IngestionJob) -> None:
         source_name = job.payload["source_name"]
         registration = self._sources[source_name]
+        files_processed = 0
+        bytes_processed = 0
         for element in self._connector.ingest(registration.source):
             await self._handle_ingested_element(element)
+            files_processed += 1
+            bytes_processed += element.get("size_bytes", 0)
+        return files_processed, bytes_processed
 
     async def _handle_ingested_element(self, element: dict) -> None:
-        # Placeholder for downstream normalization and storage
         logger.debug("Ingested element from %s", element.get("path"))
+
+    # Removed helper; ingestion happens synchronously within event loop execution
+
+    def _record_audit_event(self, job: IngestionJob, status: str) -> None:
+        logger.debug("Audit event job=%s status=%s", job.job_id, status)
+        self._audit_logger.record(job_id=job.job_id, status=status, source=job.payload["source_name"])
+
+    async def _maybe_retry(self, job: IngestionJob) -> None:
+        record = DataRetryRecord(job_id=job.job_id, attempts=job.payload.get("attempts", 0))
+        if record.attempts >= self._max_retries:
+            logger.error("Job %s exceeded retry limit", job.job_id)
+            return
+
+        record.attempts += 1
+        job.payload["attempts"] = record.attempts
+        logger.info(
+            "Rescheduling job %s (attempt %s/%s)", job.job_id, record.attempts, self._max_retries
+        )
+        self._job_queue.reschedule(job.job_id, self._retry_backoff_seconds)
+        await asyncio.sleep(self._retry_backoff_seconds)
+
+    def _start_observer(self) -> None:
+        if self._observer is not None:
+            return
+        observer = Observer()
+        for registration in self._sources.values():
+            handler = _SourceEventHandler(self._enqueue_job, registration.source.name)
+            observer.schedule(handler, str(registration.source.root_path), recursive=True)
+        observer.start()
+        self._observer = observer
+
+    def _register_file_watch(self, source: LocalIngestionSource) -> None:
+        if self._observer is None:
+            return
+        handler = _SourceEventHandler(self._enqueue_job, source.name)
+        self._observer.schedule(handler, str(source.root_path), recursive=True)
+
+
+class _SourceEventHandler(FileSystemEventHandler):
+    def __init__(self, enqueue: Callable[[str], None], source_name: str) -> None:
+        self._enqueue = enqueue
+        self._source_name = source_name
+
+    def on_any_event(self, event):  # pragma: no cover - requires filesystem events
+        if event.is_directory:
+            return
+        self._enqueue(self._source_name)
+
+
+@dataclass
+class DataRetryRecord:
+    job_id: str
+    attempts: int = 0
 
 

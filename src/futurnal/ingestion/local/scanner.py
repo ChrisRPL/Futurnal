@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator
 
 from pathspec import PathSpec
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -40,7 +44,11 @@ def walk_directory(
             rel_path = str(path.relative_to(root))
             if include_spec.match_file(rel_path):
                 continue
-            stat = path.stat()
+            try:
+                stat = path.stat()
+            except (FileNotFoundError, PermissionError, OSError) as exc:
+                logger.warning("Skipping path %s due to stat error: %s", path, exc)
+                continue
             yield FileSnapshot(path=path, size=stat.st_size, mtime=stat.st_mtime)
 
 

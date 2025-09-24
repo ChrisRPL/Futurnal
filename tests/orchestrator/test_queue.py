@@ -47,3 +47,15 @@ def test_status_transitions(tmp_path: Path) -> None:
     assert list(queue.fetch_pending()) == []
 
 
+def test_reschedule(tmp_path: Path) -> None:
+    queue = JobQueue(tmp_path / "queue.db")
+    job = make_job("job")
+    queue.enqueue(job)
+    queue.mark_running("job")
+    queue.mark_failed("job")
+    queue.reschedule("job", retry_delay_seconds=60)
+
+    pending = list(queue.fetch_pending())
+    assert pending
+
+

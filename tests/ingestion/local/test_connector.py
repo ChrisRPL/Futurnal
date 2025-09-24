@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Iterable
 
@@ -78,5 +79,28 @@ def test_crawl_source_skips_unchanged(tmp_path: Path, connector: LocalFilesConne
 
     second_records = connector.crawl_source(source)
     assert not second_records
+
+
+def test_ingest_quarantines_on_partition_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "source"
+    root.mkdir()
+    file_path = root / "note.md"
+    file_path.write_text("hello")
+
+    def failing_partition(**kwargs):  # type: ignore[no-redef]
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("futurnal.ingestion.local.connector.partition", failing_partition)
+    state_store = DummyStateStore()
+    connector = LocalFilesConnector(workspace_dir=tmp_path, state_store=state_store)
+    source = LocalIngestionSource(name="notes", root_path=root)
+
+    assert not list(connector.ingest(source))
+
+    quarantine_dir = tmp_path / "quarantine"
+    files = list(quarantine_dir.glob("*.json"))
+    assert files
+    payload = json.loads(files[0].read_text())
+    assert payload["reason"] == "partition_error"
 
 

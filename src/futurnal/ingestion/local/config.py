@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, RootModel, validator
+from pydantic import BaseModel, Field, RootModel, field_validator
 from pathspec import PathSpec
 
 
@@ -22,7 +22,7 @@ class LocalIngestionSource(BaseModel):
         description="Optional path to .futurnalignore-like file with patterns",
     )
 
-    @validator("root_path")
+    @field_validator("root_path")
     def _validate_root(cls, value: Path) -> Path:
         if not value.exists():
             raise ValueError(f"Ingestion root does not exist: {value}")
