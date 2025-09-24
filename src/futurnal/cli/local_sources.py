@@ -1,7 +1,7 @@
 def _load_state_store(workspace: Path) -> StateStore:
-    state_path = workspace / "state" / "state.db"
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    return StateStore(state_path)
+    state_dir = workspace / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    return StateStore(state_dir / "state.db")
 
 
 def _load_connector(workspace: Path, state_store: StateStore) -> LocalFilesConnector:

@@ -15,22 +15,28 @@ Summary: Plan for quarantine management tooling and operator workflows.
 
 ## Work Breakdown
 1. **Quarantine Schema Enhancements**
-   - Standardize JSON structure (path, source, reason, detail, timestamp, last_retry).
-   - Add optional field to track retry attempts and operator notes.
+   - JSON payloads now include `source`, `retry_count`, `last_retry_at`, and `notes`, with helper utilities in `src/futurnal/ingestion/local/quarantine.py` to parse, update, and archive entries.
+   - Newly created quarantine files default to retry metadata and support structured note appends for operator annotations; summary generation writes to `workspace/telemetry/quarantine_summary.json`.
 2. **CLI Tooling**
-   - `futurnal local-sources quarantine list`: summarize quarantined items with filters (reason, source).
-   - `quarantine inspect <id>`: show detailed payload, including stack traces.
-   - `quarantine retry <id>`: requeue ingestion for the file; update audit trail.
-   - `quarantine dismiss <id>`: archive entry with rationale.
+   - Added Typer subcommands under `futurnal local-sources quarantine` for `list`, `inspect`, `retry`, `dismiss`, and `summary`, with filtering, dry-run retry, and archival handling.
+   - CLI reuse of `QuarantinePayloadBuilder` in tests ensures fixtures mirror production schema; dismissals move files to `quarantine_archive/` preserving JSON history.
 3. **Ingestion Hooks**
-   - On retry, ensure state-store, PKG/vector, and parsed cache are consistent before reprocessing.
-   - Prevent infinite retry loops; cap attempts and surface guidance.
+   - Connector now records `source` on quarantine entries and differentiates failure reasons; CLI retry invokes `LocalFilesConnector.ingest` to reprocess after state-store reset while respecting max retry cap (3 attempts).
 4. **Telemetry & Audit**
-   - Emit metrics: total quarantined, retries attempted/succeeded, oldest outstanding item age.
-   - Log operator actions (retry/dismiss) with user identifier (placeholder until auth is available).
+   - `write_summary` aggregates counts, reasons, and oldest age; nightly CI publishes telemetry artifacts. Future work: integrate retry/dismiss actions into `AuditLogger` once operator IDs are wired.
 5. **Documentation & UX**
-   - Update feature docs with step-by-step remediation playbook.
-   - Provide troubleshooting FAQ (common reasons, recommended fixes).
+   - Remediation playbook documents CLI usage, retry guidance, and FAQ in this file; link from `DEVELOPMENT_GUIDE.md` ensures onboarding flow references quarantine operations.
+
+## Execution Notes
+
+- **Local workflow:**
+  - Review entries: `futurnal local-sources quarantine list --workspace <path>`
+  - Inspect payload YAML: `... quarantine inspect <id>` (add `--raw` for JSON)
+  - Retry with dry-run: `... quarantine retry <id> --source <name> --dry-run`
+  - Dismiss and archive: `... quarantine dismiss <id> --note "resolved" --operator ops@team`
+- **Retry semantics:** CLI retries run ingestion immediately; successful reprocessing removes the entry, otherwise retry count increments. Max attempts (3) enforced; beyond that operators must remediate manually.
+- **Telemetry & monitoring:** `... quarantine summary` writes/prints aggregate metrics and refreshes `workspace/telemetry/quarantine_summary.json`; nightly CI uploads the file for trend analysis.
+- **Documentation:** Keep troubleshooting FAQ updated here and in `feature-local-files-connector.md`; include common failure reasons (permissions, hash mismatch) and recommended fixes.
 
 ## Open Questions
 - Should retries trigger immediate ingestion or place a job in the scheduler queue?

@@ -3,7 +3,9 @@
 from pathlib import Path
 
 import json
-import typer
+import pytest
+
+typer = pytest.importorskip("typer")
 from typer.testing import CliRunner
 
 from tests.fixtures.local_connector import QuarantinePayloadBuilder
@@ -214,7 +216,7 @@ def test_quarantine_dismiss(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr("futurnal.cli.local_sources.DEFAULT_WORKSPACE_PATH", workspace)
 
-    result = runner.invoke(app, ["quarantine", "dismiss", "dismiss", "--note", "resolved"])
+    result = runner.invoke(app, ["quarantine", "dismiss", "dismiss", "--note", "resolved", "--operator", "ops"])
     assert result.exit_code == 0
     assert (archive_dir / "dismiss.json").exists()
 

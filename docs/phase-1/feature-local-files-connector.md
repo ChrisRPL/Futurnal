@@ -47,7 +47,7 @@ Enable users to ingest local directories into Futurnal with deterministic schedu
 
 ## Production Readiness Plan
 - **Integration & Performance Suite:** Build automated scenarios covering large directories, symlinks, permission failures, and deletion flows; add throughput benchmarks validating the ≥5 MB/s target.
-- **Quarantine Operations:** Extend CLI with commands to inspect, retry, or dismiss quarantined files; document operator remediation flow and surface counts in telemetry reports.
+- **Quarantine Operations:** Extend CLI with commands to inspect, retry, or dismiss quarantined files; document operator remediation flow and surface counts in telemetry reports. Implemented via `futurnal local-sources quarantine` subcommands with telemetry summary generation and archived history.
 - **Throughput & Concurrency Controls:** Expose configuration for scan intervals, worker concurrency, and batching; validate FSEvents-driven updates under heavy churn without overwhelming the queue.
 - **Privacy & Audit Hardening:** Enrich audit entries with redacted metadata, integrate consent prompts for external parsers, and ensure telemetry omits sensitive paths while remaining user-auditable.
 - **Scheduler UX Enhancements:** Provide CLI/desktop controls for scheduling (cron/interval), priority overrides, manual pause/resume, and job retry counters to keep orchestration deterministic.
