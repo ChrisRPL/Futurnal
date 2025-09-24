@@ -33,7 +33,6 @@ class TelemetryRecorder:
         files_processed: Optional[int] = None,
         bytes_processed: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        *,
         active_workers: Optional[int] = None,
         configured_workers: Optional[int] = None,
         queue_depth: Optional[int] = None,

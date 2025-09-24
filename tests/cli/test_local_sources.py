@@ -176,6 +176,7 @@ def test_quarantine_list_and_summary(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0
     assert "partition_error" in result.output
     assert "hash_error" in result.output
+    assert "path:" in result.output
 
     summary_result = runner.invoke(app, ["quarantine", "list", "--summary"])
     assert summary_result.exit_code == 0
@@ -205,6 +206,7 @@ def test_quarantine_inspect(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(app, ["quarantine", "inspect", "inspect"])
     assert result.exit_code == 0
     assert "stacktrace" in result.output
+    assert "redacted_path" in result.output
 
 
 def test_quarantine_dismiss(tmp_path: Path, monkeypatch) -> None:

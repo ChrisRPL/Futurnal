@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict
 
+from futurnal.privacy.redaction import redact_path
+
 
 @dataclass
 class QuarantinePayloadBuilder:
@@ -26,6 +28,7 @@ class QuarantinePayloadBuilder:
         notes: list[str] | None = None,
     ) -> Path:
         self.directory.mkdir(parents=True, exist_ok=True)
+        redacted = redact_path(path)
         payload: Dict[str, object] = {
             "path": path,
             "reason": reason,
@@ -35,6 +38,8 @@ class QuarantinePayloadBuilder:
             "last_retry_at": last_retry_at,
             "notes": notes or [],
             "source": source,
+            "redacted_path": redacted.redacted,
+            "path_hash": redacted.path_hash,
         }
         file_path = self.directory / f"{identifier}.json"
         file_path.write_text(json.dumps(payload))

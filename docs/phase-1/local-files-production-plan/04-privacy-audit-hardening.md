@@ -30,6 +30,13 @@ Summary: Plan for privacy safeguards and audit logging enhancements in the Local
    - Update feature docs and onboarding materials covering privacy controls, logging expectations, and review processes.
    - Provide operator checklist before enabling external integrations.
 
+## Implementation Summary
+- Audit events now include structured fields (`job_id`, `source`, `action`, `status`, `sha256`, `redacted_path`, `path_hash`, `operator_action`, `metadata`) with a chained hash for tamper evidence and automatic file rotation/retention (30 days by default).
+- Redaction policy hashes every directory segment while preserving filename extensions; CLI telemetry, audit views, and quarantine tooling print masked paths with stable hashes.
+- Consent registry persists per-source scope decisions, exposes CLI grant/revoke/status commands, and blocks ingestion escalations without active approval; all decisions feed the audit log with optional token hashes.
+- Privacy review hooks mirror audit entries into a dedicated workspace channel for downstream inspection, priming future encryption at rest integration via manifest metadata.
+- Operator documentation references CLI commands (`local-sources audit --verify`, `local-sources consent`, `local-sources quarantine`) to inspect logs, manage consent, and validate privacy posture.
+
 ## Open Questions
 - What retention policy should we enforce for audit logs? Daily rotation? Configurable TTL?
 - Do we need to support per-source redaction rules (e.g., allow plaintext for non-sensitive directories)?

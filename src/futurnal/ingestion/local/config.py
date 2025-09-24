@@ -45,6 +45,18 @@ class LocalIngestionSource(BaseModel):
         ge=0.0,
         le=120.0,
     )
+    allow_plaintext_paths: bool = Field(
+        default=False,
+        description="Expose plaintext paths to audit outputs instead of redacted values",
+    )
+    require_external_processing_consent: bool = Field(
+        default=False,
+        description="Require explicit consent before escalating files to external parsers",
+    )
+    external_processing_scope: str = Field(
+        default="local.external_processing",
+        description="Consent scope identifier for external processing decisions",
+    )
 
     @field_validator("root_path")
     def _validate_root(cls, value: Path) -> Path:
@@ -61,6 +73,9 @@ class LocalIngestionSource(BaseModel):
         patterns.extend(f"!{pattern}" for pattern in self.include)
         patterns.extend(self.exclude)
         return PathSpec.from_lines("gitwildmatch", patterns)
+
+    def allows_plaintext(self) -> bool:
+        return self.allow_plaintext_paths
 
 
 class LocalIngestionConfig(RootModel[List[LocalIngestionSource]]):

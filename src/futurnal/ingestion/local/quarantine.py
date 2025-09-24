@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
+
+from futurnal.privacy.redaction import build_policy, redact_path
 
 
 QUARANTINE_SUMMARY_FILENAME = "quarantine_summary.json"
@@ -36,6 +38,8 @@ class QuarantineEntry:
     notes: List[str]
     source: Optional[str]
     file_path: Path
+    redacted_path: str = field(default="")
+    path_hash: Optional[str] = field(default=None)
 
     @classmethod
     def from_file(cls, path: Path) -> "QuarantineEntry":
@@ -51,9 +55,15 @@ class QuarantineEntry:
             notes=list(data.get("notes", [])),
             source=data.get("source"),
             file_path=path,
+            redacted_path=data.get("redacted_path", ""),
+            path_hash=data.get("path_hash"),
         )
 
     def to_dict(self) -> Dict[str, object]:
+        if not self.redacted_path:
+            redacted = redact_path(self.path, policy=build_policy())
+            self.redacted_path = redacted.redacted
+            self.path_hash = redacted.path_hash
         return {
             "path": self.path,
             "reason": self.reason,
@@ -63,6 +73,8 @@ class QuarantineEntry:
             "last_retry_at": self.last_retry_at.isoformat() if self.last_retry_at else None,
             "notes": self.notes,
             "source": self.source,
+            "redacted_path": self.redacted_path,
+            "path_hash": self.path_hash,
         }
 
 

@@ -78,7 +78,11 @@ def _make_connector(tmp_path: Path) -> tuple[LocalFilesConnector, RecordingPKGWr
     sink = NormalizationSink(pkg_writer=pkg_writer, vector_writer=vector_writer)
     state_store_path = workspace / "state.db"
     state_store = StateStore(state_store_path)
-    connector = LocalFilesConnector(workspace_dir=workspace, state_store=state_store, element_sink=sink)
+    connector = LocalFilesConnector(
+        workspace_dir=workspace,
+        state_store=state_store,
+        element_sink=sink,
+    )
     return connector, pkg_writer, vector_writer, state_store, workspace
 
 

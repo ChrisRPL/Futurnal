@@ -35,6 +35,14 @@ def _load_source(config_path: Path, source_name: str) -> LocalIngestionSource:
 
 def _quarantine_summary_path(workspace: Path) -> Path:
     return workspace / TELEMETRY_DIR_NAME / QUARANTINE_SUMMARY_FILENAME
+
+
+def _audit_logger(workspace: Path) -> AuditLogger:
+    return AuditLogger(workspace / AUDIT_DIR_NAME)
+
+
+def _load_consent_registry(workspace: Path) -> ConsentRegistry:
+    return ConsentRegistry(workspace / CONSENT_DIR_NAME)
 """CLI utilities for managing local ingestion sources."""
 
 from __future__ import annotations
@@ -61,6 +69,7 @@ from ..ingestion.local.quarantine import (
     write_summary,
 )
 from ..ingestion.local.state import StateStore
+from ..privacy import AuditLogger, ConsentRegistry, ConsentRequiredError, build_policy, redact_path
 
 app = typer.Typer(help="Manage Futurnal local data sources")
 
@@ -75,6 +84,8 @@ QUARANTINE_DIR_NAME = "quarantine"
 QUARANTINE_ARCHIVE_DIR_NAME = "quarantine_archive"
 MAX_RETRIES = MAX_RETRY_ATTEMPTS
 DISMISS_NOTE_KEY = "dismissed_by"
+CONSENT_DIR_NAME = "privacy"
+CONSENT_SCOPE_LOCAL_EXTERNAL = "local.external_processing"
 
 
 def _load_config(path: Path) -> dict:
@@ -197,6 +208,7 @@ def show_audit(
         help="Path to ingestion workspace",
     ),
     tail: int = typer.Option(20, min=1, help="Number of recent audit events to display"),
+    verify: bool = typer.Option(False, help="Verify log chain integrity before printing"),
 ) -> None:
     """Print recent audit log entries."""
 
@@ -206,9 +218,26 @@ def show_audit(
         typer.echo(f"Audit log not found at {audit_path}")
         raise typer.Exit(code=1)
 
+    logger = _audit_logger(workspace)
+    if verify and not logger.verify(path=audit_path):
+        typer.echo("Audit log integrity check failed")
+        raise typer.Exit(code=2)
+
     lines = audit_path.read_text().splitlines()
     for line in lines[-tail:]:
-        typer.echo(line)
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            typer.echo(line)
+            continue
+        typer.echo(
+            f"[{payload.get('timestamp')}] {payload.get('source')} {payload.get('action')} {payload.get('status')}"
+        )
+        redacted_path = payload.get("redacted_path")
+        if redacted_path:
+            typer.echo(f"  path: {redacted_path} (hash={payload.get('path_hash')})")
+        if payload.get("metadata"):
+            typer.echo(f"  metadata: {json.dumps(payload['metadata'])}")
 
 
 @app.command("remove")
@@ -264,8 +293,11 @@ def quarantine_list(
     for entry in entries:
         timestamp = entry.timestamp.isoformat() if entry.timestamp else "unknown"
         typer.echo(
-            f"- {entry.identifier}: {entry.reason} (source={entry.source}, retries={entry.retry_count}, timestamp={timestamp})"
+            f"- {entry.identifier}: {entry.reason}"
+            f" (source={entry.source}, retries={entry.retry_count}, timestamp={timestamp})"
         )
+        if entry.redacted_path:
+            typer.echo(f"    path: {entry.redacted_path} (hash={entry.path_hash})")
 
 
 @quarantine_app.command("inspect")
@@ -280,13 +312,19 @@ def quarantine_inspect(
         typer.echo(f"Quarantine entry {entry_id} not found")
         raise typer.Exit(code=1)
 
-    entry = json.loads(entry_path.read_text())
+    entry = QuarantineEntry.from_file(entry_path)
     if raw:
-        typer.echo(json.dumps(entry, indent=2))
+        typer.echo(json.dumps(entry.to_dict(), indent=2))
         return
 
-    for key, value in entry.items():
-        typer.echo(f"{key}: {value}")
+    typer.echo(f"id: {entry.identifier}")
+    typer.echo(f"source: {entry.source}")
+    typer.echo(f"reason: {entry.reason}")
+    typer.echo(f"detail: {entry.detail}")
+    typer.echo(f"timestamp: {entry.timestamp}")
+    typer.echo(f"retries: {entry.retry_count}")
+    typer.echo(f"redacted_path: {entry.redacted_path}")
+    typer.echo(f"path_hash: {entry.path_hash}")
 
 
 @quarantine_app.command("retry")
@@ -313,7 +351,8 @@ def quarantine_retry(
     source = _load_source(config_path, source_name)
 
     if dry_run:
-        typer.echo(f"Dry run: would retry {entry.path} for source {source.name}")
+        redacted = entry.redacted_path or redact_path(entry.path).redacted
+        typer.echo(f"Dry run: would retry {redacted} for source {source.name}")
         return
 
     state_store = _load_state_store(workspace)
@@ -330,10 +369,11 @@ def quarantine_retry(
     )
 
     if records:
-        remove_entry(entry_path)
-        typer.echo(f"Retried {entry.path}; {len(records)} elements ingested and entry cleared")
+        redacted = entry.redacted_path or redact_path(entry.path).redacted
+        typer.echo(f"Retried {redacted}; {len(records)} elements ingested and entry cleared")
     else:
-        typer.echo(f"Retried {entry.path}; no elements produced. Entry remains for further action")
+        redacted = entry.redacted_path or redact_path(entry.path).redacted
+        typer.echo(f"Retried {redacted}; no elements produced. Entry remains for further action")
 
 
 @quarantine_app.command("dismiss")
@@ -366,6 +406,80 @@ def quarantine_summary(
     workspace = _resolve_workspace(workspace_path)
     summary = write_summary(_load_quarantine_dir(workspace), workspace / TELEMETRY_DIR_NAME)
     typer.echo(json.dumps(summary, indent=2))
+
+
+consent_app = typer.Typer(help="Manage connector consent decisions")
+app.add_typer(consent_app, name="consent")
+
+
+@consent_app.command("grant")
+def consent_grant(
+    source_name: str = typer.Argument(..., help="Name of the registered source"),
+    scope: str = typer.Option(CONSENT_SCOPE_LOCAL_EXTERNAL, help="Consent scope"),
+    workspace_path: Optional[Path] = typer.Option(None, help="Path to ingestion workspace"),
+    duration_hours: Optional[int] = typer.Option(None, help="Optional duration for consent"),
+    token: Optional[str] = typer.Option(None, help="Optional consent token"),
+    operator: Optional[str] = typer.Option(None, help="Operator identifier"),
+) -> None:
+    workspace = _resolve_workspace(workspace_path)
+    registry = _load_consent_registry(workspace)
+    record = registry.grant(
+        source=source_name,
+        scope=scope,
+        duration_hours=duration_hours,
+        token=token,
+        operator=operator,
+    )
+    audit = _audit_logger(workspace)
+    audit.record_consent_event(
+        job_id=str(uuid.uuid4()),
+        source=source_name,
+        scope=scope,
+        granted=True,
+        operator=operator,
+        token_hash=record.token_hash,
+    )
+    typer.echo(f"Granted consent for {source_name}:{scope}")
+
+
+@consent_app.command("revoke")
+def consent_revoke(
+    source_name: str = typer.Argument(..., help="Name of the registered source"),
+    scope: str = typer.Option(CONSENT_SCOPE_LOCAL_EXTERNAL, help="Consent scope"),
+    workspace_path: Optional[Path] = typer.Option(None, help="Path to ingestion workspace"),
+    operator: Optional[str] = typer.Option(None, help="Operator identifier"),
+) -> None:
+    workspace = _resolve_workspace(workspace_path)
+    registry = _load_consent_registry(workspace)
+    record = registry.revoke(source=source_name, scope=scope, operator=operator)
+    audit = _audit_logger(workspace)
+    audit.record_consent_event(
+        job_id=str(uuid.uuid4()),
+        source=source_name,
+        scope=scope,
+        granted=False,
+        operator=operator,
+        token_hash=record.token_hash,
+    )
+    typer.echo(f"Revoked consent for {source_name}:{scope}")
+
+
+@consent_app.command("status")
+def consent_status(
+    workspace_path: Optional[Path] = typer.Option(None, help="Path to ingestion workspace"),
+    active_only: bool = typer.Option(True, help="Show only active consents"),
+) -> None:
+    workspace = _resolve_workspace(workspace_path)
+    registry = _load_consent_registry(workspace)
+    records = list(registry.iter_active()) if active_only else list(registry.snapshot())
+    if not records:
+        typer.echo("No consent records found")
+        return
+    for record in records:
+        typer.echo(
+            f"- {record.source}:{record.scope} :: granted={record.granted}"
+            f" expires={record.expires_at} operator={record.operator}"
+        )
 
 
 if __name__ == "__main__":

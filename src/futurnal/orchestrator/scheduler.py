@@ -23,8 +23,9 @@ from watchdog.observers import Observer
 from ..ingestion.local.connector import ElementSink, LocalFilesConnector
 from ..ingestion.local.config import LocalIngestionSource
 from ..ingestion.local.state import StateStore
+from ..privacy.consent import ConsentRegistry
 from .models import IngestionJob, JobPriority, JobType
-from .audit import AuditLogger
+from .audit import AuditEvent, AuditLogger
 from .metrics import TelemetryRecorder
 from .queue import JobQueue
 
@@ -54,15 +55,21 @@ class IngestionOrchestrator:
         self._workspace_dir = Path(workspace_dir)
         self._workspace_dir.mkdir(parents=True, exist_ok=True)
         self._job_queue = job_queue
-        self._connector = LocalFilesConnector(
-            workspace_dir=self._workspace_dir, state_store=state_store, element_sink=element_sink
-        )
         self._loop = loop or asyncio.get_event_loop()
         self._scheduler = AsyncIOScheduler(event_loop=self._loop)
         self._sources: Dict[str, SourceRegistration] = {}
         self._running = False
         self._telemetry = telemetry or TelemetryRecorder(self._workspace_dir / "telemetry")
         self._audit_logger = AuditLogger(self._workspace_dir / "audit")
+        consent_dir = self._workspace_dir / "privacy"
+        self._consent_registry = ConsentRegistry(consent_dir)
+        self._connector = LocalFilesConnector(
+            workspace_dir=self._workspace_dir,
+            state_store=state_store,
+            element_sink=element_sink,
+            audit_logger=self._audit_logger,
+            consent_registry=self._consent_registry,
+        )
         self._max_retries = 3
         self._retry_backoff_seconds = 60
         hardware_cpu_count = os.cpu_count() or 4
@@ -192,7 +199,7 @@ class IngestionOrchestrator:
         bytes_processed = 0
         try:
             files_processed, bytes_processed = await self._execute_job(job)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             logger.exception("Job %s failed", job.job_id)
             self._job_queue.mark_failed(job.job_id)
             if self._telemetry:
@@ -208,6 +215,13 @@ class IngestionOrchestrator:
                     queue_depth=self._job_queue.pending_count(),
                     effective_throughput=(bytes_processed / duration) if duration else None,
                 )
+            job.payload.update(
+                {
+                    "files_processed": files_processed,
+                    "bytes_processed": bytes_processed,
+                    "error": str(exc),
+                }
+            )
             self._record_audit_event(job, "failed")
             await self._maybe_retry(job)
         else:
@@ -228,6 +242,12 @@ class IngestionOrchestrator:
                     queue_depth=queue_depth,
                     effective_throughput=throughput,
                 )
+            job.payload.update(
+                {
+                    "files_processed": files_processed,
+                    "bytes_processed": bytes_processed,
+                }
+            )
             self._record_audit_event(job, "succeeded")
 
     async def _execute_job(self, job: IngestionJob) -> None:
@@ -241,7 +261,7 @@ class IngestionOrchestrator:
         registration = self._sources[source_name]
         files_processed = 0
         bytes_processed = 0
-        for element in self._connector.ingest(registration.source):
+        for element in self._connector.ingest(registration.source, job_id=job.job_id):
             await self._handle_ingested_element(element)
             files_processed += 1
             bytes_processed += element.get("size_bytes", 0)
@@ -254,7 +274,22 @@ class IngestionOrchestrator:
 
     def _record_audit_event(self, job: IngestionJob, status: str) -> None:
         logger.debug("Audit event job=%s status=%s", job.job_id, status)
-        self._audit_logger.record(job_id=job.job_id, status=status, source=job.payload["source_name"])
+        detail = {
+            "files_processed": job.payload.get("files_processed"),
+            "bytes_processed": job.payload.get("bytes_processed"),
+        }
+        if status == "failed":
+            detail["error"] = job.payload.get("error")
+        metadata = {k: v for k, v in detail.items() if v is not None}
+        event = AuditEvent(
+            job_id=job.job_id,
+            source=job.payload["source_name"],
+            action="job",
+            status=status,
+            timestamp=datetime.utcnow(),
+            metadata=metadata,
+        )
+        self._audit_logger.record(event)
 
     async def _maybe_retry(self, job: IngestionJob) -> None:
         record = DataRetryRecord(job_id=job.job_id, attempts=job.payload.get("attempts", 0))
