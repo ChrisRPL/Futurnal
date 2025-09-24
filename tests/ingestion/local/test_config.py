@@ -39,6 +39,10 @@ def test_load_config_from_dict(tmp_path: Path) -> None:
                     "name": "docs",
                     "root_path": str(root),
                     "include": ["**/*.md"],
+                    "max_workers": 4,
+                    "max_files_per_batch": 50,
+                    "scan_interval_seconds": 120.0,
+                    "watcher_debounce_seconds": 1.0,
                 }
             ]
         }
@@ -46,5 +50,9 @@ def test_load_config_from_dict(tmp_path: Path) -> None:
 
     assert len(config.root) == 1
     assert config.root[0].name == "docs"
+    assert config.root[0].max_workers == 4
+    assert config.root[0].max_files_per_batch == 50
+    assert config.root[0].scan_interval_seconds == 120.0
+    assert config.root[0].watcher_debounce_seconds == 1.0
 
 

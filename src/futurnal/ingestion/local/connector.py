@@ -53,18 +53,30 @@ class LocalFilesConnector:
         pathspec = source.build_pathspec()
         snapshots: List[FileRecord] = []
         current_paths: List[Path] = []
+        batch_limit = source.max_files_per_batch or 0
 
+        limit_hit = False
         for snapshot in walk_directory(
             source.root_path,
             include_spec=pathspec,
             follow_symlinks=source.follow_symlinks,
         ):
             current_paths.append(snapshot.path)
+            if limit_hit:
+                continue
             record = self._process_snapshot(source, snapshot)
             if record:
                 snapshots.append(record)
-
-        self._handle_deletions(source, current_paths)
+                if batch_limit and len(snapshots) >= batch_limit:
+                    limit_hit = True
+        if not limit_hit:
+            self._handle_deletions(source, current_paths)
+        else:
+            logger.debug(
+                "Batch limit %s reached for source %s; remaining files will scan in subsequent jobs",
+                batch_limit,
+                source.name,
+            )
         return snapshots
 
     def ingest(self, source: LocalIngestionSource) -> Iterable[dict]:

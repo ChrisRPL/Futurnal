@@ -44,6 +44,14 @@ def test_register_and_list(tmp_path: Path, monkeypatch) -> None:
             str(root),
             "--include",
             "**/*.md",
+            "--max-workers",
+            "3",
+            "--max-files-per-batch",
+            "25",
+            "--scan-interval-seconds",
+            "30",
+            "--watcher-debounce-seconds",
+            "0.5",
             "--config-path",
             str(config_path),
         ],
@@ -52,6 +60,10 @@ def test_register_and_list(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0
     config = read_config(config_path)
     assert config["sources"][0]["name"] == "docs"
+    assert config["sources"][0]["max_workers"] == 3
+    assert config["sources"][0]["max_files_per_batch"] == 25
+    assert config["sources"][0]["scan_interval_seconds"] == 30.0
+    assert config["sources"][0]["watcher_debounce_seconds"] == 0.5
 
     list_result = runner.invoke(app, ["list", "--config-path", str(config_path)])
     assert "docs" in list_result.output

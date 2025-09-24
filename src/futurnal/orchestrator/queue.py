@@ -132,4 +132,13 @@ class JobQueue:
                     (datetime.utcnow().isoformat(), datetime.utcnow().isoformat(), job_id),
                 )
 
+    def pending_count(self) -> int:
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                "SELECT COUNT(*) FROM jobs WHERE status = 'pending'"
+            )
+            row = cur.fetchone()
+        return int(row[0]) if row else 0
+
 

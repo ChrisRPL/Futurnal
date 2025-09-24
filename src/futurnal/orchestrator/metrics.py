@@ -33,6 +33,11 @@ class TelemetryRecorder:
         files_processed: Optional[int] = None,
         bytes_processed: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        *,
+        active_workers: Optional[int] = None,
+        configured_workers: Optional[int] = None,
+        queue_depth: Optional[int] = None,
+        effective_throughput: Optional[float] = None,
     ) -> None:
         entry = {
             "job_id": job_id,
@@ -44,8 +49,17 @@ class TelemetryRecorder:
             entry["files_processed"] = files_processed
         if bytes_processed is not None:
             entry["bytes_processed"] = bytes_processed
-        if metadata:
-            entry["metadata"] = metadata
+        metadata_payload: Dict[str, Any] = metadata.copy() if metadata else {}
+        if active_workers is not None:
+            metadata_payload["active_workers"] = active_workers
+        if configured_workers is not None:
+            metadata_payload["configured_workers"] = configured_workers
+        if queue_depth is not None:
+            metadata_payload["queue_depth"] = queue_depth
+        if effective_throughput is not None:
+            metadata_payload["effective_throughput_bps"] = effective_throughput
+        if metadata_payload:
+            entry["metadata"] = metadata_payload
 
         status_stats = self._stats.setdefault(
             status, {"count": 0, "duration": 0.0, "files": 0, "bytes": 0.0}

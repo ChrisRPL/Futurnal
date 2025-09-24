@@ -21,6 +21,30 @@ class LocalIngestionSource(BaseModel):
         default=None,
         description="Optional path to .futurnalignore-like file with patterns",
     )
+    max_workers: Optional[int] = Field(
+        default=None,
+        description="Upper bound on concurrent ingestion workers for this source",
+        ge=1,
+        le=32,
+    )
+    max_files_per_batch: Optional[int] = Field(
+        default=None,
+        description="Maximum number of files to ingest per worker batch",
+        ge=1,
+        le=1000,
+    )
+    scan_interval_seconds: Optional[float] = Field(
+        default=None,
+        description="Interval for periodic scans when file watcher is unavailable",
+        gt=0.0,
+        le=3600.0,
+    )
+    watcher_debounce_seconds: Optional[float] = Field(
+        default=None,
+        description="Minimum seconds between watcher-triggered job enqueues",
+        ge=0.0,
+        le=120.0,
+    )
 
     @field_validator("root_path")
     def _validate_root(cls, value: Path) -> Path:

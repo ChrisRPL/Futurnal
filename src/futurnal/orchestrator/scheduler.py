@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -64,12 +65,22 @@ class IngestionOrchestrator:
         self._audit_logger = AuditLogger(self._workspace_dir / "audit")
         self._max_retries = 3
         self._retry_backoff_seconds = 60
+        hardware_cpu_count = os.cpu_count() or 4
+        self._hardware_worker_cap = max(1, min(hardware_cpu_count, 8))
+        self._configured_workers = self._hardware_worker_cap
+        self._semaphore: Optional[asyncio.Semaphore] = None
+        self._active_jobs = 0
+        self._debounce_windows: Dict[str, float] = {}
         self._observer: Optional[Observer] = None
 
     def register_source(self, registration: SourceRegistration) -> None:
         if registration.schedule != "@manual" and not croniter.is_valid(registration.schedule):
             raise ValueError(f"Invalid cron schedule: {registration.schedule}")
         self._sources[registration.source.name] = registration
+        if registration.source.max_workers:
+            requested = registration.source.max_workers
+            capped = max(1, min(requested, self._hardware_worker_cap))
+            self._configured_workers = min(self._configured_workers, capped)
         if registration.schedule != "@manual":
             trigger = CronTrigger.from_crontab(registration.schedule)
             self._scheduler.add_job(
@@ -81,6 +92,16 @@ class IngestionOrchestrator:
             )
         logger.info("Registered source %s", registration.source.name)
         self._register_file_watch(registration.source)
+        if registration.source.scan_interval_seconds:
+            seconds = int(registration.source.scan_interval_seconds)
+            if seconds > 0:
+                self._scheduler.add_job(
+                    self._enqueue_job,
+                    trigger=IntervalTrigger(seconds=seconds),
+                    args=[registration.source.name],
+                    id=f"fallback-{registration.source.name}",
+                    replace_existing=True,
+                )
 
     def register_interval_source(
         self, registration: SourceRegistration, *, seconds: int
@@ -122,10 +143,18 @@ class IngestionOrchestrator:
     def _enqueue_job(self, source_name: str) -> None:
         registration = self._sources[source_name]
         job_id = str(uuid.uuid4())
+        now = time.perf_counter()
+        debounce = registration.source.watcher_debounce_seconds or 0.0
+        last_event = self._debounce_windows.get(source_name)
+        if debounce and last_event and (now - last_event) < debounce:
+            return
+        self._debounce_windows[source_name] = now
         job = IngestionJob(
             job_id=job_id,
             job_type=JobType.LOCAL_FILES,
-            payload={"source_name": source_name},
+            payload={
+                "source_name": source_name,
+            },
             priority=registration.priority,
             scheduled_for=datetime.utcnow(),
         )
@@ -133,15 +162,27 @@ class IngestionOrchestrator:
         logger.debug("Enqueued job %s for source %s", job_id, source_name)
 
     async def _worker_loop(self) -> None:
+        max_workers = self._configured_workers or 1
+        self._semaphore = asyncio.Semaphore(max_workers)
         while self._running:
             async for job in self._fetch_jobs():
-                await self._process_job(job)
-            await asyncio.sleep(1)
+                await self._semaphore.acquire()
+                self._active_jobs += 1
+                self._loop.create_task(self._run_job(job))
+            await asyncio.sleep(0.1)
 
     async def _fetch_jobs(self):
         # Convert iterator to async generator
         for job in self._job_queue.fetch_pending():
             yield job
+
+    async def _run_job(self, job: IngestionJob) -> None:
+        try:
+            await self._process_job(job)
+        finally:
+            self._active_jobs -= 1
+            if self._semaphore:
+                self._semaphore.release()
 
     async def _process_job(self, job: IngestionJob) -> None:
         logger.info("Processing job %s", job.job_id)
@@ -155,12 +196,17 @@ class IngestionOrchestrator:
             logger.exception("Job %s failed", job.job_id)
             self._job_queue.mark_failed(job.job_id)
             if self._telemetry:
+                duration = time.perf_counter() - start
                 self._telemetry.record(
                     job.job_id,
-                    time.perf_counter() - start,
+                    duration,
                     "failed",
                     files_processed=files_processed,
                     bytes_processed=bytes_processed,
+                    active_workers=self._active_jobs,
+                    configured_workers=self._configured_workers,
+                    queue_depth=self._job_queue.pending_count(),
+                    effective_throughput=(bytes_processed / duration) if duration else None,
                 )
             self._record_audit_event(job, "failed")
             await self._maybe_retry(job)
@@ -169,12 +215,18 @@ class IngestionOrchestrator:
             duration = time.perf_counter() - start
             logger.info("Job %s completed in %.2fs", job.job_id, duration)
             if self._telemetry:
+                queue_depth = self._job_queue.pending_count()
+                throughput = bytes_processed / duration if duration else None
                 self._telemetry.record(
                     job.job_id,
                     duration,
                     "succeeded",
                     files_processed=files_processed,
                     bytes_processed=bytes_processed,
+                    active_workers=self._active_jobs,
+                    configured_workers=self._configured_workers,
+                    queue_depth=queue_depth,
+                    effective_throughput=throughput,
                 )
             self._record_audit_event(job, "succeeded")
 
@@ -223,7 +275,7 @@ class IngestionOrchestrator:
             return
         observer = Observer()
         for registration in self._sources.values():
-            handler = _SourceEventHandler(self._enqueue_job, registration.source.name)
+            handler = _SourceEventHandler(self, registration.source)
             observer.schedule(handler, str(registration.source.root_path), recursive=True)
         observer.start()
         self._observer = observer
@@ -231,19 +283,19 @@ class IngestionOrchestrator:
     def _register_file_watch(self, source: LocalIngestionSource) -> None:
         if self._observer is None:
             return
-        handler = _SourceEventHandler(self._enqueue_job, source.name)
+        handler = _SourceEventHandler(self, source)
         self._observer.schedule(handler, str(source.root_path), recursive=True)
 
 
 class _SourceEventHandler(FileSystemEventHandler):
-    def __init__(self, enqueue: Callable[[str], None], source_name: str) -> None:
-        self._enqueue = enqueue
-        self._source_name = source_name
+    def __init__(self, orchestrator: IngestionOrchestrator, source: LocalIngestionSource) -> None:
+        self._orchestrator = orchestrator
+        self._source = source
 
     def on_any_event(self, event):  # pragma: no cover - requires filesystem events
         if event.is_directory:
             return
-        self._enqueue(self._source_name)
+        self._orchestrator._enqueue_job(self._source.name)
 
 
 @dataclass

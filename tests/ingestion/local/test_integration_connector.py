@@ -204,3 +204,17 @@ def test_sparse_large_file_reporting(tmp_path: Path) -> None:
         state_store.close()
 
 
+def test_max_files_per_batch_limits_results(tmp_path: Path) -> None:
+    fixture = create_nested_fixture(tmp_path)
+    connector, pkg_writer, vector_writer, state_store, _workspace = _make_connector(tmp_path)
+    try:
+        source = LocalIngestionSource(name="nested", root_path=fixture.root, max_files_per_batch=1)
+        records = list(connector.ingest(source))
+
+        assert len(records) == 1
+        assert len(pkg_writer.documents_by_sha) == 1
+        assert len(vector_writer.embeddings_by_sha) == 1
+    finally:
+        state_store.close()
+
+

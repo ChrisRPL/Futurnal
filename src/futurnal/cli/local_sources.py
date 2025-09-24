@@ -96,13 +96,37 @@ def register_local_source(
     exclude: Optional[str] = typer.Option(None, help="Comma-separated glob exclude patterns"),
     ignore_file: Optional[Path] = typer.Option(None, help="Custom ignore file path"),
     follow_symlinks: bool = typer.Option(False, help="Follow symlinks when scanning"),
+    max_workers: Optional[int] = typer.Option(
+        None,
+        min=1,
+        max=32,
+        help="Upper bound on concurrent ingestion workers for this source",
+    ),
+    max_files_per_batch: Optional[int] = typer.Option(
+        None,
+        min=1,
+        max=1000,
+        help="Maximum number of files an ingestion worker processes per batch",
+    ),
+    scan_interval_seconds: Optional[float] = typer.Option(
+        None,
+        min=0.1,
+        max=3600.0,
+        help="Fallback scan interval in seconds when watcher is unavailable",
+    ),
+    watcher_debounce_seconds: Optional[float] = typer.Option(
+        None,
+        min=0.0,
+        max=120.0,
+        help="Debounce interval in seconds between watcher-triggered job enqueues",
+    ),
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config"),
 ) -> None:
     """Register or update a local directory source."""
 
     config = _load_config(config_path)
-    include_list = include.split(",") if include else []
-    exclude_list = exclude.split(",") if exclude else []
+    include_list = [pattern.strip() for pattern in include.split(",") if pattern.strip()] if include else []
+    exclude_list = [pattern.strip() for pattern in exclude.split(",") if pattern.strip()] if exclude else []
 
     source_dict = {
         "name": name,
@@ -111,6 +135,10 @@ def register_local_source(
         "exclude": exclude_list,
         "follow_symlinks": follow_symlinks,
         "ignore_file": str(ignore_file) if ignore_file else None,
+        "max_workers": max_workers,
+        "max_files_per_batch": max_files_per_batch,
+        "scan_interval_seconds": scan_interval_seconds,
+        "watcher_debounce_seconds": watcher_debounce_seconds,
     }
 
     # Validate source configuration

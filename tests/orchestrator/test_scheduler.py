@@ -73,7 +73,13 @@ async def test_manual_job_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     root = tmp_path / "root"
     root.mkdir()
     (root / "note.md").write_text("hello")
-    source = LocalIngestionSource(name="notes", root_path=root)
+    source = LocalIngestionSource(
+        name="notes",
+        root_path=root,
+        max_workers=2,
+        watcher_debounce_seconds=0.2,
+        scan_interval_seconds=0.5,
+    )
 
     orchestrator.register_source(SourceRegistration(source=source, schedule="@manual"))
     orchestrator.run_manual_job("notes")

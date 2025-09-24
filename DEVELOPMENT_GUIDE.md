@@ -26,6 +26,7 @@ Follow the sequence below to onboard quickly, understand the product vision, and
 10. `prompts/phase-3-guide.md` — Prompts covering conversational causal exploration and Aspirational Self integration.
 11. `docs/phase-1/local-files-production-plan/01-integration-performance-tests.md` — Runbook for Local Files Connector integration/performance suite, including fixture generation, CI workflows, and telemetry benchmarks.
 12. `docs/phase-1/local-files-production-plan/02-quarantine-operations.md` — Quarantine remediation guide detailing CLI workflows, retry policies, and telemetry monitoring.
+13. `docs/phase-1/local-files-production-plan/03-throughput-concurrency-controls.md` — Operator tuning playbook covering concurrency knobs, batch sizing, telemetry interpretation, and hardware presets.
 
 ## Additional Tips
 - Revisit the prompts as checklists during implementation sprints.
