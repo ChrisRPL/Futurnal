@@ -11,7 +11,8 @@ Summary: Plan for improving scheduling UX and operator controls in the Local Fil
 - CLI commands for listing schedules, updating cron/interval settings, changing priorities, and triggering manual jobs.
 - Pause/resume support per source with persisted state to avoid unintended ingestion.
 - Queue visibility tools (e.g., pending jobs, retry counts, next run times) integrated into CLI or dashboard.
-- Documentation describing scheduling workflows and best practices.
+- Documentation describing scheduling workflows and best practices. Refer to
+  [`scheduler-operations.md`](scheduler-operations.md) for operator guidance.
 
 ## Work Breakdown
 1. **Schedule Management CLI**

@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, RootModel, field_validator
+from croniter import croniter, is_valid
+from pydantic import BaseModel, Field, RootModel, field_validator, model_validator
 from pathspec import PathSpec
 
 
@@ -57,6 +58,25 @@ class LocalIngestionSource(BaseModel):
         default="local.external_processing",
         description="Consent scope identifier for external processing decisions",
     )
+    schedule: str = Field(
+        default="@manual",
+        description="Cron expression for scheduled ingestion or '@manual' for manual-only",
+    )
+    interval_seconds: Optional[float] = Field(
+        default=None,
+        description="Interval in seconds for '@interval' scheduled ingestion",
+        gt=0.0,
+        le=86400.0,
+    )
+    priority: str = Field(
+        default="normal",
+        description="Job priority for scheduled ingestion (low, normal, high)",
+        pattern="^(low|normal|high)$",
+    )
+    paused: bool = Field(
+        default=False,
+        description="When true, suppress automatic ingestion for this source",
+    )
 
     @field_validator("root_path")
     def _validate_root(cls, value: Path) -> Path:
@@ -65,6 +85,19 @@ class LocalIngestionSource(BaseModel):
         if not value.is_dir():
             raise ValueError(f"Ingestion root must be a directory: {value}")
         return value.resolve()
+
+    @model_validator(mode="after")
+    def _validate_schedule(self):  # type: ignore[override]
+        if self.schedule == "@manual":
+            return self
+        if self.schedule == "@interval":
+            if self.interval_seconds is None:
+                raise ValueError("interval_seconds is required when schedule is '@interval'")
+            return self
+        if not is_valid(self.schedule):
+            raise ValueError(f"Invalid cron expression: {self.schedule}")
+        self.interval_seconds = None
+        return self
 
     def build_pathspec(self) -> PathSpec:
         patterns: List[str] = []

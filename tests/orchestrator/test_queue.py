@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from futurnal.orchestrator.models import IngestionJob, JobPriority, JobType
-from futurnal.orchestrator.queue import JobQueue
+from futurnal.orchestrator.queue import JobQueue, JobStatus
 
 
 def make_job(job_id: str, scheduled_offset: int = 0) -> IngestionJob:
@@ -57,5 +57,28 @@ def test_reschedule(tmp_path: Path) -> None:
 
     pending = list(queue.fetch_pending())
     assert pending
+
+
+def test_snapshot(tmp_path: Path) -> None:
+    queue = JobQueue(tmp_path / "queue.db")
+    first = make_job("first")
+    second = make_job("second")
+    queue.enqueue(first)
+    queue.enqueue(second)
+    queue.mark_running("first")
+    queue.mark_completed("first")
+
+    snapshot_all = queue.snapshot()
+    assert len(snapshot_all) == 2
+    assert snapshot_all[-1]["job_id"] == "second"
+    assert snapshot_all[-1]["status"] == JobStatus.PENDING.value
+    assert snapshot_all[0]["priority"] == "normal"
+
+    succeeded = queue.snapshot(status=JobStatus.SUCCEEDED)
+    assert len(succeeded) == 1
+    assert succeeded[-1]["job_id"] == "first"
+
+    limited = queue.snapshot(limit=1)
+    assert len(limited) == 1
 
 

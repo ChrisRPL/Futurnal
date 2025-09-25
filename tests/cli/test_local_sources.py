@@ -21,12 +21,20 @@ from futurnal.cli.local_sources import (
     TELEMETRY_SUMMARY_FILE,
     app,
 )
+from futurnal.orchestrator.queue import JobQueue
 
 runner = CliRunner()
 
 
 def read_config(path: Path) -> dict:
     return json.loads(path.read_text())
+
+
+def find_source(config: dict, name: str) -> dict:
+    for source in config.get("sources", []):
+        if source.get("name") == name:
+            return source
+    raise AssertionError(f"Source {name} not found")
 
 
 def test_register_and_list(tmp_path: Path, monkeypatch) -> None:
@@ -59,11 +67,15 @@ def test_register_and_list(tmp_path: Path, monkeypatch) -> None:
 
     assert result.exit_code == 0
     config = read_config(config_path)
-    assert config["sources"][0]["name"] == "docs"
-    assert config["sources"][0]["max_workers"] == 3
-    assert config["sources"][0]["max_files_per_batch"] == 25
-    assert config["sources"][0]["scan_interval_seconds"] == 30.0
-    assert config["sources"][0]["watcher_debounce_seconds"] == 0.5
+    source = find_source(config, "docs")
+    assert source["name"] == "docs"
+    assert source["max_workers"] == 3
+    assert source["max_files_per_batch"] == 25
+    assert source["scan_interval_seconds"] == 30.0
+    assert source["watcher_debounce_seconds"] == 0.5
+    assert source["schedule"] == "@manual"
+    assert source["priority"] == "normal"
+    assert source["paused"] is False
 
     list_result = runner.invoke(app, ["list", "--config-path", str(config_path)])
     assert "docs" in list_result.output
@@ -90,6 +102,208 @@ def test_remove_source(tmp_path: Path) -> None:
     assert result.exit_code == 0
     config = read_config(config_path)
     assert config["sources"] == []
+
+
+def test_schedule_update_and_list(tmp_path: Path) -> None:
+    config_path = tmp_path / "sources.json"
+    root = tmp_path / "data"
+    root.mkdir()
+
+    runner.invoke(
+        app,
+        [
+            "register",
+            "--name",
+            "data",
+            "--root",
+            str(root),
+            "--config-path",
+            str(config_path),
+        ],
+    )
+
+    update_result = runner.invoke(
+        app,
+        [
+            "schedule",
+            "update",
+            "data",
+            "--cron",
+            "*/10 * * * *",
+            "--config-path",
+            str(config_path),
+        ],
+    )
+    assert update_result.exit_code == 0
+
+    config = read_config(config_path)
+    source = find_source(config, "data")
+    assert source["schedule"] == "*/10 * * * *"
+    assert source["interval_seconds"] is None
+
+    list_result = runner.invoke(
+        app,
+        [
+            "schedule",
+            "list",
+            "--json",
+            "--config-path",
+            str(config_path),
+        ],
+    )
+    assert list_result.exit_code == 0
+    payload = json.loads(list_result.output)
+    assert payload[0]["schedule"] == "*/10 * * * *"
+    assert payload[0]["priority"] == "normal"
+
+    interval_result = runner.invoke(
+        app,
+        [
+            "schedule",
+            "update",
+            "data",
+            "--interval",
+            "600",
+            "--config-path",
+            str(config_path),
+        ],
+    )
+    assert interval_result.exit_code == 0
+    config = read_config(config_path)
+    source = find_source(config, "data")
+    assert source["schedule"] == "@interval"
+    assert source["interval_seconds"] == 600.0
+
+    remove_result = runner.invoke(
+        app,
+        [
+            "schedule",
+            "remove",
+            "data",
+            "--config-path",
+            str(config_path),
+        ],
+    )
+    assert remove_result.exit_code == 0
+    config = read_config(config_path)
+    source = find_source(config, "data")
+    assert source["schedule"] == "@manual"
+
+
+def test_priority_pause_resume_and_run(tmp_path: Path) -> None:
+    config_path = tmp_path / "sources.json"
+    workspace = tmp_path / "workspace"
+    root = tmp_path / "docs"
+    root.mkdir()
+
+    runner.invoke(
+        app,
+        [
+            "register",
+            "--name",
+            "docs",
+            "--root",
+            str(root),
+            "--config-path",
+            str(config_path),
+        ],
+    )
+
+    priority_result = runner.invoke(
+        app,
+        [
+            "priority",
+            "docs",
+            "--level",
+            "high",
+            "--config-path",
+            str(config_path),
+        ],
+    )
+    assert priority_result.exit_code == 0
+    source = find_source(read_config(config_path), "docs")
+    assert source["priority"] == "high"
+
+    pause_result = runner.invoke(
+        app,
+        [
+            "pause",
+            "docs",
+            "--config-path",
+            str(config_path),
+            "--workspace-path",
+            str(workspace),
+            "--operator",
+            "ops",
+        ],
+    )
+    assert pause_result.exit_code == 0
+    source = find_source(read_config(config_path), "docs")
+    assert source["paused"] is True
+    audit_path = workspace / "audit" / "audit.log"
+    assert "paused" in audit_path.read_text()
+
+    resume_result = runner.invoke(
+        app,
+        [
+            "resume",
+            "docs",
+            "--config-path",
+            str(config_path),
+            "--workspace-path",
+            str(workspace),
+            "--operator",
+            "ops",
+        ],
+    )
+    assert resume_result.exit_code == 0
+    source = find_source(read_config(config_path), "docs")
+    assert source["paused"] is False
+    assert "resumed" in audit_path.read_text()
+
+    run_result = runner.invoke(
+        app,
+        [
+            "run",
+            "docs",
+            "--config-path",
+            str(config_path),
+            "--workspace-path",
+            str(workspace),
+        ],
+    )
+    assert run_result.exit_code == 1
+
+    run_force_result = runner.invoke(
+        app,
+        [
+            "run",
+            "docs",
+            "--config-path",
+            str(config_path),
+            "--workspace-path",
+            str(workspace),
+            "--force",
+        ],
+    )
+    assert run_force_result.exit_code == 0
+    queue = JobQueue(workspace / "queue" / "queue.db")
+    entries = queue.snapshot()
+    assert entries
+    assert entries[0]["payload"]["trigger"] == "manual"
+    queue_result = runner.invoke(
+        app,
+        [
+            "queue",
+            "status",
+            "--json",
+            "--workspace-path",
+            str(workspace),
+        ],
+    )
+    assert queue_result.exit_code == 0
+    queue_payload = json.loads(queue_result.output)
+    assert queue_payload[0]["job_id"] == entries[0]["job_id"]
 
 
 def test_telemetry_command(tmp_path: Path, monkeypatch) -> None:

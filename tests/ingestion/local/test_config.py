@@ -43,6 +43,8 @@ def test_load_config_from_dict(tmp_path: Path) -> None:
                     "max_files_per_batch": 50,
                     "scan_interval_seconds": 120.0,
                     "watcher_debounce_seconds": 1.0,
+                    "schedule": "*/5 * * * *",
+                    "priority": "high",
                 }
             ]
         }
@@ -54,5 +56,7 @@ def test_load_config_from_dict(tmp_path: Path) -> None:
     assert config.root[0].max_files_per_batch == 50
     assert config.root[0].scan_interval_seconds == 120.0
     assert config.root[0].watcher_debounce_seconds == 1.0
+    assert config.root[0].schedule == "*/5 * * * *"
+    assert config.root[0].priority == "high"
 
 

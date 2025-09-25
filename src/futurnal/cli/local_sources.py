@@ -43,17 +43,59 @@ def _audit_logger(workspace: Path) -> AuditLogger:
 
 def _load_consent_registry(workspace: Path) -> ConsentRegistry:
     return ConsentRegistry(workspace / CONSENT_DIR_NAME)
+
+
+def _load_job_queue(workspace: Path) -> JobQueue:
+    queue_dir = workspace / QUEUE_DIR_NAME
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    return JobQueue(queue_dir / QUEUE_DB_FILE)
+
+
+def _load_sources(config_path: Path) -> Dict[str, LocalIngestionSource]:
+    config = _load_config(config_path)
+    valid = load_config_from_dict(config)
+    return {source.name: source for source in valid.root}
+
+
+def _save_sources(config_path: Path, sources: Iterable[LocalIngestionSource]) -> None:
+    serialized = []
+    for source in sorted(sources, key=lambda item: item.name):
+        payload = source.model_dump(mode="json")
+        payload["root_path"] = str(source.root_path)
+        if payload.get("ignore_file") is None:
+            payload["ignore_file"] = None
+        serialized.append(payload)
+    _save_config(config_path, {"sources": serialized})
+
+
+def _update_source(
+    config_path: Path,
+    name: str,
+    *,
+    mutate: Callable[[LocalIngestionSource], LocalIngestionSource],
+) -> LocalIngestionSource:
+    sources = _load_sources(config_path)
+    try:
+        existing = sources[name]
+    except KeyError as exc:
+        raise typer.BadParameter(f"Source '{name}' not found") from exc
+    updated = mutate(existing)
+    sources[name] = updated
+    _save_sources(config_path, sources.values())
+    return updated
 """CLI utilities for managing local ingestion sources."""
 
 from __future__ import annotations
 
 import json
+import uuid
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Callable, Dict, Iterable, Optional
 
 import typer
+from croniter import croniter
 
 from ..ingestion.local.config import LocalIngestionSource, load_config_from_dict
 from ..ingestion.local.connector import LocalFilesConnector
@@ -69,7 +111,10 @@ from ..ingestion.local.quarantine import (
     write_summary,
 )
 from ..ingestion.local.state import StateStore
+from ..orchestrator.models import IngestionJob, JobPriority, JobType
+from ..orchestrator.queue import JobQueue, JobStatus
 from ..privacy import AuditLogger, ConsentRegistry, ConsentRequiredError, build_policy, redact_path
+from ..privacy.audit import AuditEvent
 
 app = typer.Typer(help="Manage Futurnal local data sources")
 
@@ -82,6 +127,8 @@ AUDIT_DIR_NAME = "audit"
 AUDIT_LOG_FILE = "audit.log"
 QUARANTINE_DIR_NAME = "quarantine"
 QUARANTINE_ARCHIVE_DIR_NAME = "quarantine_archive"
+QUEUE_DIR_NAME = "queue"
+QUEUE_DB_FILE = "queue.db"
 MAX_RETRIES = MAX_RETRY_ATTEMPTS
 DISMISS_NOTE_KEY = "dismissed_by"
 CONSENT_DIR_NAME = "privacy"
@@ -152,12 +199,10 @@ def register_local_source(
         "watcher_debounce_seconds": watcher_debounce_seconds,
     }
 
-    # Validate source configuration
-    LocalIngestionSource(**source_dict)
-
-    sources = [src for src in config.get("sources", []) if src.get("name") != name]
-    sources.append(source_dict)
-    _save_config(config_path, {"sources": sources})
+    new_source = LocalIngestionSource(**source_dict)
+    sources = _load_sources(config_path)
+    sources[name] = new_source
+    _save_sources(config_path, sources.values())
     typer.echo(f"Registered source '{name}' at {root}")
 
 
@@ -165,10 +210,12 @@ def register_local_source(
 def list_sources(config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config")) -> None:
     """List configured local sources."""
 
-    config = _load_config(config_path)
-    load_config_from_dict(config)  # Validate schema
-    for source in config.get("sources", []):
-        typer.echo(f"- {source['name']}: {source['root_path']}")
+    sources = _load_sources(config_path)
+    if not sources:
+        typer.echo("No sources configured")
+        return
+    for source in sources.values():
+        typer.echo(f"- {source.name}: {source.root_path}")
 
 
 @app.command("telemetry")
@@ -199,6 +246,299 @@ def show_telemetry(
     avg = summary.get("avg_duration", {})
     for status, duration in avg.items():
         typer.echo(f"Average duration ({status}): {duration:.2f}s")
+
+
+schedule_app = typer.Typer(help="Manage ingestion schedules")
+app.add_typer(schedule_app, name="schedule")
+
+
+def _describe_schedule(source: LocalIngestionSource) -> str:
+    if source.schedule == "@manual":
+        return "manual"
+    if source.schedule == "@interval" and source.interval_seconds:
+        return f"every {int(source.interval_seconds)}s"
+    return source.schedule
+
+
+def _next_run(source: LocalIngestionSource) -> Optional[datetime]:
+    now = datetime.utcnow()
+    if source.paused:
+        return None
+    if source.schedule == "@manual":
+        return None
+    if source.schedule == "@interval" and source.interval_seconds:
+        return now + timedelta(seconds=source.interval_seconds)
+    if not source.schedule:
+        return None
+    try:
+        iterator = croniter(source.schedule, now)
+        return iterator.get_next(datetime)
+    except (ValueError, TypeError):
+        return None
+
+
+@schedule_app.command("list")
+def schedule_list(
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config"),
+    show_paused: bool = typer.Option(True, help="Include paused sources"),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON instead of text"),
+) -> None:
+    sources = _load_sources(config_path)
+    output = []
+    for source in sources.values():
+        if not show_paused and source.paused:
+            continue
+        entry: Dict[str, object] = {
+            "name": source.name,
+            "schedule": _describe_schedule(source),
+            "priority": source.priority,
+            "paused": source.paused,
+        }
+        next_run = _next_run(source)
+        if next_run:
+            entry["next_run"] = next_run.isoformat()
+        output.append(entry)
+
+    if json_output:
+        typer.echo(json.dumps(output, indent=2))
+        return
+
+    if not output:
+        typer.echo("No schedules configured")
+        return
+
+    typer.echo("Source schedules")
+    for entry in output:
+        line = f"- {entry['name']}: {entry['schedule']} (priority={entry['priority']})"
+        if entry.get("next_run"):
+            line += f" next={entry['next_run']}"
+        if entry["paused"]:
+            line += " [paused]"
+        typer.echo(line)
+
+
+def _validate_schedule_args(cron: Optional[str], interval: Optional[float], manual: bool) -> None:
+    if manual:
+        return
+    if interval is not None:
+        if interval <= 0:
+            raise typer.BadParameter("Interval must be positive")
+        LocalIngestionSource(
+            name="__interval__",
+            root_path=Path.cwd(),
+            schedule="@interval",
+            interval_seconds=interval,
+        )
+        return
+    if cron:
+        if not croniter.is_valid(cron):
+            raise typer.BadParameter("Invalid cron expression")
+        return
+    raise typer.BadParameter("Provide --cron, --interval, or --manual")
+
+
+@schedule_app.command("update")
+def schedule_update(
+    source_name: str = typer.Argument(..., help="Name of the source"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config"),
+    cron: Optional[str] = typer.Option(None, help="Cron expression"),
+    interval: Optional[float] = typer.Option(None, help="Interval in seconds"),
+    manual: bool = typer.Option(False, help="Switch to manual-only"),
+) -> None:
+    _validate_schedule_args(cron, interval, manual)
+
+    def mutate(source: LocalIngestionSource) -> LocalIngestionSource:
+        payload = source.model_copy()
+        if manual:
+            payload.schedule = "@manual"
+            payload.interval_seconds = None
+        elif interval is not None:
+            payload.schedule = "@interval"
+            payload.interval_seconds = interval
+        elif cron:
+            payload.schedule = cron
+            payload.interval_seconds = None
+        return payload
+
+    updated = _update_source(config_path, source_name, mutate=mutate)
+    next_run = _next_run(updated)
+    next_repr = next_run.isoformat() if next_run else "manual"
+    typer.echo(f"Updated schedule for {updated.name}; next run {next_repr}")
+
+
+@schedule_app.command("remove")
+def schedule_remove(
+    source_name: str = typer.Argument(..., help="Name of the source"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config"),
+) -> None:
+    updated = _update_source(
+        config_path,
+        source_name,
+        mutate=lambda src: src.model_copy(update={"schedule": "@manual", "interval_seconds": None}),
+    )
+    typer.echo(f"Removed schedule for {updated.name}; source is now manual-only")
+
+
+@app.command("priority")
+def set_priority(
+    source_name: str = typer.Argument(..., help="Name of the source"),
+    level: str = typer.Option("normal", help="Priority level: low|normal|high"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config"),
+) -> None:
+    allowed = {"low", "normal", "high"}
+    normalized = level.lower()
+    if normalized not in allowed:
+        raise typer.BadParameter("Priority must be one of: low, normal, high")
+
+    _update_source(
+        config_path,
+        source_name,
+        mutate=lambda src: src.model_copy(update={"priority": normalized}),
+    )
+    typer.echo(f"Set priority for {source_name} to {normalized}")
+
+
+def _record_operator_event(
+    workspace: Path,
+    *,
+    source: str,
+    action: str,
+    status: str,
+    operator: Optional[str],
+    metadata: Optional[Dict[str, object]] = None,
+) -> None:
+    logger = _audit_logger(workspace)
+    event = AuditEvent(
+        job_id=str(uuid.uuid4()),
+        source=source,
+        action=action,
+        status=status,
+        timestamp=datetime.utcnow(),
+        operator_action=operator,
+        metadata=metadata or {},
+    )
+    logger.record(event)
+
+
+@app.command("pause")
+def pause_source(
+    source_name: str = typer.Argument(..., help="Name of the source"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config"),
+    workspace_path: Optional[Path] = typer.Option(None, help="Workspace path for audit logging"),
+    operator: Optional[str] = typer.Option(None, help="Operator identifier"),
+) -> None:
+    updated = _update_source(
+        config_path,
+        source_name,
+        mutate=lambda src: src.model_copy(update={"paused": True}),
+    )
+    workspace = _resolve_workspace(workspace_path)
+    _record_operator_event(
+        workspace,
+        source=updated.name,
+        action="scheduler",
+        status="paused",
+        operator=operator,
+        metadata={"schedule": _describe_schedule(updated)},
+    )
+    typer.echo(f"Paused automatic ingestion for {updated.name}")
+
+
+@app.command("resume")
+def resume_source(
+    source_name: str = typer.Argument(..., help="Name of the source"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config"),
+    workspace_path: Optional[Path] = typer.Option(None, help="Workspace path for audit logging"),
+    operator: Optional[str] = typer.Option(None, help="Operator identifier"),
+) -> None:
+    updated = _update_source(
+        config_path,
+        source_name,
+        mutate=lambda src: src.model_copy(update={"paused": False}),
+    )
+    workspace = _resolve_workspace(workspace_path)
+    _record_operator_event(
+        workspace,
+        source=updated.name,
+        action="scheduler",
+        status="resumed",
+        operator=operator,
+        metadata={"schedule": _describe_schedule(updated)},
+    )
+    typer.echo(f"Resumed automatic ingestion for {updated.name}")
+
+
+@app.command("run")
+def trigger_manual_run(
+    source_name: str = typer.Argument(..., help="Name of the source"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config"),
+    workspace_path: Optional[Path] = typer.Option(None, help="Path to ingestion workspace"),
+    force: bool = typer.Option(False, help="Allow manual run even when paused"),
+) -> None:
+    workspace = _resolve_workspace(workspace_path)
+    sources = _load_sources(config_path)
+    if source_name not in sources:
+        raise typer.BadParameter(f"Source '{source_name}' not found")
+
+    source = sources[source_name]
+    if source.paused and not force:
+        typer.echo("Source is paused; use --force to run anyway")
+        raise typer.Exit(code=1)
+
+    queue = _load_job_queue(workspace)
+    priority_map = {
+        "low": JobPriority.LOW,
+        "normal": JobPriority.NORMAL,
+        "high": JobPriority.HIGH,
+    }
+    job = IngestionJob(
+        job_id=str(uuid.uuid4()),
+        job_type=JobType.LOCAL_FILES,
+        payload={"source_name": source.name, "trigger": "manual"},
+        priority=priority_map[source.priority],
+        scheduled_for=datetime.utcnow(),
+    )
+    queue.enqueue(job)
+    typer.echo(f"Enqueued manual ingestion job {job.job_id} for {source.name}")
+
+
+queue_app = typer.Typer(help="Inspect the job queue")
+app.add_typer(queue_app, name="queue")
+
+
+@queue_app.command("status")
+def queue_status(
+    workspace_path: Optional[Path] = typer.Option(None, help="Path to ingestion workspace"),
+    limit: int = typer.Option(50, help="Maximum entries to display"),
+    status: Optional[JobStatus] = typer.Option(None, help="Filter by job status"),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON instead of text"),
+) -> None:
+    workspace = _resolve_workspace(workspace_path)
+    queue = _load_job_queue(workspace)
+    entries = queue.snapshot(status=status, limit=limit)
+
+    if json_output:
+        typer.echo(json.dumps(entries, indent=2, default=str))
+        return
+
+    if not entries:
+        typer.echo("Queue is empty")
+        return
+
+    typer.echo("Job queue")
+    for entry in entries:
+        payload = entry.get("payload", {})
+        line = (
+            f"- {entry['job_id']} :: {entry['status']} :: source={payload.get('source_name')}"
+            f" attempts={entry['attempts']} priority={entry['priority']}"
+        )
+        if entry.get("scheduled_for"):
+            line += f" scheduled_for={entry['scheduled_for']}"
+        if entry.get("updated_at"):
+            line += f" updated_at={entry['updated_at']}"
+        if payload.get("error"):
+            line += f" error={payload['error']}"
+        typer.echo(line)
 
 
 @app.command("audit")
@@ -247,12 +587,12 @@ def remove_source(
 ) -> None:
     """Remove a configured local source."""
 
-    config = _load_config(config_path)
-    sources = [src for src in config.get("sources", []) if src.get("name") != name]
-    if len(sources) == len(config.get("sources", [])):
+    sources = _load_sources(config_path)
+    if name not in sources:
         typer.echo(f"Source '{name}' not found")
         raise typer.Exit(code=1)
-    _save_config(config_path, {"sources": sources})
+    sources.pop(name)
+    _save_sources(config_path, sources.values())
     typer.echo(f"Removed source '{name}'")
 
 

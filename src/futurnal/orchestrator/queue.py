@@ -8,7 +8,7 @@ import threading
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, List, Optional
 
 from .models import IngestionJob, JobPriority, JobType
 
@@ -140,5 +140,65 @@ class JobQueue:
             )
             row = cur.fetchone()
         return int(row[0]) if row else 0
+
+    def snapshot(
+        self,
+        *,
+        status: Optional[JobStatus] = None,
+        limit: Optional[int] = None,
+    ) -> List[dict]:
+        query = (
+            "SELECT job_id, job_type, payload, priority, scheduled_for, status, attempts, created_at, updated_at"
+            " FROM jobs"
+        )
+        criteria = []
+        params: List[object] = []
+        if status is not None:
+            criteria.append("status = ?")
+            params.append(status.value)
+        if criteria:
+            query += " WHERE " + " AND ".join(criteria)
+        query += " ORDER BY datetime(updated_at) DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(query, params)
+            rows = cur.fetchall()
+
+        entries: List[dict] = []
+        for (
+            job_id,
+            job_type,
+            payload,
+            priority,
+            scheduled_for,
+            job_status,
+            attempts,
+            created_at,
+            updated_at,
+        ) in rows:
+            parsed_payload = json.loads(payload)
+            try:
+                priority_enum = JobPriority(priority)
+                priority_value = priority_enum.name.lower()
+            except ValueError:
+                priority_value = str(priority)
+            entries.append(
+                {
+                    "job_id": job_id,
+                    "job_type": job_type,
+                    "payload": parsed_payload,
+                    "priority": priority_value,
+                    "scheduled_for": scheduled_for,
+                    "status": job_status,
+                    "attempts": attempts,
+                    "created_at": created_at,
+                    "updated_at": updated_at,
+                }
+            )
+        return entries
 
 

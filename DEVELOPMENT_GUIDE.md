@@ -27,6 +27,7 @@ Follow the sequence below to onboard quickly, understand the product vision, and
 11. `docs/phase-1/local-files-production-plan/01-integration-performance-tests.md` — Runbook for Local Files Connector integration/performance suite, including fixture generation, CI workflows, and telemetry benchmarks.
 12. `docs/phase-1/local-files-production-plan/02-quarantine-operations.md` — Quarantine remediation guide detailing CLI workflows, retry policies, and telemetry monitoring.
 13. `docs/phase-1/local-files-production-plan/03-throughput-concurrency-controls.md` — Operator tuning playbook covering concurrency knobs, batch sizing, telemetry interpretation, and hardware presets.
+14. `docs/phase-1/local-files-production-plan/scheduler-operations.md` — Scheduler CLI operations for cadence updates, priorities, manual overrides, and queue inspection.
 
 ## Additional Tips
 - Revisit the prompts as checklists during implementation sprints.

@@ -81,8 +81,10 @@ async def test_manual_job_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         scan_interval_seconds=0.5,
     )
 
-    orchestrator.register_source(SourceRegistration(source=source, schedule="@manual"))
-    orchestrator.run_manual_job("notes")
+    orchestrator.register_source(
+        SourceRegistration(source=source, schedule="@manual", priority=JobPriority.NORMAL)
+    )
+    orchestrator.run_manual_job("notes", force=True)
     orchestrator.start()
 
     await asyncio.sleep(0.5)
@@ -108,4 +110,34 @@ async def test_manual_job_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert "notes" in content
     assert "succeeded" in content
 
+
+def test_paused_source_blocks_automatic_jobs(tmp_path: Path) -> None:
+    queue = JobQueue(tmp_path / "queue.db")
+    state_store = MemoryStateStore()
+    orchestrator = IngestionOrchestrator(
+        job_queue=queue,
+        state_store=state_store,
+        workspace_dir=str(tmp_path / "workspace"),
+    )
+
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "note.md").write_text("hello")
+    source = LocalIngestionSource(name="notes", root_path=root)
+    registration = SourceRegistration(
+        source=source,
+        schedule="*/5 * * * *",
+        priority=JobPriority.NORMAL,
+        paused=True,
+    )
+
+    orchestrator.register_source(registration)
+    orchestrator._enqueue_job("notes")  # type: ignore[attr-defined]
+    assert queue.pending_count() == 0
+
+    orchestrator.run_manual_job("notes")
+    assert queue.pending_count() == 0
+
+    orchestrator.run_manual_job("notes", force=True)
+    assert queue.pending_count() == 1
 

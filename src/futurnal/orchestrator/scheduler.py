@@ -10,12 +10,12 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Awaitable, Callable, Dict, Iterable, Optional
+from typing import Dict, Iterable, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from croniter import croniter
+from croniter import croniter, is_valid
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
@@ -36,7 +36,9 @@ logger = logging.getLogger(__name__)
 class SourceRegistration:
     source: LocalIngestionSource
     schedule: str
+    interval_seconds: Optional[int] = None
     priority: JobPriority = JobPriority.NORMAL
+    paused: bool = False
 
 
 class IngestionOrchestrator:
@@ -81,19 +83,36 @@ class IngestionOrchestrator:
         self._observer: Optional[Observer] = None
 
     def register_source(self, registration: SourceRegistration) -> None:
-        if registration.schedule != "@manual" and not croniter.is_valid(registration.schedule):
+        if registration.schedule not in {"@manual", "@interval"} and not is_valid(
+            registration.schedule
+        ):
             raise ValueError(f"Invalid cron schedule: {registration.schedule}")
+        if registration.schedule == "@interval":
+            if not registration.interval_seconds:
+                raise ValueError("interval_seconds must be provided for '@interval' schedules")
+            if registration.interval_seconds <= 0:
+                raise ValueError("interval_seconds must be greater than zero")
         self._sources[registration.source.name] = registration
         if registration.source.max_workers:
             requested = registration.source.max_workers
             capped = max(1, min(requested, self._hardware_worker_cap))
             self._configured_workers = min(self._configured_workers, capped)
-        if registration.schedule != "@manual":
+        if registration.schedule == "@interval" and registration.interval_seconds:
+            self._scheduler.add_job(
+                self._enqueue_job,
+                trigger=IntervalTrigger(seconds=registration.interval_seconds),
+                args=[registration.source.name],
+                kwargs={"trigger": "interval"},
+                id=f"interval-{registration.source.name}",
+                replace_existing=True,
+            )
+        elif registration.schedule != "@manual":
             trigger = CronTrigger.from_crontab(registration.schedule)
             self._scheduler.add_job(
                 self._enqueue_job,
                 trigger=trigger,
                 args=[registration.source.name],
+                kwargs={"trigger": "schedule"},
                 id=f"schedule-{registration.source.name}",
                 replace_existing=True,
             )
@@ -106,21 +125,10 @@ class IngestionOrchestrator:
                     self._enqueue_job,
                     trigger=IntervalTrigger(seconds=seconds),
                     args=[registration.source.name],
+                    kwargs={"trigger": "fallback"},
                     id=f"fallback-{registration.source.name}",
                     replace_existing=True,
                 )
-
-    def register_interval_source(
-        self, registration: SourceRegistration, *, seconds: int
-    ) -> None:
-        self._sources[registration.source.name] = registration
-        self._scheduler.add_job(
-            self._enqueue_job,
-            trigger=IntervalTrigger(seconds=seconds),
-            args=[registration.source.name],
-            id=f"interval-{registration.source.name}",
-            replace_existing=True,
-        )
 
     def start(self) -> None:
         if self._running:
@@ -142,13 +150,16 @@ class IngestionOrchestrator:
         self._running = False
         logger.info("Ingestion orchestrator stopped")
 
-    def run_manual_job(self, source_name: str) -> None:
+    def run_manual_job(self, source_name: str, *, force: bool = False) -> None:
         if source_name not in self._sources:
             raise KeyError(f"Unknown source {source_name}")
-        self._enqueue_job(source_name)
+        self._enqueue_job(source_name, force=force, trigger="manual")
 
-    def _enqueue_job(self, source_name: str) -> None:
+    def _enqueue_job(self, source_name: str, *, force: bool = False, trigger: str = "schedule") -> None:
         registration = self._sources[source_name]
+        if registration.paused and not force:
+            logger.debug("Skipping enqueue for %s because source is paused", source_name)
+            return
         job_id = str(uuid.uuid4())
         now = time.perf_counter()
         debounce = registration.source.watcher_debounce_seconds or 0.0
@@ -161,6 +172,7 @@ class IngestionOrchestrator:
             job_type=JobType.LOCAL_FILES,
             payload={
                 "source_name": source_name,
+                "trigger": trigger,
             },
             priority=registration.priority,
             scheduled_for=datetime.utcnow(),
@@ -302,6 +314,7 @@ class IngestionOrchestrator:
         logger.info(
             "Rescheduling job %s (attempt %s/%s)", job.job_id, record.attempts, self._max_retries
         )
+        job.payload["trigger"] = "retry"
         self._job_queue.reschedule(job.job_id, self._retry_backoff_seconds)
         await asyncio.sleep(self._retry_backoff_seconds)
 
@@ -330,7 +343,7 @@ class _SourceEventHandler(FileSystemEventHandler):
     def on_any_event(self, event):  # pragma: no cover - requires filesystem events
         if event.is_directory:
             return
-        self._orchestrator._enqueue_job(self._source.name)
+        self._orchestrator._enqueue_job(self._source.name, trigger="watcher")
 
 
 @dataclass
