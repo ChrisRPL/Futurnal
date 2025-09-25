@@ -110,6 +110,9 @@ class LocalIngestionSource(BaseModel):
     def allows_plaintext(self) -> bool:
         return self.allow_plaintext_paths
 
+    def workspace_subdir(self) -> Path:
+        return Path(self.name)
+
 
 class LocalIngestionConfig(RootModel[List[LocalIngestionSource]]):
     """Collection of local ingestion sources."""

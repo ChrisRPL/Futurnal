@@ -5,8 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from pydantic import BaseModel, Field, SecretStr
+
 from neo4j import GraphDatabase
 from neo4j import Driver
+
+
+class Neo4jSettings(BaseModel):
+    uri: str = Field(...)
+    username: str = Field(...)
+    password: SecretStr = Field(...)
+    database: Optional[str] = Field(default=None)
+    encrypted: bool = Field(default=False)
 
 
 @dataclass

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
+from pydantic import BaseModel, Field, SecretStr
+
 try:  # pragma: no cover - import is optional for tests
     import chromadb
     from chromadb.api import ClientAPI
@@ -13,6 +15,12 @@ try:  # pragma: no cover - import is optional for tests
     from chromadb.utils import embedding_functions
 except ImportError as exc:  # pragma: no cover
     raise RuntimeError("ChromaDB dependency is required for ChromaVectorWriter") from exc
+
+
+class ChromaSettings(BaseModel):
+    path: Path = Field(...)
+    collection_name: str = Field(default="futurnal-ingestion")
+    auth_token: Optional[SecretStr] = Field(default=None)
 
 
 @dataclass
