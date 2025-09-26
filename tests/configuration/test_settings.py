@@ -6,8 +6,6 @@ import json
 from pathlib import Path
 from typing import Dict
 
-import pytest
-
 from futurnal.configuration.settings import (
     Settings,
     SecretStore,

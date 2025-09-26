@@ -1,4 +1,10 @@
-"""Typed settings management for Futurnal local workspace."""
+"""Typed settings management for Futurnal local workspace.
+
+This module wraps user configuration in Pydantic models so CLI commands and
+services can rely on validated settings. It also provides a keyring-backed
+secret store for persisted credentials, ensuring privacy requirements remain
+front and center.
+"""
 
 from __future__ import annotations
 
@@ -61,7 +67,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback when keyring is unava
 
     keyring = _FallbackKeyring()  # type: ignore[assignment]
 
-from pydantic import BaseModel, Field, SecretStr, ValidationError, model_validator
+from pydantic import BaseModel, Field, SecretStr, ValidationError, field_validator
 
 
 DEFAULT_CONFIG_PATH = Path.home() / ".futurnal" / "config.json"
@@ -80,11 +86,11 @@ class StorageSettings(BaseModel):
         default=None, description="Optional auth token for remote Chroma"
     )
 
-    @model_validator(mode="after")
-    def _validate_paths(self) -> "StorageSettings":  # type: ignore[override]
-        if not self.neo4j_uri.startswith("bolt://") and not self.neo4j_uri.startswith("neo4j://"):
+    @field_validator("neo4j_uri")
+    def _validate_neo4j_uri(cls, value: str) -> str:
+        if not value.startswith("bolt://") and not value.startswith("neo4j://"):
             raise ValueError("neo4j_uri must start with bolt:// or neo4j://")
-        return self
+        return value
 
 
 class SecuritySettings(BaseModel):

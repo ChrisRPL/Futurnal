@@ -1,11 +1,17 @@
-"""Graph storage integration for the Personal Knowledge Graph (PKG)."""
+"""Graph storage integration for the Personal Knowledge Graph (PKG).
+
+Creates a thin wrapper around the Neo4j driver with settings models that keep
+URI validation consistent with the broader storage configuration. The writer is
+used by ingestion sinks to project document metadata into the PKG in lockstep
+with the vector index.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 from neo4j import GraphDatabase
 from neo4j import Driver
@@ -17,6 +23,12 @@ class Neo4jSettings(BaseModel):
     password: SecretStr = Field(...)
     database: Optional[str] = Field(default=None)
     encrypted: bool = Field(default=False)
+
+    @field_validator("uri")
+    def _validate_uri(cls, value: str) -> str:
+        if not value.startswith("bolt://") and not value.startswith("neo4j://"):
+            raise ValueError("URI must start with bolt:// or neo4j://")
+        return value
 
 
 @dataclass

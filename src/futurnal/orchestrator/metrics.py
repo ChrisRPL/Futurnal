@@ -1,4 +1,8 @@
-"""Simple telemetry recorder for ingestion jobs."""
+"""Simple telemetry recorder for ingestion jobs.
+
+Persists per-job metrics and aggregated summaries that operators can inspect
+locally. These files feed Phase 1 telemetry dashboards and CLI commands.
+"""
 
 from __future__ import annotations
 

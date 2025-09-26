@@ -20,6 +20,39 @@ from .scanner import FileSnapshot, detect_deletions, walk_directory
 from .state import FileRecord, StateStore, compute_sha256
 
 
+def _log_extra(
+    *,
+    job_id: str | None = None,
+    source: str | None = None,
+    record: FileRecord | None = None,
+    path: Path | None = None,
+    policy: RedactionPolicy | None = None,
+    **metadata: object,
+) -> dict[str, object]:
+    """Build structured logging context with privacy-aware path handling."""
+
+    extra: dict[str, object] = {}
+    if job_id:
+        extra["ingestion_job_id"] = job_id
+    if source:
+        extra["ingestion_source"] = source
+    if record:
+        extra["ingestion_sha256"] = record.sha256
+        extra["ingestion_size_bytes"] = record.size
+        extra["ingestion_mtime"] = record.mtime
+        if path is None:
+            path = record.path
+    if path is not None:
+        active_policy = policy or build_policy()
+        redacted = redact_path(path, policy=active_policy)
+        extra["ingestion_path"] = redacted.redacted
+        extra["ingestion_path_hash"] = redacted.path_hash
+    for key, value in metadata.items():
+        if value is not None:
+            extra[f"ingestion_{key}"] = value
+    return extra
+
+
 @runtime_checkable
 class ElementSink(Protocol):
     """Sink interface for handling parsed elements."""
@@ -58,7 +91,12 @@ class LocalFilesConnector:
         self._consent_registry = consent_registry
 
     def crawl_source(self, source: LocalIngestionSource, *, job_id: str | None = None) -> List[FileRecord]:
-        """Perform a crawl of the provided source returning updated records."""
+        """Perform a crawl of the provided source returning updated records.
+
+        The crawl honours ignore patterns, batches work per `max_files_per_batch`,
+        and tracks which paths were seen so deletions can be processed after the
+        scan completes.
+        """
 
         pathspec = source.build_pathspec()
         snapshots: List[FileRecord] = []
@@ -84,9 +122,13 @@ class LocalFilesConnector:
             self._handle_deletions(source, current_paths, job_id=active_job)
         else:
             logger.debug(
-                "Batch limit %s reached for source %s; remaining files will scan in subsequent jobs",
-                batch_limit,
-                source.name,
+                "Batch limit reached for source; remaining files will run later",
+                extra=_log_extra(
+                    job_id=active_job,
+                    source=source.name,
+                    batch_limit=batch_limit,
+                    event="batch_limit_reached",
+                ),
             )
         return snapshots
 
@@ -97,14 +139,34 @@ class LocalFilesConnector:
         policy = build_policy(allow_plaintext=source.allow_plaintext_paths)
 
         for record in self.crawl_source(source, job_id=active_job_id):
-            logger.debug("Parsing %s", record.path)
+            logger.debug(
+                "Parsing file for ingestion",
+                extra=_log_extra(
+                    job_id=active_job_id,
+                    source=source.name,
+                    record=record,
+                    policy=policy,
+                    event="parse_start",
+                ),
+            )
             if source.require_external_processing_consent and self._consent_registry:
                 try:
                     self._consent_registry.require(
                         source=source.name, scope=source.external_processing_scope
                     )
                 except ConsentRequiredError as exc:
-                    logger.error("Consent missing for %s: %s", source.name, exc)
+                    logger.error(
+                        "Consent missing before external processing",
+                        extra=_log_extra(
+                            job_id=active_job_id,
+                            source=source.name,
+                            record=record,
+                            policy=policy,
+                            event="consent_missing",
+                            scope=source.external_processing_scope,
+                        ),
+                        exc_info=exc,
+                    )
                     self._log_file_event(
                         job_id=active_job_id,
                         source=source,
@@ -120,7 +182,16 @@ class LocalFilesConnector:
                     filename=str(record.path), strategy="fast", include_metadata=True
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.exception("Partition failed for %s", record.path)
+                logger.exception(
+                    "Partition failed during ingestion",
+                    extra=_log_extra(
+                        job_id=active_job_id,
+                        source=source.name,
+                        record=record,
+                        policy=policy,
+                        event="partition_failed",
+                    ),
+                )
                 self._quarantine(record.path, "partition_error", str(exc), source.name, policy)
                 self._log_file_event(
                     job_id=active_job_id,
@@ -137,7 +208,16 @@ class LocalFilesConnector:
                 try:
                     parsed = self._persist_element(source, record, element)
                 except Exception as exc:  # noqa: BLE001
-                    logger.exception("Persist failed for %s", record.path)
+                    logger.exception(
+                        "Persist failed during ingestion",
+                        extra=_log_extra(
+                            job_id=active_job_id,
+                            source=source.name,
+                            record=record,
+                            policy=policy,
+                            event="persist_failed",
+                        ),
+                    )
                     self._quarantine(record.path, "persist_error", str(exc), source.name, policy)
                     self._log_file_event(
                         job_id=active_job_id,
@@ -154,7 +234,16 @@ class LocalFilesConnector:
                     try:
                         self._element_sink.handle(parsed)
                     except Exception as exc:  # noqa: BLE001
-                        logger.exception("Sink handling failed for %s", record.path)
+                        logger.exception(
+                            "Element sink reported a failure",
+                            extra=_log_extra(
+                                job_id=active_job_id,
+                                source=source.name,
+                                record=record,
+                                policy=policy,
+                                event="sink_failed",
+                            ),
+                        )
                         self._quarantine(record.path, "sink_error", str(exc), source.name, policy)
                         self._log_file_event(
                             job_id=active_job_id,
@@ -176,6 +265,16 @@ class LocalFilesConnector:
                     action="ingest",
                     status="succeeded",
                     policy=policy,
+                )
+                logger.debug(
+                    "File ingested successfully",
+                    extra=_log_extra(
+                        job_id=active_job_id,
+                        source=source.name,
+                        record=record,
+                        policy=policy,
+                        event="ingest_succeeded",
+                    ),
                 )
 
     def _persist_element(self, source: LocalIngestionSource, record: FileRecord, element) -> dict:
@@ -209,16 +308,33 @@ class LocalFilesConnector:
         }
 
     def _process_snapshot(self, source: LocalIngestionSource, snapshot: FileSnapshot) -> FileRecord | None:
+        policy = build_policy(allow_plaintext=source.allow_plaintext_paths)
         try:
             current_hash = compute_sha256(snapshot.path)
         except (FileNotFoundError, PermissionError, OSError) as exc:
-            logger.warning("Skipping snapshot for %s due to hash error: %s", snapshot.path, exc)
-            policy = build_policy(allow_plaintext=source.allow_plaintext_paths)
+            logger.warning(
+                "Skipping snapshot due to hash error",
+                extra=_log_extra(
+                    source=source.name,
+                    path=snapshot.path,
+                    policy=policy,
+                    event="hash_error",
+                    error=str(exc),
+                ),
+            )
             self._quarantine(snapshot.path, "hash_error", str(exc), source.name, policy)
             return None
         existing = self._state_store.fetch(snapshot.path)
         if existing and existing.sha256 == current_hash and existing.mtime == snapshot.mtime:
-            logger.debug("Skipping unchanged file %s", snapshot.path)
+            logger.debug(
+                "Skipping unchanged file",
+                extra=_log_extra(
+                    source=source.name,
+                    path=snapshot.path,
+                    policy=policy,
+                    event="unchanged",
+                ),
+            )
             return None
 
         record = FileRecord(
@@ -238,7 +354,16 @@ class LocalFilesConnector:
         policy = build_policy(allow_plaintext=source.allow_plaintext_paths)
         for path in removed:
             record = tracked[path]
-            logger.debug("Removing deleted file %s", path)
+            logger.debug(
+                "Removing deleted file",
+                extra=_log_extra(
+                    job_id=job_id,
+                    source=source.name,
+                    record=record,
+                    policy=policy,
+                    event="delete",
+                ),
+            )
             self._state_store.remove(record.path)
             self._notify_sink_of_deletion(source, record)
             self._cleanup_parsed(record.sha256)
@@ -262,7 +387,15 @@ class LocalFilesConnector:
                     }
                 )
             except Exception as exc:  # noqa: BLE001
-                logger.exception("Deletion sink handling failed for %s", record.path)
+                logger.exception(
+                    "Element sink deletion callback failed",
+                    extra=_log_extra(
+                        source=source.name,
+                        record=record,
+                        policy=build_policy(allow_plaintext=source.allow_plaintext_paths),
+                        event="sink_deletion_failed",
+                    ),
+                )
                 policy = build_policy(allow_plaintext=source.allow_plaintext_paths)
                 self._quarantine(record.path, "sink_deletion_error", str(exc), source.name, policy)
 
@@ -297,10 +430,22 @@ class LocalFilesConnector:
             try:
                 identifier = compute_sha256(path)
             except Exception:  # pragma: no cover - hashing failure
-                logger.debug("Falling back to UUID for quarantine file of %s", path)
+                logger.debug(
+                    "Falling back to UUID for quarantine file",
+                    extra=_log_extra(path=path, policy=policy, event="quarantine_uuid_fallback"),
+                )
         quarantine_file = self._quarantine_dir / f"{identifier}.json"
         quarantine_file.write_text(json.dumps(payload, ensure_ascii=False))
-        logger.warning("Quarantined file %s due to %s", path, reason)
+        logger.warning(
+            "File written to quarantine",
+            extra=_log_extra(
+                source=source_name,
+                path=path,
+                policy=policy,
+                event="quarantine",
+                reason=reason,
+            ),
+        )
 
     def _log_file_event(
         self,

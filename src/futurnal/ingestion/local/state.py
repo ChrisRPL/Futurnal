@@ -105,7 +105,7 @@ def compute_sha256(path: Path, chunk_size: int = 64 * 1024) -> str:
         with path.open("rb") as fh:
             for chunk in iter(lambda: fh.read(chunk_size), b""):
                 digest.update(chunk)
-    except (FileNotFoundError, PermissionError, OSError) as exc:
+    except (FileNotFoundError, PermissionError, OSError):
         raise
     return digest.hexdigest()
 

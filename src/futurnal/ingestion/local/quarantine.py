@@ -104,13 +104,20 @@ def write_summary(quarantine_dir: Path, telemetry_dir: Path) -> Dict[str, object
         if timestamps:
             oldest_ts = min(timestamps)
 
+    oldest_age: Optional[float] = None
+    if oldest_ts:
+        reference = oldest_ts
+        if oldest_ts.tzinfo is None:
+            reference = oldest_ts.replace(tzinfo=timezone.utc)
+        oldest_age = (now - reference).total_seconds()
+
     summary = {
         "total": total,
         "by_reason": dict(by_reason),
         "retry_pending": retry_pending,
         "max_retry_attempts": MAX_RETRY_ATTEMPTS,
         "oldest_timestamp": oldest_ts.isoformat() if oldest_ts else None,
-        "oldest_age_seconds": (now - oldest_ts).total_seconds() if oldest_ts else None,
+        "oldest_age_seconds": oldest_age,
         "generated_at": now.isoformat(),
     }
 

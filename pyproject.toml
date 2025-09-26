@@ -7,7 +7,7 @@ name = "futurnal"
 version = "0.1.0"
 description = "Futurnal Phase 1 ingestion components"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["typer>=0.12"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

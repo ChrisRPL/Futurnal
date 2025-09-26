@@ -4,24 +4,21 @@ from pathlib import Path
 
 import json
 import pytest
-
-typer = pytest.importorskip("typer")
 from typer.testing import CliRunner
 
-from tests.fixtures.local_connector import QuarantinePayloadBuilder
 from futurnal.cli.local_sources import (
     AUDIT_DIR_NAME,
     AUDIT_LOG_FILE,
-    DEFAULT_CONFIG_PATH,
-    DEFAULT_WORKSPACE_PATH,
     QUARANTINE_ARCHIVE_DIR_NAME,
     QUARANTINE_DIR_NAME,
     TELEMETRY_DIR_NAME,
-    TELEMETRY_LOG_FILE,
     TELEMETRY_SUMMARY_FILE,
     app,
 )
 from futurnal.orchestrator.queue import JobQueue
+from tests.fixtures.local_connector import QuarantinePayloadBuilder
+
+typer = pytest.importorskip("typer")
 
 runner = CliRunner()
 

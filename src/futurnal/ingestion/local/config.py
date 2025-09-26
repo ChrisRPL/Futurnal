@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
-from croniter import croniter, is_valid
+from croniter import is_valid
 from pydantic import BaseModel, Field, RootModel, field_validator, model_validator
 from pathspec import PathSpec
 

@@ -10,12 +10,12 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import Dict, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from croniter import croniter, is_valid
+from croniter import is_valid
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
@@ -116,7 +116,13 @@ class IngestionOrchestrator:
                 id=f"schedule-{registration.source.name}",
                 replace_existing=True,
             )
-        logger.info("Registered source %s", registration.source.name)
+        logger.info(
+            "Registered source",
+            extra={
+                "ingestion_source": registration.source.name,
+                "ingestion_schedule": registration.schedule,
+            },
+        )
         self._register_file_watch(registration.source)
         if registration.source.scan_interval_seconds:
             seconds = int(registration.source.scan_interval_seconds)
@@ -158,7 +164,9 @@ class IngestionOrchestrator:
     def _enqueue_job(self, source_name: str, *, force: bool = False, trigger: str = "schedule") -> None:
         registration = self._sources[source_name]
         if registration.paused and not force:
-            logger.debug("Skipping enqueue for %s because source is paused", source_name)
+            logger.debug(
+                "Skipping enqueue because source is paused", extra={"ingestion_source": source_name, "ingestion_event": "pause_skip"}
+            )
             return
         job_id = str(uuid.uuid4())
         now = time.perf_counter()
@@ -178,7 +186,14 @@ class IngestionOrchestrator:
             scheduled_for=datetime.utcnow(),
         )
         self._job_queue.enqueue(job)
-        logger.debug("Enqueued job %s for source %s", job_id, source_name)
+        logger.debug(
+            "Enqueued job",
+            extra={
+                "ingestion_job_id": job_id,
+                "ingestion_source": source_name,
+                "ingestion_trigger": trigger,
+            },
+        )
 
     async def _worker_loop(self) -> None:
         max_workers = self._configured_workers or 1
@@ -204,7 +219,13 @@ class IngestionOrchestrator:
                 self._semaphore.release()
 
     async def _process_job(self, job: IngestionJob) -> None:
-        logger.info("Processing job %s", job.job_id)
+        logger.info(
+            "Processing job",
+            extra={
+                "ingestion_job_id": job.job_id,
+                "ingestion_source": job.payload.get("source_name"),
+            },
+        )
         self._job_queue.mark_running(job.job_id)
         start = time.perf_counter()
         files_processed = 0
@@ -212,7 +233,13 @@ class IngestionOrchestrator:
         try:
             files_processed, bytes_processed = await self._execute_job(job)
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Job %s failed", job.job_id)
+            logger.exception(
+                "Job failed",
+                extra={
+                    "ingestion_job_id": job.job_id,
+                    "ingestion_source": job.payload.get("source_name"),
+                },
+            )
             self._job_queue.mark_failed(job.job_id)
             if self._telemetry:
                 duration = time.perf_counter() - start
@@ -239,7 +266,14 @@ class IngestionOrchestrator:
         else:
             self._job_queue.mark_completed(job.job_id)
             duration = time.perf_counter() - start
-            logger.info("Job %s completed in %.2fs", job.job_id, duration)
+            logger.info(
+                "Job completed",
+                extra={
+                    "ingestion_job_id": job.job_id,
+                    "ingestion_source": job.payload.get("source_name"),
+                    "ingestion_duration_s": round(duration, 2),
+                },
+            )
             if self._telemetry:
                 queue_depth = self._job_queue.pending_count()
                 throughput = bytes_processed / duration if duration else None
@@ -280,12 +314,21 @@ class IngestionOrchestrator:
         return files_processed, bytes_processed
 
     async def _handle_ingested_element(self, element: dict) -> None:
-        logger.debug("Ingested element from %s", element.get("path"))
+        logger.debug(
+            "Ingested element", extra={"ingestion_source": element.get("source")}
+        )
 
     # Removed helper; ingestion happens synchronously within event loop execution
 
     def _record_audit_event(self, job: IngestionJob, status: str) -> None:
-        logger.debug("Audit event job=%s status=%s", job.job_id, status)
+        logger.debug(
+            "Audit event emitted",
+            extra={
+                "ingestion_job_id": job.job_id,
+                "ingestion_source": job.payload.get("source_name"),
+                "ingestion_status": status,
+            },
+        )
         detail = {
             "files_processed": job.payload.get("files_processed"),
             "bytes_processed": job.payload.get("bytes_processed"),
@@ -306,13 +349,25 @@ class IngestionOrchestrator:
     async def _maybe_retry(self, job: IngestionJob) -> None:
         record = DataRetryRecord(job_id=job.job_id, attempts=job.payload.get("attempts", 0))
         if record.attempts >= self._max_retries:
-            logger.error("Job %s exceeded retry limit", job.job_id)
+            logger.error(
+                "Job exceeded retry limit",
+                extra={
+                    "ingestion_job_id": job.job_id,
+                    "ingestion_source": job.payload.get("source_name"),
+                },
+            )
             return
 
         record.attempts += 1
         job.payload["attempts"] = record.attempts
         logger.info(
-            "Rescheduling job %s (attempt %s/%s)", job.job_id, record.attempts, self._max_retries
+            "Rescheduling job",
+            extra={
+                "ingestion_job_id": job.job_id,
+                "ingestion_source": job.payload.get("source_name"),
+                "ingestion_attempt": record.attempts,
+                "ingestion_max_retries": self._max_retries,
+            },
         )
         job.payload["trigger"] = "retry"
         self._job_queue.reschedule(job.job_id, self._retry_backoff_seconds)

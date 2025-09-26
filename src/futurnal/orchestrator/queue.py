@@ -36,7 +36,14 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 
 class JobQueue:
-    """SQLite-backed persistent queue for ingestion jobs."""
+    """SQLite-backed persistent queue for ingestion jobs.
+
+    The queue maintains durable state for the orchestrator workers. Each method
+    acquires the same connection-level lock to guarantee thread safety, and all
+    writes happen within SQLite transactions to preserve crash recovery. Caller
+    code should rely on the typed helpers instead of issuing raw SQL so audit
+    metadata and retry counters remain consistent.
+    """
 
     def __init__(self, path: Path) -> None:
         self._path = path

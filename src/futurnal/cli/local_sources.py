@@ -1,3 +1,54 @@
+"""CLI utilities for managing local ingestion sources."""
+
+from __future__ import annotations
+
+import json
+import uuid
+from collections import Counter
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Callable, Dict, Iterable, Optional
+
+import typer
+from croniter import croniter
+
+from ..ingestion.local.config import LocalIngestionSource, load_config_from_dict
+from ..ingestion.local.connector import LocalFilesConnector
+from ..ingestion.local.quarantine import (
+    QUARANTINE_SUMMARY_FILENAME,
+    MAX_RETRY_ATTEMPTS,
+    QuarantineEntry,
+    archive_entry,
+    append_note,
+    iter_entries,
+    update_entry,
+    write_summary,
+)
+from ..ingestion.local.state import StateStore
+from ..orchestrator.models import IngestionJob, JobPriority, JobType
+from ..orchestrator.queue import JobQueue, JobStatus
+from ..privacy import AuditLogger, ConsentRegistry, redact_path
+from ..privacy.audit import AuditEvent
+
+app = typer.Typer(help="Manage Futurnal local data sources")
+
+DEFAULT_CONFIG_PATH = Path.home() / ".futurnal" / "sources.json"
+DEFAULT_WORKSPACE_PATH = Path.home() / ".futurnal" / "workspace"
+TELEMETRY_DIR_NAME = "telemetry"
+TELEMETRY_LOG_FILE = "telemetry.log"
+TELEMETRY_SUMMARY_FILE = "telemetry_summary.json"
+AUDIT_DIR_NAME = "audit"
+AUDIT_LOG_FILE = "audit.log"
+QUARANTINE_DIR_NAME = "quarantine"
+QUARANTINE_ARCHIVE_DIR_NAME = "quarantine_archive"
+QUEUE_DIR_NAME = "queue"
+QUEUE_DB_FILE = "queue.db"
+MAX_RETRIES = MAX_RETRY_ATTEMPTS
+DISMISS_NOTE_KEY = "dismissed_by"
+CONSENT_DIR_NAME = "privacy"
+CONSENT_SCOPE_LOCAL_EXTERNAL = "local.external_processing"
+
+
 def _load_state_store(workspace: Path) -> StateStore:
     state_dir = workspace / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -6,6 +57,7 @@ def _load_state_store(workspace: Path) -> StateStore:
 
 def _load_connector(workspace: Path, state_store: StateStore) -> LocalFilesConnector:
     return LocalFilesConnector(workspace_dir=workspace, state_store=state_store)
+
 
 def _resolve_workspace(path: Optional[Path]) -> Path:
     return path or DEFAULT_WORKSPACE_PATH
@@ -83,61 +135,6 @@ def _update_source(
     sources[name] = updated
     _save_sources(config_path, sources.values())
     return updated
-"""CLI utilities for managing local ingestion sources."""
-
-from __future__ import annotations
-
-import json
-import uuid
-from collections import Counter
-from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Callable, Dict, Iterable, Optional
-
-import typer
-from croniter import croniter
-
-from ..configuration.settings import (
-    DEFAULT_CONFIG_PATH as SETTINGS_CONFIG_PATH,
-    bootstrap_settings,
-    load_settings,
-)
-from ..ingestion.local.config import LocalIngestionSource, load_config_from_dict
-from ..ingestion.local.connector import LocalFilesConnector
-from ..ingestion.local.quarantine import (
-    QUARANTINE_SUMMARY_FILENAME,
-    MAX_RETRY_ATTEMPTS,
-    QuarantineEntry,
-    archive_entry,
-    append_note,
-    iter_entries,
-    remove_entry,
-    update_entry,
-    write_summary,
-)
-from ..ingestion.local.state import StateStore
-from ..orchestrator.models import IngestionJob, JobPriority, JobType
-from ..orchestrator.queue import JobQueue, JobStatus
-from ..privacy import AuditLogger, ConsentRegistry, ConsentRequiredError, build_policy, redact_path
-from ..privacy.audit import AuditEvent
-
-app = typer.Typer(help="Manage Futurnal local data sources")
-
-DEFAULT_CONFIG_PATH = Path.home() / ".futurnal" / "sources.json"
-DEFAULT_WORKSPACE_PATH = Path.home() / ".futurnal" / "workspace"
-TELEMETRY_DIR_NAME = "telemetry"
-TELEMETRY_LOG_FILE = "telemetry.log"
-TELEMETRY_SUMMARY_FILE = "telemetry_summary.json"
-AUDIT_DIR_NAME = "audit"
-AUDIT_LOG_FILE = "audit.log"
-QUARANTINE_DIR_NAME = "quarantine"
-QUARANTINE_ARCHIVE_DIR_NAME = "quarantine_archive"
-QUEUE_DIR_NAME = "queue"
-QUEUE_DB_FILE = "queue.db"
-MAX_RETRIES = MAX_RETRY_ATTEMPTS
-DISMISS_NOTE_KEY = "dismissed_by"
-CONSENT_DIR_NAME = "privacy"
-CONSENT_SCOPE_LOCAL_EXTERNAL = "local.external_processing"
 
 
 def _load_config(path: Path) -> dict:
@@ -187,7 +184,6 @@ def register_local_source(
 ) -> None:
     """Register or update a local directory source."""
 
-    config = _load_config(config_path)
     include_list = [pattern.strip() for pattern in include.split(",") if pattern.strip()] if include else []
     exclude_list = [pattern.strip() for pattern in exclude.split(",") if pattern.strip()] if exclude else []
 
@@ -336,8 +332,10 @@ def _validate_schedule_args(cron: Optional[str], interval: Optional[float], manu
         )
         return
     if cron:
-        if not croniter.is_valid(cron):
-            raise typer.BadParameter("Invalid cron expression")
+        try:
+            croniter(cron)
+        except (TypeError, ValueError) as exc:
+            raise typer.BadParameter("Invalid cron expression") from exc
         return
     raise typer.BadParameter("Provide --cron, --interval, or --manual")
 
@@ -488,6 +486,9 @@ def trigger_manual_run(
     source = sources[source_name]
     if source.paused and not force:
         typer.echo("Source is paused; use --force to run anyway")
+        raise typer.Exit(code=1)
+    if not force and source.schedule == "@manual":
+        typer.echo("Use schedule update or --force to enqueue a manual job")
         raise typer.Exit(code=1)
 
     queue = _load_job_queue(workspace)
@@ -679,6 +680,7 @@ def quarantine_retry(
     workspace_path: Optional[Path] = typer.Option(None, help="Path to ingestion workspace"),
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config"),
     dry_run: bool = typer.Option(False, help="Preview retry without executing"),
+    operator: Optional[str] = typer.Option(None, help="Operator identifier"),
 ) -> None:
     workspace = _resolve_workspace(workspace_path)
     quarantine_dir = _load_quarantine_dir(workspace)
@@ -715,9 +717,34 @@ def quarantine_retry(
 
     if records:
         redacted = entry.redacted_path or redact_path(entry.path).redacted
+        # Record audit event for successful retry
+        _record_operator_event(
+            workspace,
+            source=source.name,
+            action="quarantine",
+            status="retry_succeeded",
+            operator=operator,
+            metadata={
+                "entry_id": entry_id,
+                "elements_ingested": len(records),
+            },
+        )
+        # Archive the resolved quarantine entry and refresh telemetry summary
+        archive_entry(entry_path, _load_archive_dir(workspace))
+        write_summary(_load_quarantine_dir(workspace), workspace / TELEMETRY_DIR_NAME)
         typer.echo(f"Retried {redacted}; {len(records)} elements ingested and entry cleared")
     else:
         redacted = entry.redacted_path or redact_path(entry.path).redacted
+        _record_operator_event(
+            workspace,
+            source=source.name,
+            action="quarantine",
+            status="retry_noop",
+            operator=operator,
+            metadata={"entry_id": entry_id},
+        )
+        # Keep entry; refresh telemetry summary to keep counts accurate
+        write_summary(_load_quarantine_dir(workspace), workspace / TELEMETRY_DIR_NAME)
         typer.echo(f"Retried {redacted}; no elements produced. Entry remains for further action")
 
 
@@ -740,7 +767,18 @@ def quarantine_dismiss(
     if note_parts:
         append_note(entry_path, "; ".join(note_parts))
 
+    # Record audit event and archive the entry
+    _record_operator_event(
+        workspace,
+        source="local-sources",
+        action="quarantine",
+        status="dismissed",
+        operator=operator,
+        metadata={"entry_id": entry_id},
+    )
     archive_entry(entry_path, _load_archive_dir(workspace))
+    # Refresh telemetry summary after dismissal
+    write_summary(_load_quarantine_dir(workspace), workspace / TELEMETRY_DIR_NAME)
     typer.echo(f"Dismissed and archived entry {entry_id}")
 
 

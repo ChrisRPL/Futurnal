@@ -1,4 +1,9 @@
-"""Vector storage integration backed by ChromaDB."""
+"""Vector storage integration backed by ChromaDB.
+
+Defines configuration models and a writer responsible for persisting document
+embeddings to the local vector index. These utilities complement the PKG layer
+to fulfill the hybrid search requirement outlined in the architecture docs.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 try:  # pragma: no cover - import is optional for tests
     import chromadb
@@ -21,6 +26,12 @@ class ChromaSettings(BaseModel):
     path: Path = Field(...)
     collection_name: str = Field(default="futurnal-ingestion")
     auth_token: Optional[SecretStr] = Field(default=None)
+
+    @field_validator("collection_name")
+    def _collection_must_be_non_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("collection_name cannot be blank")
+        return value
 
 
 @dataclass
