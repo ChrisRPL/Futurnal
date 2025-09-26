@@ -28,6 +28,10 @@ Follow the sequence below to onboard quickly, understand the product vision, and
 12. `docs/phase-1/local-files-production-plan/02-quarantine-operations.md` — Quarantine remediation guide detailing CLI workflows, retry policies, and telemetry monitoring.
 13. `docs/phase-1/local-files-production-plan/03-throughput-concurrency-controls.md` — Operator tuning playbook covering concurrency knobs, batch sizing, telemetry interpretation, and hardware presets.
 14. `docs/phase-1/local-files-production-plan/scheduler-operations.md` — Scheduler CLI operations for cadence updates, priorities, manual overrides, and queue inspection.
+15. `docs/phase-1/obsidian-connector-production-plan/README.md` — Production plan index for Obsidian Vault Connector with detailed tasks and acceptance criteria.
+16. `docs/phase-1/obsidian-connector-production-plan/03-markdown-normalizer.md` — Parser and normalization spec for Obsidian markdown.
+17. `docs/phase-1/obsidian-connector-production-plan/04-link-graph-construction.md` — Wikilink and tag relationship extraction for PKG.
+18. `docs/phase-1/obsidian-connector-production-plan/06-sync-strategy.md` — Event-driven incremental sync, rename handling.
 
 ## Additional Tips
 - Revisit the prompts as checklists during implementation sprints.
