@@ -210,15 +210,68 @@ def register_local_source(
 
 
 @app.command("list")
-def list_sources(config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config")) -> None:
+def list_sources(
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config"),
+    source_type: Optional[str] = typer.Option(None, help="Filter by source type (e.g., 'obsidian')"),
+) -> None:
     """List configured local sources."""
 
     sources = _load_sources(config_path)
-    if not sources:
+
+    # If filtering by obsidian type, also include Obsidian vault descriptors
+    if source_type and source_type.lower() == "obsidian":
+        try:
+            registry = VaultRegistry()
+            obsidian_descriptors = registry.list()
+
+            # Convert descriptors to a dict format similar to sources
+            obsidian_sources = {}
+            for descriptor in obsidian_descriptors:
+                source_name = descriptor.name or f"obsidian-{descriptor.id[:8]}"
+                obsidian_sources[source_name] = {
+                    'name': source_name,
+                    'root_path': str(descriptor.base_path),
+                    'type': 'obsidian',
+                    'descriptor': descriptor
+                }
+
+            # Merge with regular sources
+            all_sources = {}
+            all_sources.update(sources)
+            all_sources.update(obsidian_sources)
+
+            # Filter to only obsidian sources
+            sources = {name: src for name, src in all_sources.items() if src.get('type') == 'obsidian'}
+
+        except Exception:
+            # If we can't load obsidian registry, just use regular sources
+            sources = {}
+
+        if not sources:
+            typer.echo("No Obsidian vaults found")
+            return
+    elif not sources:
         typer.echo("No sources configured")
         return
-    for source in sources.values():
-        typer.echo(f"- {source.name}: {source.root_path}")
+
+    for source_name, source in sources.items():
+        # Handle both LocalIngestionSource objects and dict representations
+        if hasattr(source, 'root_path'):
+            root_path = str(source.root_path)
+        else:
+            root_path = source['root_path']
+        
+        # Use redaction to safely display path
+        if source.get('type') == 'obsidian' and 'descriptor' in source:
+            # Use Obsidian redaction policy
+            descriptor = source['descriptor']
+            redaction_policy = descriptor.build_redaction_policy()
+            redacted_path = redaction_policy.apply(root_path).redacted
+        else:
+            # Use general redaction for local sources
+            redacted_path = redact_path(root_path).redacted
+        
+        typer.echo(f"- {source_name}: {redacted_path}")
 
 
 # -----------------
@@ -232,6 +285,8 @@ def obsidian_add(
     name: Optional[str] = typer.Option(None, help="Human-readable vault name"),
     icon: Optional[str] = typer.Option(None, help="Emoji or path to icon"),
     extra_ignore: Optional[str] = typer.Option(None, help="Comma-separated extra ignore rules"),
+    redact_title: Optional[str] = typer.Option(None, help="Comma-separated patterns to redact sensitive note titles in logs"),
+    json_out: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
     registry_path: Optional[Path] = typer.Option(
         None,
         help="Override path to the Obsidian registry directory (for tests)",
@@ -240,15 +295,39 @@ def obsidian_add(
     """Register or update an Obsidian vault descriptor."""
 
     extras = [r.strip() for r in (extra_ignore or "").split(",") if r.strip()]
+    redact_patterns = [p.strip() for p in (redact_title or "").split(",") if p.strip()] if redact_title else None
     registry = VaultRegistry(registry_root=registry_path) if registry_path else VaultRegistry()
-    descriptor = registry.register_path(path, name=name, icon=icon, extra_ignores=extras)
+    descriptor = registry.register_path(path, name=name, icon=icon, extra_ignores=extras, redact_title_patterns=redact_patterns)
     
     # Show network mount warning if applicable
     warning = descriptor.get_network_warning()
     if warning:
         typer.echo(f"⚠️  WARNING: {warning}", err=True)
     
-    typer.echo(json.dumps(descriptor.model_dump(mode="json"), indent=2))
+    # Show empty vault warning if applicable
+    empty_warning = descriptor.get_empty_vault_warning()
+    if empty_warning:
+        typer.echo(f"⚠️  WARNING: {empty_warning}", err=True)
+    
+    if json_out:
+        typer.echo(json.dumps(descriptor.model_dump(mode="json"), indent=2))
+    else:
+        vault_name = descriptor.name or f"vault-{descriptor.id[:8]}"
+        # Use redaction policy to safely display path
+        redaction_policy = descriptor.build_redaction_policy()
+        redacted_path = redaction_policy.apply(descriptor.base_path).redacted
+        typer.echo(f"✅ Registered Obsidian vault '{vault_name}' at {redacted_path}")
+        typer.echo(f"   Vault ID: {descriptor.id}")
+        
+        # Show next steps
+        typer.echo("\n📋 Next Steps:")
+        typer.echo("   1. Convert to ingestion source:")
+        typer.echo(f"      futurnal sources obsidian to-local-source {descriptor.id}")
+        typer.echo("   2. Start ingestion:")
+        typer.echo(f"      futurnal sources run <source_name>")
+        typer.echo("   3. View ingestion reports:")
+        typer.echo("      futurnal sources telemetry")
+        typer.echo("      futurnal sources audit")
 
 
 @obsidian_app.command("list")
@@ -265,7 +344,10 @@ def obsidian_list(
         typer.echo("No Obsidian vaults registered")
         return
     for i in items:
-        typer.echo(f"- {i.id}: {i.base_path}")
+        # Use redaction policy to safely display path
+        redaction_policy = i.build_redaction_policy()
+        redacted_path = redaction_policy.apply(i.base_path).redacted
+        typer.echo(f"- {i.id}: {redacted_path}")
 
 
 @obsidian_app.command("show")
@@ -281,11 +363,37 @@ def obsidian_show(
 @obsidian_app.command("remove")
 def obsidian_remove(
     vault_id: str,
+    yes: bool = typer.Option(False, "--yes", help="Skip confirmation prompt"),
     registry_path: Optional[Path] = typer.Option(None, help="Override registry directory"),
 ) -> None:
+    """Remove an Obsidian vault descriptor."""
     registry = VaultRegistry(registry_root=registry_path) if registry_path else VaultRegistry()
+    
+    try:
+        descriptor = registry.get(vault_id)
+    except FileNotFoundError:
+        typer.echo(f"❌ Vault '{vault_id}' not found")
+        raise typer.Exit(code=1)
+    
+    vault_name = descriptor.name or f"vault-{descriptor.id[:8]}"
+    
+    if not yes:
+        # Show confirmation prompt
+        typer.echo(f"⚠️  About to remove Obsidian vault:")
+        typer.echo(f"   Name: {vault_name}")
+        # Use redaction policy to safely display path
+        redaction_policy = descriptor.build_redaction_policy()
+        redacted_path = redaction_policy.apply(descriptor.base_path).redacted
+        typer.echo(f"   Path: {redacted_path}")
+        typer.echo(f"   ID: {vault_id}")
+        
+        confirm = typer.confirm("Are you sure you want to remove this vault?")
+        if not confirm:
+            typer.echo("❌ Operation cancelled")
+            raise typer.Exit(code=0)
+    
     registry.remove(vault_id)
-    typer.echo(f"Removed Obsidian vault {vault_id}")
+    typer.echo(f"✅ Removed Obsidian vault '{vault_name}' ({vault_id})")
 
 
 @obsidian_app.command("to-local-source")
@@ -679,18 +787,138 @@ def show_audit(
 
 @app.command("remove")
 def remove_source(
-    name: str = typer.Argument(..., help="Name of the source to remove"),
+    source_id: str = typer.Argument(..., help="Source ID or name to remove"),
+    yes: bool = typer.Option(False, "--yes", help="Skip confirmation prompt"),
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config"),
 ) -> None:
-    """Remove a configured local source."""
-
+    """Remove a configured source (local or Obsidian vault)."""
+    
+    # First try as local source
     sources = _load_sources(config_path)
-    if name not in sources:
-        typer.echo(f"Source '{name}' not found")
+    if source_id in sources:
+        source = sources[source_id]
+        
+        if not yes:
+            typer.echo(f"⚠️  About to remove local source:")
+            typer.echo(f"   Name: {source.name}")
+            # Use redaction to safely display path
+            redacted = redact_path(source.root_path).redacted
+            typer.echo(f"   Path: {redacted}")
+            
+            confirm = typer.confirm("Are you sure you want to remove this source?")
+            if not confirm:
+                typer.echo("❌ Operation cancelled")
+                raise typer.Exit(code=0)
+        
+        sources.pop(source_id)
+        _save_sources(config_path, sources.values())
+        typer.echo(f"✅ Removed local source '{source_id}'")
+        return
+    
+    # Try as Obsidian vault ID
+    try:
+        registry = VaultRegistry()
+        descriptor = registry.get(source_id)
+        
+        vault_name = descriptor.name or f"vault-{descriptor.id[:8]}"
+        
+        if not yes:
+            typer.echo(f"⚠️  About to remove Obsidian vault:")
+            typer.echo(f"   Name: {vault_name}")
+            # Use redaction policy to safely display path
+            redaction_policy = descriptor.build_redaction_policy()
+            redacted_path = redaction_policy.apply(descriptor.base_path).redacted
+            typer.echo(f"   Path: {redacted_path}")
+            typer.echo(f"   ID: {source_id}")
+            
+            confirm = typer.confirm("Are you sure you want to remove this vault?")
+            if not confirm:
+                typer.echo("❌ Operation cancelled")
+                raise typer.Exit(code=0)
+        
+        registry.remove(source_id)
+        typer.echo(f"✅ Removed Obsidian vault '{vault_name}' ({source_id})")
+        
+    except FileNotFoundError:
+        typer.echo(f"❌ Source '{source_id}' not found (tried both local sources and Obsidian vaults)")
         raise typer.Exit(code=1)
-    sources.pop(name)
-    _save_sources(config_path, sources.values())
-    typer.echo(f"Removed source '{name}'")
+
+
+@app.command("add")
+def add_source(
+    source_type: str = typer.Argument(..., help="Source type (e.g., 'obsidian')"),
+    path: Path = typer.Option(..., "--path", exists=True, file_okay=False, help="Path to source"),
+    name: Optional[str] = typer.Option(None, "--name", help="Human-readable source name"),
+    icon: Optional[str] = typer.Option(None, "--icon", help="Emoji or path to icon"),
+    redact_title: Optional[str] = typer.Option(None, "--redact-title", help="Comma-separated patterns to redact sensitive titles in logs"),
+    json_out: bool = typer.Option(False, "--json", help="Output machine-readable JSON"),
+) -> None:
+    """Add a new source (obsidian vault or other types)."""
+    
+    if source_type.lower() == "obsidian":
+        # Handle Obsidian vault registration
+        redact_patterns = [p.strip() for p in (redact_title or "").split(",") if p.strip()] if redact_title else None
+        registry = VaultRegistry()
+        descriptor = registry.register_path(path, name=name, icon=icon, extra_ignores=[], redact_title_patterns=redact_patterns)
+        
+        # Show network mount warning if applicable
+        warning = descriptor.get_network_warning()
+        if warning:
+            typer.echo(f"⚠️  WARNING: {warning}", err=True)
+        
+        # Show empty vault warning if applicable
+        empty_warning = descriptor.get_empty_vault_warning()
+        if empty_warning:
+            typer.echo(f"⚠️  WARNING: {empty_warning}", err=True)
+        
+        if json_out:
+            typer.echo(json.dumps(descriptor.model_dump(mode="json"), indent=2))
+        else:
+            vault_name = descriptor.name or f"vault-{descriptor.id[:8]}"
+            # Use redaction policy to safely display path
+            redaction_policy = descriptor.build_redaction_policy()
+            redacted_path = redaction_policy.apply(descriptor.base_path).redacted
+            typer.echo(f"✅ Registered Obsidian vault '{vault_name}' at {redacted_path}")
+            typer.echo(f"   Vault ID: {descriptor.id}")
+            
+            # Show next steps
+            typer.echo("\n📋 Next Steps:")
+            typer.echo("   1. Convert to ingestion source:")
+            typer.echo(f"      futurnal sources obsidian to-local-source {descriptor.id}")
+            typer.echo("   2. Start ingestion:")
+            typer.echo(f"      futurnal sources run <source_name>")
+            typer.echo("   3. View ingestion reports:")
+            typer.echo("      futurnal sources telemetry")
+            typer.echo("      futurnal sources audit")
+    else:
+        typer.echo(f"❌ Unsupported source type: {source_type}")
+        typer.echo("Supported types: obsidian")
+        raise typer.Exit(code=1)
+
+
+@app.command("inspect")
+def inspect_source(
+    source_id: str = typer.Argument(..., help="Source ID or name to inspect"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config"),
+) -> None:
+    """Inspect a configured source (local or Obsidian vault)."""
+    
+    # First try as local source
+    sources = _load_sources(config_path)
+    if source_id in sources:
+        source = sources[source_id]
+        typer.echo(json.dumps(source.model_dump(mode="json"), indent=2))
+        return
+    
+    # Try as Obsidian vault ID
+    try:
+        registry = VaultRegistry()
+        descriptor = registry.get(source_id)
+        typer.echo(json.dumps(descriptor.model_dump(mode="json"), indent=2))
+        
+    except FileNotFoundError:
+        typer.echo(f"❌ Source '{source_id}' not found (tried both local sources and Obsidian vaults)")
+        raise typer.Exit(code=1)
 
 
 quarantine_app = typer.Typer(help="Inspect and manage quarantined files")

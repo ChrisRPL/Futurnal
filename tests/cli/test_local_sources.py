@@ -95,7 +95,7 @@ def test_remove_source(tmp_path: Path) -> None:
             str(config_path),
         ],
     )
-    result = runner.invoke(app, ["remove", "data", "--config-path", str(config_path)])
+    result = runner.invoke(app, ["remove", "data", "--yes", "--config-path", str(config_path)])
     assert result.exit_code == 0
     config = read_config(config_path)
     assert config["sources"] == []

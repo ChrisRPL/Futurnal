@@ -203,6 +203,33 @@ class ObsidianVaultDescriptor(BaseModel):
     def get_network_warning(self) -> Optional[str]:
         """Check if vault is on a network mount and return warning if so."""
         return _detect_network_mount(self.base_path)
+    
+    def get_empty_vault_warning(self) -> Optional[str]:
+        """Check if vault appears to be empty (no .md files) and return warning if so."""
+        try:
+            # Check if there are any .md files in the vault, excluding ignored directories
+            from pathspec import PathSpec
+            
+            # Create pathspec for ignore rules to exclude ignored directories
+            spec = PathSpec.from_lines('gitwildmatch', self.ignore_rules)
+            
+            # Look for any .md files that aren't ignored
+            for md_file in self.base_path.rglob('*.md'):
+                relative_path = md_file.relative_to(self.base_path)
+                if not spec.match_file(str(relative_path)):
+                    return None  # Found at least one non-ignored .md file
+            
+            # Also check for .markdown files
+            for md_file in self.base_path.rglob('*.markdown'):
+                relative_path = md_file.relative_to(self.base_path)
+                if not spec.match_file(str(relative_path)):
+                    return None  # Found at least one non-ignored .markdown file
+                    
+            return "Vault appears to be empty (no .md files found)"
+            
+        except Exception:
+            # If we can't check, don't warn (privacy-first approach)
+            return None
 
     def build_redaction_policy(self, *, allow_plaintext: bool = False) -> RedactionPolicy:
         """Build a redaction policy that respects redact_title_patterns."""

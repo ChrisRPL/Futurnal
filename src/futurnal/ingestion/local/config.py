@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
-from croniter import is_valid
+from croniter import croniter
 from pydantic import BaseModel, Field, RootModel, field_validator, model_validator
 from pathspec import PathSpec
 
@@ -94,7 +94,9 @@ class LocalIngestionSource(BaseModel):
             if self.interval_seconds is None:
                 raise ValueError("interval_seconds is required when schedule is '@interval'")
             return self
-        if not is_valid(self.schedule):
+        try:
+            croniter(self.schedule)
+        except Exception:
             raise ValueError(f"Invalid cron expression: {self.schedule}")
         self.interval_seconds = None
         return self
