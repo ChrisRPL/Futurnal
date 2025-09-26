@@ -29,8 +29,10 @@ from ..orchestrator.models import IngestionJob, JobPriority, JobType
 from ..orchestrator.queue import JobQueue, JobStatus
 from ..privacy import AuditLogger, ConsentRegistry, redact_path
 from ..privacy.audit import AuditEvent
+from ..ingestion.obsidian.descriptor import VaultRegistry, ObsidianVaultDescriptor
 
 app = typer.Typer(help="Manage Futurnal local data sources")
+obsidian_app = typer.Typer(help="Manage Obsidian vault sources")
 
 DEFAULT_CONFIG_PATH = Path.home() / ".futurnal" / "sources.json"
 DEFAULT_WORKSPACE_PATH = Path.home() / ".futurnal" / "workspace"
@@ -217,6 +219,95 @@ def list_sources(config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Pat
         return
     for source in sources.values():
         typer.echo(f"- {source.name}: {source.root_path}")
+
+
+# -----------------
+# Obsidian Commands
+# -----------------
+
+
+@obsidian_app.command("add")
+def obsidian_add(
+    path: Path = typer.Option(..., exists=True, file_okay=False, help="Path to Obsidian vault"),
+    name: Optional[str] = typer.Option(None, help="Human-readable vault name"),
+    icon: Optional[str] = typer.Option(None, help="Emoji or path to icon"),
+    extra_ignore: Optional[str] = typer.Option(None, help="Comma-separated extra ignore rules"),
+    registry_path: Optional[Path] = typer.Option(
+        None,
+        help="Override path to the Obsidian registry directory (for tests)",
+    ),
+) -> None:
+    """Register or update an Obsidian vault descriptor."""
+
+    extras = [r.strip() for r in (extra_ignore or "").split(",") if r.strip()]
+    registry = VaultRegistry(registry_root=registry_path) if registry_path else VaultRegistry()
+    descriptor = registry.register_path(path, name=name, icon=icon, extra_ignores=extras)
+    
+    # Show network mount warning if applicable
+    warning = descriptor.get_network_warning()
+    if warning:
+        typer.echo(f"⚠️  WARNING: {warning}", err=True)
+    
+    typer.echo(json.dumps(descriptor.model_dump(mode="json"), indent=2))
+
+
+@obsidian_app.command("list")
+def obsidian_list(
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output"),
+    registry_path: Optional[Path] = typer.Option(None, help="Override registry directory"),
+) -> None:
+    registry = VaultRegistry(registry_root=registry_path) if registry_path else VaultRegistry()
+    items = registry.list()
+    if json_out:
+        typer.echo(json.dumps([i.model_dump(mode="json") for i in items], indent=2))
+        return
+    if not items:
+        typer.echo("No Obsidian vaults registered")
+        return
+    for i in items:
+        typer.echo(f"- {i.id}: {i.base_path}")
+
+
+@obsidian_app.command("show")
+def obsidian_show(
+    vault_id: str,
+    registry_path: Optional[Path] = typer.Option(None, help="Override registry directory"),
+) -> None:
+    registry = VaultRegistry(registry_root=registry_path) if registry_path else VaultRegistry()
+    descriptor = registry.get(vault_id)
+    typer.echo(json.dumps(descriptor.model_dump(mode="json"), indent=2))
+
+
+@obsidian_app.command("remove")
+def obsidian_remove(
+    vault_id: str,
+    registry_path: Optional[Path] = typer.Option(None, help="Override registry directory"),
+) -> None:
+    registry = VaultRegistry(registry_root=registry_path) if registry_path else VaultRegistry()
+    registry.remove(vault_id)
+    typer.echo(f"Removed Obsidian vault {vault_id}")
+
+
+@obsidian_app.command("to-local-source")
+def obsidian_to_local_source(
+    vault_id: str,
+    registry_path: Optional[Path] = typer.Option(None, help="Override registry directory"),
+    max_workers: Optional[int] = typer.Option(None, help="Max concurrent workers"),
+    schedule: str = typer.Option("@manual", help="Cron schedule or @manual/@interval"),
+    priority: str = typer.Option("normal", help="Job priority (low/normal/high)"),
+) -> None:
+    """Convert Obsidian vault descriptor to LocalIngestionSource format."""
+    registry = VaultRegistry(registry_root=registry_path) if registry_path else VaultRegistry()
+    descriptor = registry.get(vault_id)
+    local_source = descriptor.to_local_source(
+        max_workers=max_workers,
+        schedule=schedule,
+        priority=priority,
+    )
+    typer.echo(json.dumps(local_source.model_dump(mode="json"), indent=2))
+
+
+app.add_typer(obsidian_app, name="obsidian")
 
 
 @app.command("telemetry")
