@@ -65,9 +65,23 @@ class IngestionOrchestrator:
         self._audit_logger = AuditLogger(self._workspace_dir / "audit")
         consent_dir = self._workspace_dir / "privacy"
         self._consent_registry = ConsentRegistry(consent_dir)
-        self._connector = LocalFilesConnector(
+        self._local_connector = LocalFilesConnector(
             workspace_dir=self._workspace_dir,
             state_store=state_store,
+            element_sink=element_sink,
+            audit_logger=self._audit_logger,
+            consent_registry=self._consent_registry,
+        )
+        
+        # Initialize Obsidian connector
+        from ..ingestion.obsidian.connector import ObsidianVaultConnector
+        from ..ingestion.obsidian.descriptor import VaultRegistry
+        
+        self._vault_registry = VaultRegistry()
+        self._obsidian_connector = ObsidianVaultConnector(
+            workspace_dir=self._workspace_dir,
+            state_store=state_store,
+            vault_registry=self._vault_registry,
             element_sink=element_sink,
             audit_logger=self._audit_logger,
             consent_registry=self._consent_registry,
@@ -299,6 +313,8 @@ class IngestionOrchestrator:
     async def _execute_job(self, job: IngestionJob) -> None:
         if job.job_type == JobType.LOCAL_FILES:
             return await self._ingest_local(job)
+        elif job.job_type == JobType.OBSIDIAN_VAULT:
+            return await self._ingest_obsidian(job)
         else:
             raise ValueError(f"Unsupported job type {job.job_type}")
 
@@ -307,7 +323,18 @@ class IngestionOrchestrator:
         registration = self._sources[source_name]
         files_processed = 0
         bytes_processed = 0
-        for element in self._connector.ingest(registration.source, job_id=job.job_id):
+        for element in self._local_connector.ingest(registration.source, job_id=job.job_id):
+            await self._handle_ingested_element(element)
+            files_processed += 1
+            bytes_processed += element.get("size_bytes", 0)
+        return files_processed, bytes_processed
+
+    async def _ingest_obsidian(self, job: IngestionJob) -> tuple[int, int]:
+        source_name = job.payload["source_name"]
+        registration = self._sources[source_name]
+        files_processed = 0
+        bytes_processed = 0
+        for element in self._obsidian_connector.ingest(registration.source, job_id=job.job_id):
             await self._handle_ingested_element(element)
             files_processed += 1
             bytes_processed += element.get("size_bytes", 0)

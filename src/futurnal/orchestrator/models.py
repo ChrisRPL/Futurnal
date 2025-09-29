@@ -16,6 +16,7 @@ class JobPriority(Enum):
 
 class JobType(str, Enum):
     LOCAL_FILES = "local_files"
+    OBSIDIAN_VAULT = "obsidian_vault"
 
 
 @dataclass(slots=True)
