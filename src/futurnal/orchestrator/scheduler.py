@@ -15,7 +15,17 @@ from typing import Dict, Optional
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
-from croniter import is_valid
+try:
+    from croniter import is_valid
+except ImportError:
+    # Fallback for older croniter versions
+    from croniter import croniter
+    def is_valid(cron_expression):
+        try:
+            croniter(cron_expression)
+            return True
+        except:
+            return False
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer

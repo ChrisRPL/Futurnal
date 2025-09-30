@@ -1,12 +1,13 @@
-"""Obsidian Vault Connector implementation."""
+"""Obsidian Vault Connector implementation with sync engine integration."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Set
 
 from pydantic import Field
 
@@ -87,8 +88,8 @@ class ObsidianVaultSource(LocalIngestionSource):
 
 
 class ObsidianVaultConnector:
-    """Connector for Obsidian vaults with specialized markdown processing."""
-    
+    """Connector for Obsidian vaults with specialized markdown processing and sync engine integration."""
+
     def __init__(
         self,
         *,
@@ -99,12 +100,14 @@ class ObsidianVaultConnector:
         audit_logger: Optional[AuditLogger] = None,
         consent_registry: Optional[ConsentRegistry] = None,
         asset_processing_config: Optional[Dict[str, any]] = None,
+        enable_sync_engine: bool = True,
+        sync_engine_config: Optional[Dict[str, any]] = None,
     ) -> None:
         self._workspace_dir = Path(workspace_dir)
         self._workspace_dir.mkdir(parents=True, exist_ok=True)
         self._quarantine_dir = self._workspace_dir / "quarantine"
         self._quarantine_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self._state_store = state_store
         self._vault_registry = vault_registry or VaultRegistry()
         self._element_sink = element_sink
@@ -120,6 +123,16 @@ class ObsidianVaultConnector:
 
         # Path tracker for rename/move detection (initialized per vault)
         self._path_trackers: Dict[str, ObsidianPathTracker] = {}
+
+        # Sync engine integration
+        self._enable_sync_engine = enable_sync_engine
+        self._sync_engine_config = sync_engine_config or {}
+        self._sync_engine = None
+        self._change_detectors: Dict[str, any] = {}  # Will be imported lazily
+
+        # File watching integration
+        self._file_watcher = None
+        self._watching_vaults: Set[str] = set()
 
     def _get_path_tracker(self, source: ObsidianVaultSource) -> Optional[ObsidianPathTracker]:
         """Get or create a path tracker for the given vault source."""
@@ -557,3 +570,364 @@ class ObsidianVaultConnector:
             self._audit_logger.record(event)
         except Exception as e:
             logger.error(f"Failed to log audit event: {e}")
+
+    # Sync Engine Integration Methods
+
+    async def initialize_sync_engine(self, job_queue) -> None:
+        """Initialize the sync engine for advanced synchronization capabilities.
+
+        Args:
+            job_queue: Job queue instance for sync coordination
+        """
+        if not self._enable_sync_engine or self._sync_engine is not None:
+            return
+
+        try:
+            # Lazy import to avoid circular dependencies
+            from .sync_engine import create_sync_engine
+
+            self._sync_engine = create_sync_engine(
+                vault_connector=self,
+                job_queue=job_queue,
+                state_store=self._state_store,
+                audit_logger=self._audit_logger,
+                **self._sync_engine_config
+            )
+
+            await self._sync_engine.start()
+            logger.info("Obsidian sync engine initialized successfully")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize sync engine: {e}", exc_info=True)
+            self._sync_engine = None
+
+    async def shutdown_sync_engine(self) -> None:
+        """Shutdown the sync engine and stop file watching."""
+        if self._sync_engine:
+            await self._sync_engine.stop()
+            self._sync_engine = None
+
+        if self._file_watcher:
+            await self._file_watcher.stop_watching()
+            self._file_watcher = None
+
+        self._watching_vaults.clear()
+        logger.info("Obsidian sync engine shutdown completed")
+
+    async def enable_vault_sync(self, vault_source: ObsidianVaultSource) -> bool:
+        """Enable sync for a specific vault.
+
+        Args:
+            vault_source: Vault source configuration
+
+        Returns:
+            True if sync was enabled successfully
+        """
+        if not self._enable_sync_engine or not vault_source.vault_id:
+            return False
+
+        try:
+            # Initialize sync engine if needed
+            if self._sync_engine is None:
+                logger.warning("Sync engine not initialized, cannot enable vault sync")
+                return False
+
+            # Initialize change detector for this vault
+            change_detector = await self._get_or_create_change_detector(vault_source)
+            if not change_detector:
+                return False
+
+            # Start file watching for this vault
+            await self._start_vault_file_watching(vault_source)
+
+            self._watching_vaults.add(vault_source.vault_id)
+
+            logger.info(f"Enabled sync for vault {vault_source.vault_id}")
+
+            if self._audit_logger:
+                await self._log_sync_event(
+                    "vault_sync_enabled",
+                    "success",
+                    vault_id=vault_source.vault_id
+                )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to enable sync for vault {vault_source.vault_id}: {e}", exc_info=True)
+
+            if self._audit_logger:
+                await self._log_sync_event(
+                    "vault_sync_enable_failed",
+                    "error",
+                    vault_id=vault_source.vault_id,
+                    error=str(e)
+                )
+
+            return False
+
+    async def disable_vault_sync(self, vault_id: str) -> bool:
+        """Disable sync for a specific vault.
+
+        Args:
+            vault_id: ID of the vault to stop syncing
+
+        Returns:
+            True if sync was disabled successfully
+        """
+        try:
+            if vault_id in self._watching_vaults:
+                self._watching_vaults.remove(vault_id)
+
+            # Remove change detector
+            self._change_detectors.pop(vault_id, None)
+
+            # Note: File watcher is shared, so we don't stop it here
+            # It will filter events based on active vaults
+
+            logger.info(f"Disabled sync for vault {vault_id}")
+
+            if self._audit_logger:
+                await self._log_sync_event(
+                    "vault_sync_disabled",
+                    "success",
+                    vault_id=vault_id
+                )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to disable sync for vault {vault_id}: {e}", exc_info=True)
+            return False
+
+    async def trigger_incremental_sync(self, vault_source: ObsidianVaultSource) -> Optional[str]:
+        """Trigger an incremental sync for a vault.
+
+        Args:
+            vault_source: Vault source configuration
+
+        Returns:
+            Job ID if sync was triggered successfully
+        """
+        if not self._sync_engine or not vault_source.vault_id:
+            logger.warning("Sync engine not available for incremental sync")
+            return None
+
+        try:
+            # Perform change detection
+            change_detector = await self._get_or_create_change_detector(vault_source)
+            if not change_detector:
+                return None
+
+            # Get current records for change detection
+            records = self.crawl_source(vault_source)
+            path_changes, content_changes = change_detector.detect_changes(records)
+
+            # Handle path changes through sync engine
+            if path_changes:
+                await self._sync_engine.handle_path_changes(path_changes, vault_source.vault_id)
+
+            # Handle content changes as file events
+            if content_changes:
+                for change in content_changes:
+                    await self._sync_engine.handle_file_event(
+                        event_type=self._map_content_change_to_event_type(change),
+                        file_path=change.file_path,
+                        vault_id=vault_source.vault_id,
+                        metadata={
+                            "change_type": change.change_type,
+                            "has_content_change": change.has_content_change(),
+                            "has_metadata_change": change.has_metadata_change(),
+                        }
+                    )
+
+            logger.info(
+                f"Triggered incremental sync for vault {vault_source.vault_id}: "
+                f"{len(path_changes)} path changes, {len(content_changes)} content changes"
+            )
+
+            if self._audit_logger:
+                await self._log_sync_event(
+                    "incremental_sync_triggered",
+                    "success",
+                    vault_id=vault_source.vault_id,
+                    path_changes_count=len(path_changes),
+                    content_changes_count=len(content_changes)
+                )
+
+            return f"incremental_sync_{uuid.uuid4().hex[:8]}"
+
+        except Exception as e:
+            logger.error(f"Failed to trigger incremental sync for vault {vault_source.vault_id}: {e}", exc_info=True)
+
+            if self._audit_logger:
+                await self._log_sync_event(
+                    "incremental_sync_failed",
+                    "error",
+                    vault_id=vault_source.vault_id,
+                    error=str(e)
+                )
+
+            return None
+
+    async def get_sync_status(self, vault_id: str) -> Dict[str, any]:
+        """Get sync status for a vault.
+
+        Args:
+            vault_id: ID of the vault
+
+        Returns:
+            Dictionary containing sync status information
+        """
+        status = {
+            "vault_id": vault_id,
+            "sync_enabled": vault_id in self._watching_vaults,
+            "sync_engine_available": self._sync_engine is not None,
+            "file_watching_active": self._file_watcher is not None,
+        }
+
+        if self._sync_engine:
+            sync_status = await self._sync_engine.get_sync_status(vault_id)
+            status.update(sync_status)
+
+        if vault_id in self._change_detectors:
+            change_detector = self._change_detectors[vault_id]
+            if hasattr(change_detector, 'get_cache_stats'):
+                status["change_detector_stats"] = change_detector.get_cache_stats()
+
+        return status
+
+    async def _get_or_create_change_detector(self, vault_source: ObsidianVaultSource):
+        """Get or create a change detector for a vault."""
+        if not vault_source.vault_id:
+            return None
+
+        if vault_source.vault_id not in self._change_detectors:
+            try:
+                # Lazy import to avoid circular dependencies
+                from .change_detector import create_change_detector
+
+                path_tracker = self._get_path_tracker(vault_source)
+                change_detector = create_change_detector(
+                    vault_id=vault_source.vault_id,
+                    vault_root=vault_source.root_path,
+                    state_store=self._state_store,
+                    path_tracker=path_tracker
+                )
+
+                self._change_detectors[vault_source.vault_id] = change_detector
+
+            except Exception as e:
+                logger.error(f"Failed to create change detector for vault {vault_source.vault_id}: {e}")
+                return None
+
+        return self._change_detectors[vault_source.vault_id]
+
+    async def _start_vault_file_watching(self, vault_source: ObsidianVaultSource) -> None:
+        """Start file watching for a vault."""
+        if self._file_watcher is None:
+            try:
+                # Lazy import to avoid circular dependencies
+                from ..orchestrator.file_watcher import create_optimized_watcher, WatcherConfig
+
+                # Create watcher config optimized for Obsidian
+                config = WatcherConfig(
+                    include_patterns=["**/*.md", "**/*.markdown", "**/*.png", "**/*.jpg", "**/*.pdf"],
+                    exclude_patterns=[
+                        "**/.obsidian/**",
+                        "**/.trash/**",
+                        "**/.git/**",
+                        "**/node_modules/**",
+                    ],
+                    enable_large_vault_mode=True,
+                    large_vault_threshold=1000,
+                )
+
+                self._file_watcher = create_optimized_watcher(
+                    config=config,
+                    event_callback=self._handle_file_events
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to create file watcher: {e}")
+                return
+
+        # Start watching the vault path
+        if not self._file_watcher.is_watching():
+            await self._file_watcher.start_watching(vault_source.root_path)
+
+    def _handle_file_events(self, events) -> None:
+        """Handle file events from the file watcher."""
+        if not self._sync_engine:
+            return
+
+        for event in events:
+            # Determine which vault this event belongs to
+            vault_id = self._find_vault_for_path(event.path)
+            if not vault_id or vault_id not in self._watching_vaults:
+                continue
+
+            # Convert file watcher event to sync engine event
+            try:
+                from .sync_engine import SyncEventType
+
+                event_type_map = {
+                    'created': SyncEventType.FILE_CREATED,
+                    'modified': SyncEventType.FILE_MODIFIED,
+                    'deleted': SyncEventType.FILE_DELETED,
+                    'moved': SyncEventType.FILE_MOVED,
+                }
+
+                sync_event_type = event_type_map.get(event.event_type.value)
+                if sync_event_type:
+                    # Create async task to handle the event
+                    asyncio.create_task(self._sync_engine.handle_file_event(
+                        event_type=sync_event_type,
+                        file_path=event.path,
+                        vault_id=vault_id,
+                        metadata=event.metadata
+                    ))
+
+            except Exception as e:
+                logger.error(f"Failed to handle file event: {e}")
+
+    def _find_vault_for_path(self, file_path: Path) -> Optional[str]:
+        """Find which vault a file path belongs to."""
+        # Simple implementation - could be optimized with a lookup table
+        for vault_descriptor in self._vault_registry.list_vaults():
+            try:
+                file_path.relative_to(vault_descriptor.base_path)
+                return vault_descriptor.id
+            except ValueError:
+                continue
+        return None
+
+    def _map_content_change_to_event_type(self, content_change):
+        """Map content change to sync event type."""
+        from .sync_engine import SyncEventType
+
+        if content_change.has_content_change():
+            return SyncEventType.FILE_MODIFIED
+        else:
+            return SyncEventType.FILE_MODIFIED  # Metadata change is still a modification
+
+    async def _log_sync_event(self, action: str, status: str, **metadata) -> None:
+        """Log sync-related audit event."""
+        if not self._audit_logger:
+            return
+
+        from futurnal.orchestrator.audit import AuditEvent
+
+        event = AuditEvent(
+            job_id="sync_connector",
+            source="obsidian_vault_connector",
+            action=action,
+            status=status,
+            timestamp=datetime.utcnow(),
+            metadata=metadata,
+        )
+
+        try:
+            self._audit_logger.record(event)
+        except Exception as e:
+            logger.error(f"Failed to log sync audit event: {e}")
