@@ -380,10 +380,10 @@ class MetadataTripleExtractor:
 
 class TripleEnrichedNormalizationSink:
     """Enhanced normalization sink that extracts semantic triples."""
-    
+
     def __init__(self, pkg_writer, vector_writer):
         from ..pipeline.stubs import PKGWriter, VectorWriter
-        
+
         self.pkg_writer: PKGWriter = pkg_writer
         self.vector_writer: VectorWriter = vector_writer
         self.triple_extractor = MetadataTripleExtractor()
@@ -439,3 +439,50 @@ class TripleEnrichedNormalizationSink:
         """Handle element deletion."""
         self.pkg_writer.remove_document(element["sha256"])
         self.vector_writer.remove_embedding(element["sha256"])
+
+    def handle_path_change(self, path_change_data: dict) -> None:
+        """Handle note path changes by updating PKG relationships.
+
+        Args:
+            path_change_data: Dictionary containing path change information
+                - vault_id: Vault identifier
+                - old_note_id: Previous note ID
+                - new_note_id: New note ID
+                - old_path: Previous file path
+                - new_path: New file path
+                - change_type: Type of change (rename, move, etc.)
+        """
+        try:
+            # Check if this is a PKG writer that supports note operations
+            if hasattr(self.pkg_writer, 'update_note_path'):
+                self.pkg_writer.update_note_path(
+                    vault_id=path_change_data["vault_id"],
+                    note_id=path_change_data["old_note_id"],
+                    old_path=path_change_data["old_path"],
+                    new_path=path_change_data["new_path"]
+                )
+
+                logger.info(
+                    f"Updated note path in PKG: {path_change_data['old_path']} -> {path_change_data['new_path']}",
+                    extra={
+                        "vault_id": path_change_data["vault_id"],
+                        "old_note_id": path_change_data["old_note_id"],
+                        "new_note_id": path_change_data["new_note_id"],
+                        "change_type": path_change_data["change_type"],
+                    }
+                )
+            else:
+                logger.warning(
+                    f"PKG writer does not support path updates: {type(self.pkg_writer).__name__}"
+                )
+
+        except Exception as e:
+            logger.error(
+                f"Failed to handle path change in PKG: {e}",
+                extra={
+                    "vault_id": path_change_data.get("vault_id"),
+                    "old_path": path_change_data.get("old_path"),
+                    "new_path": path_change_data.get("new_path"),
+                    "error": str(e),
+                }
+            )

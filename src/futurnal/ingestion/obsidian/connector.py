@@ -6,7 +6,9 @@ import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional
+
+from pydantic import Field
 
 from futurnal.privacy.audit import AuditLogger
 from futurnal.privacy.consent import ConsentRegistry, ConsentRequiredError
@@ -19,15 +21,46 @@ from ..local.state import FileRecord, StateStore
 
 from .descriptor import ObsidianVaultDescriptor, VaultRegistry
 from .processor import ObsidianDocumentProcessor
+from .path_tracker import ObsidianPathTracker
 
 logger = logging.getLogger(__name__)
 
 
 class ObsidianVaultSource(LocalIngestionSource):
     """Extended ingestion source for Obsidian vaults."""
-    
+
     vault_id: Optional[str] = None
     vault_name: Optional[str] = None
+
+    # Asset processing configuration
+    enable_asset_processing: bool = Field(
+        default=True,
+        description="Enable processing of embedded assets (images, PDFs)"
+    )
+    enable_asset_text_extraction: bool = Field(
+        default=True,
+        description="Enable text extraction from processable assets using Unstructured.io"
+    )
+    asset_ocr_languages: str = Field(
+        default="eng",
+        description="Language codes for OCR processing (e.g., 'eng', 'fra', 'eng+fra')"
+    )
+    asset_max_file_size_mb: int = Field(
+        default=50,
+        description="Maximum file size in MB for asset processing",
+        ge=1,
+        le=500
+    )
+    asset_processing_timeout_seconds: int = Field(
+        default=60,
+        description="Timeout in seconds for asset processing operations",
+        ge=5,
+        le=600
+    )
+    supported_asset_extensions: Optional[List[str]] = Field(
+        default=None,
+        description="Custom list of supported asset file extensions (defaults to standard set)"
+    )
     
     @classmethod
     def from_vault_descriptor(
@@ -65,6 +98,7 @@ class ObsidianVaultConnector:
         element_sink: Optional[ElementSink] = None,
         audit_logger: Optional[AuditLogger] = None,
         consent_registry: Optional[ConsentRegistry] = None,
+        asset_processing_config: Optional[Dict[str, any]] = None,
     ) -> None:
         self._workspace_dir = Path(workspace_dir)
         self._workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -76,9 +110,106 @@ class ObsidianVaultConnector:
         self._element_sink = element_sink
         self._audit_logger = audit_logger
         self._consent_registry = consent_registry
-        
+        self._asset_processing_config = asset_processing_config or {}
+
         # Initialize processor
-        self._processor = ObsidianDocumentProcessor(workspace_dir=self._workspace_dir)
+        self._processor = ObsidianDocumentProcessor(
+            workspace_dir=self._workspace_dir,
+            asset_processing_config=self._asset_processing_config
+        )
+
+        # Path tracker for rename/move detection (initialized per vault)
+        self._path_trackers: Dict[str, ObsidianPathTracker] = {}
+
+    def _get_path_tracker(self, source: ObsidianVaultSource) -> Optional[ObsidianPathTracker]:
+        """Get or create a path tracker for the given vault source."""
+        if not source.vault_id:
+            return None
+
+        if source.vault_id not in self._path_trackers:
+            self._path_trackers[source.vault_id] = ObsidianPathTracker(
+                vault_id=source.vault_id,
+                vault_root=source.root_path,
+                state_store=self._state_store
+            )
+
+        return self._path_trackers[source.vault_id]
+
+    def _handle_path_changes(self, path_changes: List, source: ObsidianVaultSource, job_id: str) -> None:
+        """Handle path changes by updating graph relationships.
+
+        Args:
+            path_changes: List of PathChange objects
+            source: Vault source
+            job_id: Current job ID for logging
+        """
+        from .path_tracker import PathChange
+
+        policy = build_policy()
+
+        for change in path_changes:
+            try:
+                # Log the path change for audit
+                self._log_path_change_event(change, source, job_id, policy)
+
+                # If element sink is available, notify it of the path change
+                if self._element_sink and hasattr(self._element_sink, 'handle_path_change'):
+                    self._element_sink.handle_path_change(change.to_dict())
+
+                logger.debug(
+                    f"Processed path change: {change.old_path} -> {change.new_path}",
+                    extra=_log_extra(
+                        job_id=job_id,
+                        source=source.name,
+                        old_path=change.old_path,
+                        new_path=change.new_path,
+                        event="path_change_processed",
+                    ),
+                )
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to handle path change {change.old_path} -> {change.new_path}: {e}",
+                    extra=_log_extra(
+                        job_id=job_id,
+                        source=source.name,
+                        old_path=change.old_path,
+                        new_path=change.new_path,
+                        event="path_change_handling_failed",
+                        error=str(e),
+                    ),
+                )
+
+    def _log_path_change_event(self, change, source: ObsidianVaultSource, job_id: str, policy) -> None:
+        """Log path change event to audit logger."""
+        if self._audit_logger is None:
+            return
+
+        from futurnal.orchestrator.audit import AuditEvent
+
+        event_metadata = {
+            "vault_id": change.vault_id,
+            "old_note_id": change.old_note_id,
+            "new_note_id": change.new_note_id,
+            "change_type": change.change_type,
+            "is_content_change": change.is_content_change(),
+            "is_rename_only": change.is_rename_only(),
+            "is_move_only": change.is_move_only(),
+        }
+
+        event = AuditEvent(
+            job_id=job_id,
+            source=source.name,
+            action="path_change",
+            status="detected",
+            timestamp=change.detected_at,
+            metadata=event_metadata,
+        )
+
+        try:
+            self._audit_logger.record(event)
+        except Exception as e:
+            logger.error(f"Failed to log path change audit event: {e}")
     
     def crawl_source(self, source: ObsidianVaultSource, *, job_id: str | None = None) -> List[FileRecord]:
         """Perform a crawl of the Obsidian vault returning updated records."""
@@ -125,26 +256,59 @@ class ObsidianVaultConnector:
                     ),
                 )
 
+        # Detect path changes for rename/move tracking
+        path_tracker = self._get_path_tracker(source)
+        if path_tracker:
+            try:
+                path_changes = path_tracker.detect_path_changes(snapshots)
+                if path_changes:
+                    logger.info(
+                        f"Detected {len(path_changes)} path changes in vault {source.vault_id}",
+                        extra=_log_extra(
+                            job_id=active_job,
+                            source=source.name,
+                            event="path_changes_detected",
+                            count=len(path_changes),
+                        ),
+                    )
+
+                    # Handle graph updates for path changes
+                    self._handle_path_changes(path_changes, source, active_job)
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to detect path changes: {e}",
+                    extra=_log_extra(
+                        job_id=active_job,
+                        source=source.name,
+                        event="path_change_detection_failed",
+                        error=str(e),
+                    ),
+                )
+
         return snapshots
     
     def ingest(self, source: ObsidianVaultSource, *, job_id: str | None = None) -> Iterable[dict]:
         """Ingest documents from Obsidian vault through specialized processing pipeline."""
-        
+
         active_job_id = job_id or uuid.uuid4().hex
         policy = build_policy()
-        
+
         # Get vault descriptor
         vault_descriptor = None
         if source.vault_id:
             vault_descriptor = self._vault_registry.get(source.vault_id)
-        
-        # Update processor with vault information
+
+        # Update processor with vault information and asset configuration
         if vault_descriptor:
             self._processor.vault_root = vault_descriptor.base_path
             self._processor.vault_id = vault_descriptor.id
         else:
             self._processor.vault_root = source.root_path
             self._processor.vault_id = source.vault_id
+
+        # Update asset processing configuration from source
+        self._processor.update_asset_config(self._extract_asset_config(source))
         
         records = self.crawl_source(source, job_id=active_job_id)
         
@@ -272,7 +436,22 @@ class ObsidianVaultConnector:
                     metadata={"detail": str(exc)},
                 )
                 continue
-    
+
+    def _extract_asset_config(self, source: ObsidianVaultSource) -> Dict[str, any]:
+        """Extract asset processing configuration from vault source."""
+        config = {
+            "enable_asset_processing": source.enable_asset_processing,
+            "enable_asset_text_extraction": source.enable_asset_text_extraction,
+            "asset_ocr_languages": source.asset_ocr_languages,
+            "asset_max_file_size_mb": source.asset_max_file_size_mb,
+            "asset_processing_timeout_seconds": source.asset_processing_timeout_seconds,
+        }
+
+        if source.supported_asset_extensions is not None:
+            config["supported_asset_extensions"] = set(source.supported_asset_extensions)
+
+        return config
+
     def _process_snapshot(self, source: ObsidianVaultSource, snapshot: FileSnapshot) -> FileRecord | None:
         """Process a file snapshot into a record, checking for changes."""
         existing = self._state_store.fetch(snapshot.path)

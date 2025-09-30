@@ -28,11 +28,12 @@ from mdit_py_plugins.deflist import deflist_plugin
 
 from .security import PathTraversalValidator, ResourceLimiter, SecurityError, validate_yaml_safety
 from .performance import (
-    MemoryMonitor, 
-    ChunkedProcessor, 
-    get_content_cache, 
+    MemoryMonitor,
+    ChunkedProcessor,
+    get_content_cache,
     get_performance_profiler
 )
+from .assets import ObsidianAsset, AssetDetector, AssetResolver
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,8 @@ class DocumentMetadata(BaseModel):
     frontmatter: Dict[str, Any] = Field(default_factory=dict)
     frontmatter_raw: Optional[str] = Field(default=None, description="Raw frontmatter for round-trip")
     headings: List[MarkdownBlock] = Field(default_factory=list)
-    links: List[ObsidianLink] = Field(default_factory=list) 
+    links: List[ObsidianLink] = Field(default_factory=list)
+    assets: List[ObsidianAsset] = Field(default_factory=list)
     tags: List[ObsidianTag] = Field(default_factory=list)
     callouts: List[ObsidianCallout] = Field(default_factory=list)
     blocks: List[MarkdownBlock] = Field(default_factory=list)
@@ -630,6 +632,8 @@ class MarkdownNormalizer:
         self.frontmatter_parser = FrontmatterParser(self.resource_limiter)
         self.callout_plugin = ObsidianCalloutPlugin()
         self.link_parser = ObsidianLinkParser(vault_root, self.path_validator, self.resource_limiter)
+        self.asset_detector = AssetDetector()
+        self.asset_resolver = AssetResolver(vault_root) if vault_root else None
         self.tag_parser = ObsidianTagParser()
         self.table_parser = MarkdownTableParser(self.resource_limiter)
         self.task_parser = TaskListParser()
@@ -692,12 +696,30 @@ class MarkdownNormalizer:
         # Step 3: Parse Obsidian-specific elements
         callouts = self.callout_plugin.parse(normalized_content)
         links = self.link_parser.parse(normalized_content, source_path)
+
+        # Parse and resolve assets
+        assets = self.asset_detector.detect_assets(normalized_content)
+        if self.asset_resolver and assets:
+            # Resolve asset paths with security validation
+            resolved_assets = []
+            for asset in assets:
+                try:
+                    resolved_asset = self.asset_resolver.resolve_asset(asset, source_path)
+                    resolved_assets.append(resolved_asset)
+                except Exception as e:
+                    logger.warning(f"Failed to resolve asset {asset.target}: {e}")
+                    asset.is_broken = True
+                    resolved_assets.append(asset)
+            assets = resolved_assets
+
         tags = self.tag_parser.parse(normalized_content)
         task_lists = self.task_parser.parse(normalized_content)
         footnotes = self.footnote_parser.parse(normalized_content)
         
         # Validate element counts
         self.resource_limiter.validate_element_count(len(callouts), 'callouts')
+        self.resource_limiter.validate_element_count(len(links), 'links')
+        self.resource_limiter.validate_element_count(len(assets), 'assets')
         self.resource_limiter.validate_element_count(len(tags), 'tags')
         self.resource_limiter.validate_element_count(len(task_lists), 'tasks')
         self.resource_limiter.validate_element_count(len(footnotes), 'footnotes')
@@ -726,6 +748,7 @@ class MarkdownNormalizer:
             frontmatter_raw=raw_frontmatter,
             headings=headings,
             links=links,
+            assets=assets,
             tags=all_tags,
             callouts=callouts,
             blocks=blocks,

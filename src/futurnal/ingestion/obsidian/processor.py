@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterator, List, Optional
 from unstructured.partition.auto import partition
 
 from .normalizer import NormalizedDocument, normalize_obsidian_document
+from .link_graph import ObsidianLinkGraphConstructor
 from ..local.state import FileRecord
 
 logger = logging.getLogger(__name__)
@@ -26,15 +27,30 @@ class ObsidianDocumentProcessor:
         *,
         workspace_dir: Path,
         vault_root: Optional[Path] = None,
-        vault_id: Optional[str] = None
+        vault_id: Optional[str] = None,
+        enable_link_graph: bool = True,
+        asset_processing_config: Optional[Dict[str, Any]] = None
     ):
         self.workspace_dir = Path(workspace_dir)
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
         self.parsed_dir = self.workspace_dir / "parsed"
         self.parsed_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.vault_root = vault_root
         self.vault_id = vault_id
+        self.asset_processing_config = asset_processing_config or {}
+
+        # Initialize link graph constructor if enabled and vault info available
+        self.link_graph_constructor = None
+        if enable_link_graph and self.vault_root and self.vault_id:
+            self.link_graph_constructor = ObsidianLinkGraphConstructor(
+                vault_id=self.vault_id,
+                vault_root=self.vault_root
+            )
+
+    def update_asset_config(self, config: Dict[str, Any]) -> None:
+        """Update asset processing configuration."""
+        self.asset_processing_config.update(config)
         
     def process_document(self, file_record: FileRecord, source_name: str) -> Iterator[Dict[str, Any]]:
         """Process a document through the full Obsidian -> Unstructured.io pipeline.
@@ -57,9 +73,26 @@ class ObsidianDocumentProcessor:
                 vault_root=self.vault_root,
                 vault_id=self.vault_id
             )
-            
-            # Step 3: Create enriched document for Unstructured.io
-            enriched_content = self._create_enriched_content(normalized_doc)
+
+            # Step 3: Construct link graph relationships
+            graph_data = None
+            if self.link_graph_constructor:
+                try:
+                    note_nodes, link_relationships, tag_relationships, asset_relationships = self.link_graph_constructor.construct_graph(normalized_doc)
+                    graph_data = {
+                        "note_nodes": [node.to_dict() for node in note_nodes],
+                        "link_relationships": [rel.to_dict() for rel in link_relationships],
+                        "tag_relationships": [rel.to_dict() for rel in tag_relationships],
+                        "asset_relationships": [rel.to_dict() for rel in asset_relationships],
+                        "statistics": self.link_graph_constructor.get_statistics()
+                    }
+                    logger.debug(f"Constructed graph for {file_record.path}: {len(note_nodes)} notes, {len(link_relationships)} links, {len(tag_relationships)} tags, {len(asset_relationships)} assets")
+                except Exception as e:
+                    logger.error(f"Failed to construct graph for {file_record.path}: {e}")
+                    graph_data = {"error": str(e)}
+
+            # Step 4: Create enriched document for Unstructured.io
+            enriched_content = self._create_enriched_content(normalized_doc, graph_data)
             
             # Step 4: Process through Unstructured.io using temporary file
             with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False, encoding='utf-8') as temp_file:
@@ -80,7 +113,8 @@ class ObsidianDocumentProcessor:
                         element=element,
                         normalized_doc=normalized_doc,
                         file_record=file_record,
-                        source_name=source_name
+                        source_name=source_name,
+                        graph_data=graph_data
                     )
                     yield element_data
                     
@@ -92,7 +126,7 @@ class ObsidianDocumentProcessor:
             logger.error(f"Failed to process document {file_record.path}: {e}")
             raise
             
-    def _create_enriched_content(self, normalized_doc: NormalizedDocument) -> str:
+    def _create_enriched_content(self, normalized_doc: NormalizedDocument, graph_data: Optional[Dict[str, Any]] = None) -> str:
         """Create enriched content that includes normalized metadata for Unstructured.io.
         
         This combines the normalized text with structured metadata comments
@@ -112,6 +146,7 @@ class ObsidianDocumentProcessor:
             "futurnal_metadata": {
                 "headings_count": len(normalized_doc.metadata.headings),
                 "links_count": len(normalized_doc.metadata.links),
+                "assets_count": len(normalized_doc.metadata.assets),
                 "tags_count": len(normalized_doc.metadata.tags),
                 "callouts_count": len(normalized_doc.metadata.callouts),
                 "tables_count": len(normalized_doc.metadata.tables),
@@ -144,9 +179,29 @@ class ObsidianDocumentProcessor:
                         "fold_state": callout.fold_state.value
                     }
                     for callout in normalized_doc.metadata.callouts
+                ],
+                "assets": [
+                    {
+                        "target": asset.target,
+                        "display_text": asset.display_text,
+                        "is_embed": asset.is_embed,
+                        "resolved_path": str(asset.resolved_path) if asset.resolved_path else None,
+                        "is_broken": asset.is_broken,
+                        "content_hash": asset.content_hash,
+                        "file_size": asset.file_size,
+                        "mime_type": asset.mime_type,
+                        "is_image": asset.is_image,
+                        "is_pdf": asset.is_pdf,
+                        "is_processable": asset.is_processable
+                    }
+                    for asset in normalized_doc.metadata.assets
                 ]
             }
         }
+
+        # Add link graph data if available
+        if graph_data:
+            metadata_summary["futurnal_link_graph"] = graph_data
         
         content_parts.append("<!-- FUTURNAL_STRUCTURED_METADATA")
         content_parts.append(json.dumps(metadata_summary, ensure_ascii=False))
@@ -163,7 +218,8 @@ class ObsidianDocumentProcessor:
         element: Any,
         normalized_doc: NormalizedDocument,
         file_record: FileRecord,
-        source_name: str
+        source_name: str,
+        graph_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Create element data dictionary for the NormalizationSink."""
         
@@ -189,7 +245,7 @@ class ObsidianDocumentProcessor:
         })
         
         # Add Futurnal-specific metadata
-        payload["metadata"]["futurnal"] = {
+        futurnal_metadata = {
             "normalizer_version": normalized_doc.provenance.normalizer_version,
             "content_checksum": normalized_doc.provenance.content_checksum,
             "metadata_checksum": normalized_doc.provenance.metadata_checksum,
@@ -200,6 +256,7 @@ class ObsidianDocumentProcessor:
                 "reading_time_minutes": normalized_doc.metadata.reading_time_minutes,
                 "headings_count": len(normalized_doc.metadata.headings),
                 "links_count": len(normalized_doc.metadata.links),
+                "assets_count": len(normalized_doc.metadata.assets),
                 "tags_count": len(normalized_doc.metadata.tags),
                 "callouts_count": len(normalized_doc.metadata.callouts),
                 "tables_count": len(normalized_doc.metadata.tables),
@@ -207,6 +264,12 @@ class ObsidianDocumentProcessor:
                 "footnotes_count": len(normalized_doc.metadata.footnotes),
             }
         }
+
+        # Add link graph data if available
+        if graph_data:
+            futurnal_metadata["link_graph"] = graph_data
+
+        payload["metadata"]["futurnal"] = futurnal_metadata
         
         # Extract and preserve structured metadata for semantic triple generation
         if normalized_doc.metadata.frontmatter:
@@ -230,6 +293,24 @@ class ObsidianDocumentProcessor:
                     "is_broken": link.is_broken
                 }
                 for link in normalized_doc.metadata.links
+            ]
+
+        if normalized_doc.metadata.assets:
+            payload["metadata"]["obsidian_assets"] = [
+                {
+                    "target": asset.target,
+                    "display_text": asset.display_text,
+                    "is_embed": asset.is_embed,
+                    "resolved_path": str(asset.resolved_path) if asset.resolved_path else None,
+                    "is_broken": asset.is_broken,
+                    "content_hash": asset.content_hash,
+                    "file_size": asset.file_size,
+                    "mime_type": asset.mime_type,
+                    "is_image": asset.is_image,
+                    "is_pdf": asset.is_pdf,
+                    "is_processable": asset.is_processable
+                }
+                for asset in normalized_doc.metadata.assets
             ]
         
         # Save element to disk

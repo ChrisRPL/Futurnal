@@ -101,6 +101,7 @@ class ResourceLimiter:
         max_content_size: int = 50 * 1024 * 1024,  # 50MB
         max_frontmatter_size: int = 1024 * 1024,   # 1MB
         max_links: int = 10000,
+        max_assets: int = 1000,
         max_tags: int = 1000,
         max_callouts: int = 1000,
         max_headings: int = 1000
@@ -108,6 +109,7 @@ class ResourceLimiter:
         self.max_content_size = max_content_size
         self.max_frontmatter_size = max_frontmatter_size
         self.max_links = max_links
+        self.max_assets = max_assets
         self.max_tags = max_tags
         self.max_callouts = max_callouts
         self.max_headings = max_headings
@@ -128,6 +130,7 @@ class ResourceLimiter:
         """Validate element count is within limits."""
         limits = {
             'links': self.max_links,
+            'assets': self.max_assets,
             'tags': self.max_tags,
             'callouts': self.max_callouts,
             'headings': self.max_headings,

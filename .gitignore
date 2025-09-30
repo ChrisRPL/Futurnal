@@ -26,7 +26,7 @@ coverage.xml
 .vscode/
 
 # Cursor editor artifacts
-.cursor/
+cursor/
 .cursor-tmp/
 
 # Local workspace outputs
