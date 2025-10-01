@@ -15,6 +15,8 @@ from futurnal.privacy.audit import AuditLogger
 from futurnal.privacy.consent import ConsentRegistry, ConsentRequiredError
 from futurnal.privacy.redaction import RedactionPolicy, build_policy, redact_path
 
+from .privacy_policy import ObsidianPrivacyPolicy, VaultConsentManager
+
 from ..local.config import LocalIngestionSource
 from ..local.connector import ElementSink, _log_extra
 from ..local.scanner import FileSnapshot, detect_deletions, walk_directory
@@ -23,6 +25,7 @@ from ..local.state import FileRecord, StateStore
 from .descriptor import ObsidianVaultDescriptor, VaultRegistry
 from .processor import ObsidianDocumentProcessor
 from .path_tracker import ObsidianPathTracker
+from .sync_metrics import SyncMetricsCollector
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +105,7 @@ class ObsidianVaultConnector:
         asset_processing_config: Optional[Dict[str, any]] = None,
         enable_sync_engine: bool = True,
         sync_engine_config: Optional[Dict[str, any]] = None,
+        metrics_collector: Optional[SyncMetricsCollector] = None,
     ) -> None:
         self._workspace_dir = Path(workspace_dir)
         self._workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -114,15 +118,21 @@ class ObsidianVaultConnector:
         self._audit_logger = audit_logger
         self._consent_registry = consent_registry
         self._asset_processing_config = asset_processing_config or {}
+        self._metrics_collector = metrics_collector
 
         # Initialize processor
         self._processor = ObsidianDocumentProcessor(
             workspace_dir=self._workspace_dir,
-            asset_processing_config=self._asset_processing_config
+            asset_processing_config=self._asset_processing_config,
+            metrics_collector=self._metrics_collector
         )
 
         # Path tracker for rename/move detection (initialized per vault)
         self._path_trackers: Dict[str, ObsidianPathTracker] = {}
+
+        # Privacy policies per vault
+        self._privacy_policies: Dict[str, ObsidianPrivacyPolicy] = {}
+        self._consent_managers: Dict[str, VaultConsentManager] = {}
 
         # Sync engine integration
         self._enable_sync_engine = enable_sync_engine
@@ -148,6 +158,46 @@ class ObsidianVaultConnector:
 
         return self._path_trackers[source.vault_id]
 
+    def _get_privacy_policy(self, source: ObsidianVaultSource) -> Optional[ObsidianPrivacyPolicy]:
+        """Get or create a privacy policy for the given vault source."""
+        if not source.vault_id:
+            return None
+
+        if source.vault_id not in self._privacy_policies:
+            # Get vault descriptor to build privacy policy
+            vault_descriptor = None
+            if self._vault_registry:
+                vault_descriptor = self._vault_registry.get(source.vault_id)
+
+            if vault_descriptor:
+                self._privacy_policies[source.vault_id] = ObsidianPrivacyPolicy.from_vault_descriptor(
+                    vault_descriptor,
+                    consent_registry=self._consent_registry
+                )
+            else:
+                # Fallback to basic privacy policy
+                from .descriptor import VaultPrivacySettings
+                default_settings = VaultPrivacySettings()
+                self._privacy_policies[source.vault_id] = ObsidianPrivacyPolicy(
+                    vault_id=source.vault_id,
+                    privacy_settings=default_settings,
+                    consent_registry=self._consent_registry
+                )
+
+        return self._privacy_policies[source.vault_id]
+
+    def _get_consent_manager(self, source: ObsidianVaultSource) -> Optional[VaultConsentManager]:
+        """Get or create a consent manager for the given vault source."""
+        if not source.vault_id:
+            return None
+
+        if source.vault_id not in self._consent_managers:
+            privacy_policy = self._get_privacy_policy(source)
+            if privacy_policy:
+                self._consent_managers[source.vault_id] = VaultConsentManager(privacy_policy)
+
+        return self._consent_managers[source.vault_id]
+
     def _handle_path_changes(self, path_changes: List, source: ObsidianVaultSource, job_id: str) -> None:
         """Handle path changes by updating graph relationships.
 
@@ -158,7 +208,12 @@ class ObsidianVaultConnector:
         """
         from .path_tracker import PathChange
 
-        policy = build_policy()
+        # Use vault-specific privacy policy for redaction
+        privacy_policy = self._get_privacy_policy(source)
+        if privacy_policy:
+            policy = privacy_policy.build_redaction_policy()
+        else:
+            policy = build_policy()
 
         for change in path_changes:
             try:
@@ -305,7 +360,13 @@ class ObsidianVaultConnector:
         """Ingest documents from Obsidian vault through specialized processing pipeline."""
 
         active_job_id = job_id or uuid.uuid4().hex
-        policy = build_policy()
+
+        # Use vault-specific privacy policy for redaction
+        privacy_policy = self._get_privacy_policy(source)
+        if privacy_policy:
+            policy = privacy_policy.build_redaction_policy()
+        else:
+            policy = build_policy()
 
         # Get vault descriptor
         vault_descriptor = None
@@ -330,47 +391,59 @@ class ObsidianVaultConnector:
             if not record.path.suffix.lower() in {'.md', '.markdown'}:
                 continue
                 
-            # Check consent for processing if required
-            if source.require_external_processing_consent:
-                if self._consent_registry is None:
-                    logger.warning(
-                        "Consent required but no registry available",
-                        extra=_log_extra(
-                            job_id=active_job_id,
-                            source=source.name,
-                            record=record,
-                            policy=policy,
-                            event="consent_unavailable",
-                        ),
-                    )
-                    continue
-                    
+            # Check consent using vault-specific privacy policy
+            consent_manager = self._get_consent_manager(source)
+            if consent_manager:
+                # Check basic vault scan consent
                 try:
-                    consent_granted = self._consent_registry.check_consent(
-                        scope=source.external_processing_scope,
-                        resource=str(record.path),
-                    )
-                    if not consent_granted:
+                    if not consent_manager.require_consent_for_scan():
                         logger.info(
-                            "Skipping file due to missing consent",
+                            "Skipping file due to missing vault scan consent",
                             extra=_log_extra(
                                 job_id=active_job_id,
                                 source=source.name,
                                 record=record,
                                 policy=policy,
-                                event="consent_denied",
+                                event="vault_scan_consent_denied",
                             ),
                         )
                         continue
                 except ConsentRequiredError:
                     logger.info(
-                        "Consent required for external processing",
+                        "Consent required for vault scanning",
                         extra=_log_extra(
                             job_id=active_job_id,
                             source=source.name,
                             record=record,
                             policy=policy,
-                            event="consent_required",
+                            event="vault_scan_consent_required",
+                        ),
+                    )
+                    continue
+
+                # Check content analysis consent for markdown processing
+                try:
+                    if not consent_manager.require_consent_for_content_analysis():
+                        logger.info(
+                            "Skipping file due to missing content analysis consent",
+                            extra=_log_extra(
+                                job_id=active_job_id,
+                                source=source.name,
+                                record=record,
+                                policy=policy,
+                                event="content_analysis_consent_denied",
+                            ),
+                        )
+                        continue
+                except ConsentRequiredError:
+                    logger.info(
+                        "Consent required for content analysis",
+                        extra=_log_extra(
+                            job_id=active_job_id,
+                            source=source.name,
+                            record=record,
+                            policy=policy,
+                            event="content_analysis_consent_required",
                         ),
                     )
                     continue
@@ -378,6 +451,15 @@ class ObsidianVaultConnector:
             # Process document through Obsidian pipeline
             try:
                 for element_data in self._processor.process_document(record, source.name):
+                    # Log link graph information if present
+                    self._log_processed_document_links(
+                        job_id=active_job_id,
+                        source=source,
+                        record=record,
+                        element_data=element_data,
+                        policy=policy,
+                    )
+
                     # Send to sink if available
                     if self._element_sink is not None:
                         try:
@@ -570,6 +652,269 @@ class ObsidianVaultConnector:
             self._audit_logger.record(event)
         except Exception as e:
             logger.error(f"Failed to log audit event: {e}")
+
+    def _log_link_graph_event(
+        self,
+        *,
+        job_id: str,
+        source: ObsidianVaultSource,
+        action: str,
+        status: str,
+        policy: RedactionPolicy,
+        metadata: Optional[dict] = None,
+    ) -> None:
+        """Log link graph events in a privacy-safe manner."""
+        if self._audit_logger is None:
+            return
+
+        privacy_policy = self._get_privacy_policy(source)
+        if privacy_policy and not privacy_policy.privacy_settings.audit_link_changes:
+            return  # Link change auditing disabled for this vault
+
+        from futurnal.orchestrator.audit import AuditEvent
+
+        event_metadata = {
+            "action": action,
+            "status": status,
+            "vault_id": source.vault_id,
+            "vault_name": source.vault_name,
+        }
+
+        if metadata:
+            # Filter out any sensitive metadata before logging
+            safe_metadata = self._sanitize_link_metadata(metadata, policy)
+            event_metadata.update(safe_metadata)
+
+        event = AuditEvent(
+            job_id=job_id,
+            source=source.name,
+            action=f"link_graph_{action}",
+            status=status,
+            timestamp=datetime.utcnow(),
+            metadata=event_metadata,
+        )
+
+        try:
+            self._audit_logger.record(event)
+        except Exception as e:
+            logger.error(f"Failed to log link graph audit event: {e}")
+
+    def _sanitize_link_metadata(self, metadata: dict, policy: RedactionPolicy) -> dict:
+        """Sanitize link metadata to remove sensitive information."""
+        safe_metadata = {}
+
+        for key, value in metadata.items():
+            if key in ["link_count", "edge_count", "node_count", "graph_size"]:
+                # Numerical statistics are safe
+                safe_metadata[key] = value
+            elif key in ["link_types", "relationship_types"]:
+                # Types are generally safe
+                safe_metadata[key] = value
+            elif key in ["source_path", "target_path", "file_path"]:
+                # Redact file paths
+                if isinstance(value, (str, Path)):
+                    redacted = policy.apply(Path(value))
+                    safe_metadata[f"{key}_hash"] = redacted.path_hash
+                    safe_metadata[f"{key}_redacted"] = redacted.redacted
+                else:
+                    safe_metadata[key] = "redacted"
+            elif key in ["note_titles", "link_text", "content"]:
+                # Never log content or titles
+                if isinstance(value, list):
+                    safe_metadata[f"{key}_count"] = len(value)
+                else:
+                    safe_metadata[f"{key}_present"] = bool(value)
+            elif key in ["checksums", "hashes"]:
+                # Hashes are safe to log
+                safe_metadata[key] = value
+            else:
+                # For unknown keys, err on the side of caution
+                if isinstance(value, (int, float, bool)):
+                    safe_metadata[key] = value
+                elif isinstance(value, list):
+                    safe_metadata[f"{key}_count"] = len(value)
+                else:
+                    safe_metadata[f"{key}_present"] = bool(value)
+
+        return safe_metadata
+
+    def _log_relationship_change(
+        self,
+        *,
+        job_id: str,
+        source: ObsidianVaultSource,
+        change_type: str,
+        source_file: Path,
+        target_file: Optional[Path] = None,
+        relationship_type: str = "wikilink",
+        policy: RedactionPolicy,
+    ) -> None:
+        """Log a specific relationship change."""
+        metadata = {
+            "change_type": change_type,
+            "relationship_type": relationship_type,
+            "source_path": source_file,
+        }
+
+        if target_file:
+            metadata["target_path"] = target_file
+
+        self._log_link_graph_event(
+            job_id=job_id,
+            source=source,
+            action="relationship_changed",
+            status="detected",
+            policy=policy,
+            metadata=metadata,
+        )
+
+    def _log_processed_document_links(
+        self,
+        *,
+        job_id: str,
+        source: ObsidianVaultSource,
+        record: 'FileRecord',  # Import type
+        element_data: dict,
+        policy: RedactionPolicy,
+    ) -> None:
+        """Log link information from processed documents."""
+        try:
+            # Extract link information from element data
+            metadata = {}
+
+            # Check for wikilinks in metadata
+            if 'metadata' in element_data:
+                doc_metadata = element_data['metadata']
+
+                if 'obsidian_links' in doc_metadata:
+                    links = doc_metadata['obsidian_links']
+                    if links:
+                        metadata['wikilink_count'] = len(links)
+                        metadata['link_types'] = list(set(link.get('type', 'wikilink') for link in links))
+
+                        # Log each significant link (without content)
+                        for link in links[:5]:  # Limit to first 5 for auditing
+                            if link.get('target'):
+                                self._log_relationship_change(
+                                    job_id=job_id,
+                                    source=source,
+                                    change_type="link_detected",
+                                    source_file=record.path,
+                                    target_file=Path(source.root_path) / link['target'] if link['target'] else None,
+                                    relationship_type=link.get('type', 'wikilink'),
+                                    policy=policy,
+                                )
+
+                if 'obsidian_tags' in doc_metadata:
+                    tags = doc_metadata['obsidian_tags']
+                    if tags:
+                        metadata['tag_count'] = len(tags)
+
+                if 'obsidian_callouts' in doc_metadata:
+                    callouts = doc_metadata['obsidian_callouts']
+                    if callouts:
+                        metadata['callout_count'] = len(callouts)
+                        metadata['callout_types'] = list(set(c.get('type', 'unknown') for c in callouts))
+
+            # Check for asset references
+            if 'text' in element_data or 'content' in element_data:
+                content = element_data.get('text', element_data.get('content', ''))
+                if content and isinstance(content, str):
+                    # Look for image references (basic detection)
+                    import re
+                    image_refs = re.findall(r'!\[\[([^\]]+)\]\]|!\[([^\]]*)\]\(([^)]+)\)', content)
+                    if image_refs:
+                        metadata['image_reference_count'] = len(image_refs)
+
+            if metadata:
+                self._log_link_graph_event(
+                    job_id=job_id,
+                    source=source,
+                    action="document_processed",
+                    status="success",
+                    policy=policy,
+                    metadata={
+                        **metadata,
+                        "source_path": record.path,
+                        "file_size": record.size,
+                        "checksum": record.sha256[:16],  # Truncated for privacy
+                    },
+                )
+
+        except Exception as e:
+            logger.debug(f"Failed to log document links: {e}")
+
+    def _log_asset_processing_event(
+        self,
+        *,
+        job_id: str,
+        source: ObsidianVaultSource,
+        asset_path: Path,
+        action: str,
+        status: str,
+        policy: RedactionPolicy,
+        metadata: Optional[dict] = None,
+    ) -> None:
+        """Log asset processing events with privacy protection."""
+        if self._audit_logger is None:
+            return
+
+        # Check if asset processing should be audited
+        consent_manager = self._get_consent_manager(source)
+        if consent_manager:
+            try:
+                if not consent_manager.require_consent_for_asset_extraction():
+                    return  # Asset processing not consented
+            except ConsentRequiredError:
+                return  # No consent for asset processing
+
+        from futurnal.orchestrator.audit import AuditEvent
+
+        # Build safe metadata
+        safe_metadata = {
+            "action": action,
+            "status": status,
+            "vault_id": source.vault_id,
+            "vault_name": source.vault_name,
+        }
+
+        if metadata:
+            # Sanitize asset metadata
+            for key, value in metadata.items():
+                if key in ["file_size", "processing_time_ms", "extracted_text_length"]:
+                    safe_metadata[key] = value
+                elif key in ["file_type", "mime_type", "processor_used"]:
+                    safe_metadata[key] = value
+                elif key in ["ocr_language", "extraction_method"]:
+                    safe_metadata[key] = value
+                elif key == "asset_path":
+                    redacted = policy.apply(Path(value))
+                    safe_metadata["asset_path_hash"] = redacted.path_hash
+                    safe_metadata["asset_path_redacted"] = redacted.redacted
+                elif key == "error":
+                    safe_metadata["error_message"] = str(value)[:200]  # Truncate errors
+                else:
+                    # Skip unknown metadata for privacy
+                    continue
+
+        # Redact the asset path
+        redacted_path = policy.apply(asset_path)
+
+        event = AuditEvent(
+            job_id=job_id,
+            source=source.name,
+            action=f"asset_{action}",
+            status=status,
+            timestamp=datetime.utcnow(),
+            redacted_path=redacted_path.redacted,
+            path_hash=redacted_path.path_hash,
+            metadata=safe_metadata,
+        )
+
+        try:
+            self._audit_logger.record(event)
+        except Exception as e:
+            logger.error(f"Failed to log asset processing audit event: {e}")
 
     # Sync Engine Integration Methods
 

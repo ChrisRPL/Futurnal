@@ -19,12 +19,14 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from futurnal.orchestrator.models import IngestionJob, JobPriority, JobType
 from futurnal.orchestrator.queue import JobQueue
+from futurnal.pipeline.graph import Neo4jPKGWriter
 from futurnal.privacy.audit import AuditLogger
 from futurnal.privacy.redaction import RedactionPolicy, build_policy
 
 from ..local.state import FileRecord, StateStore
 from .connector import ObsidianVaultConnector, ObsidianVaultSource
 from .path_tracker import ObsidianPathTracker, PathChange
+from .folder_cascade_detector import FolderCascade
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +108,7 @@ class ObsidianSyncEngine:
         job_queue: JobQueue,
         state_store: StateStore,
         audit_logger: Optional[AuditLogger] = None,
+        graph_writer: Optional[Neo4jPKGWriter] = None,
         batch_window_seconds: float = 2.0,
         max_batch_size: int = 50,
         max_retry_attempts: int = 3,
@@ -116,6 +119,7 @@ class ObsidianSyncEngine:
         self._job_queue = job_queue
         self._state_store = state_store
         self._audit_logger = audit_logger
+        self._graph_writer = graph_writer
 
         # Batching configuration
         self._batch_window_seconds = batch_window_seconds
@@ -274,6 +278,9 @@ class ObsidianSyncEngine:
                 vault_id,
                 path_changes_count=len(path_changes)
             )
+
+        # Update knowledge graph for each path change
+        await self._update_graph_for_path_changes(path_changes, vault_id)
 
         # Create high-priority events for path changes
         sync_events = []
@@ -648,6 +655,185 @@ class ObsidianSyncEngine:
             SyncPriority.BACKGROUND: JobPriority.LOW,
         }
         return mapping.get(sync_priority, JobPriority.NORMAL)
+
+    async def _update_graph_for_path_changes(
+        self,
+        path_changes: List[PathChange],
+        vault_id: str
+    ) -> None:
+        """Update knowledge graph for path changes to preserve relationships.
+
+        Args:
+            path_changes: List of detected path changes
+            vault_id: ID of the vault containing the changes
+        """
+        if not self._graph_writer:
+            logger.debug("No graph writer configured, skipping graph updates")
+            return
+
+        if not path_changes:
+            return
+
+        logger.info(f"Updating knowledge graph for {len(path_changes)} path changes")
+
+        successful_updates = 0
+        failed_updates = 0
+
+        for change in path_changes:
+            try:
+                # Update the graph node path while preserving the note identity
+                # Note: With UUID system, old_note_id and new_note_id are the same
+                self._graph_writer.update_note_path(
+                    vault_id=vault_id,
+                    note_id=change.new_note_id,  # Use the persistent UUID
+                    old_path=str(change.old_path),
+                    new_path=str(change.new_path)
+                )
+
+                successful_updates += 1
+                logger.debug(f"Updated graph for note {change.new_note_id}: {change.old_path} -> {change.new_path}")
+
+            except Exception as e:
+                failed_updates += 1
+                logger.error(f"Failed to update graph for path change {change.old_path} -> {change.new_path}: {e}")
+
+        # Log summary
+        logger.info(f"Graph update completed: {successful_updates} successful, {failed_updates} failed")
+
+        # Record metrics if available
+        if self._metrics_collector:
+            self._metrics_collector.increment_counter("graph_updates_successful", successful_updates)
+            self._metrics_collector.increment_counter("graph_updates_failed", failed_updates)
+
+        # Log audit event
+        await self._log_audit_event(
+            action="graph_path_updates",
+            status="completed",
+            metadata={
+                "vault_id": vault_id,
+                "total_changes": len(path_changes),
+                "successful_updates": successful_updates,
+                "failed_updates": failed_updates
+            }
+        )
+
+    async def handle_folder_cascades(
+        self,
+        folder_cascades: List[FolderCascade],
+        vault_id: str
+    ) -> None:
+        """Handle folder cascade operations atomically.
+
+        Args:
+            folder_cascades: List of detected folder cascades
+            vault_id: ID of the vault containing the cascades
+        """
+        if not folder_cascades:
+            return
+
+        logger.info(f"Processing {len(folder_cascades)} folder cascades for vault {vault_id}")
+
+        for cascade in folder_cascades:
+            await self._process_folder_cascade_atomically(cascade, vault_id)
+
+    async def _process_folder_cascade_atomically(
+        self,
+        cascade: FolderCascade,
+        vault_id: str
+    ) -> None:
+        """Process a single folder cascade operation atomically.
+
+        Args:
+            cascade: The folder cascade to process
+            vault_id: ID of the vault containing the cascade
+        """
+        logger.info(
+            f"Processing folder cascade {cascade.cascade_id}: "
+            f"{cascade.old_folder_path} -> {cascade.new_folder_path} "
+            f"({cascade.get_file_count()} files)"
+        )
+
+        # Record metrics
+        if self._metrics_collector:
+            self._metrics_collector.increment_counter("folder_cascades_processed")
+            self._metrics_collector.record_event(
+                "folder_cascade_processed",
+                vault_id,
+                cascade_type=cascade.operation_type,
+                file_count=cascade.get_file_count(),
+                markdown_count=cascade.get_markdown_count()
+            )
+
+        success_count = 0
+        failure_count = 0
+
+        try:
+            # Process all affected files in a transaction-like manner
+            # First, update the knowledge graph for all files atomically
+            if self._graph_writer:
+                for change in cascade.affected_files:
+                    try:
+                        self._graph_writer.update_note_path(
+                            vault_id=vault_id,
+                            note_id=change.new_note_id,
+                            old_path=str(change.old_path),
+                            new_path=str(change.new_path)
+                        )
+                        success_count += 1
+                    except Exception as e:
+                        failure_count += 1
+                        logger.error(f"Failed to update graph for {change.old_path}: {e}")
+
+            # Create a single high-priority batch for all cascade files
+            sync_events = []
+            for change in cascade.affected_files:
+                event = SyncEvent(
+                    event_type=SyncEventType.FILE_MOVED,
+                    file_path=change.new_path,
+                    vault_id=vault_id,
+                    priority=SyncPriority.CRITICAL,
+                    metadata={
+                        "path_change": change.to_dict(),
+                        "cascade_id": cascade.cascade_id,
+                        "cascade_operation": cascade.operation_type,
+                        "is_folder_cascade": True,
+                    }
+                )
+                sync_events.append(event)
+
+            # Process the entire cascade as a single atomic batch
+            batch = SyncBatch(
+                batch_id=f"folder_cascade_{cascade.cascade_id}",
+                events=sync_events,
+                priority=SyncPriority.CRITICAL
+            )
+
+            await self._process_sync_batch(batch)
+
+            logger.info(
+                f"Folder cascade {cascade.cascade_id} completed: "
+                f"{success_count} successful graph updates, {failure_count} failures"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to process folder cascade {cascade.cascade_id}: {e}")
+            failure_count = len(cascade.affected_files)
+
+        # Log audit event for the cascade
+        await self._log_audit_event(
+            action="folder_cascade_processed",
+            status="completed" if failure_count == 0 else "partial_failure",
+            metadata={
+                "vault_id": vault_id,
+                "cascade_id": cascade.cascade_id,
+                "operation_type": cascade.operation_type,
+                "total_files": cascade.get_file_count(),
+                "successful_updates": success_count,
+                "failed_updates": failure_count,
+                "old_folder": str(cascade.old_folder_path),
+                "new_folder": str(cascade.new_folder_path)
+            }
+        )
 
     async def _log_audit_event(
         self,

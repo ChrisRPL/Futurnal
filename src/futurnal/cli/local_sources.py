@@ -30,6 +30,20 @@ from ..orchestrator.queue import JobQueue, JobStatus
 from ..privacy import AuditLogger, ConsentRegistry, redact_path
 from ..privacy.audit import AuditEvent
 from ..ingestion.obsidian.descriptor import VaultRegistry, ObsidianVaultDescriptor
+from ..ingestion.obsidian.quality_gate import (
+    QualityGateConfig,
+    QualityGateEvaluator,
+    create_quality_gate_evaluator
+)
+from ..ingestion.obsidian.report_generator import (
+    ReportGenerator,
+    JSONReportFormatter,
+    MarkdownReportFormatter,
+    create_report_generator,
+    create_json_formatter,
+    create_markdown_formatter
+)
+from ..ingestion.obsidian.sync_metrics import create_metrics_collector
 
 app = typer.Typer(help="Manage Futurnal local data sources")
 obsidian_app = typer.Typer(help="Manage Obsidian vault sources")
@@ -413,6 +427,238 @@ def obsidian_to_local_source(
         priority=priority,
     )
     typer.echo(json.dumps(local_source.model_dump(mode="json"), indent=2))
+
+
+@obsidian_app.command("report")
+def obsidian_report(
+    vault_id: str = typer.Argument(..., help="Vault ID to generate report for"),
+    output_format: str = typer.Option("markdown", "--format", help="Output format: json, markdown"),
+    output_path: Optional[Path] = typer.Option(None, "--output", help="Output file path"),
+    registry_path: Optional[Path] = typer.Option(None, help="Override registry directory"),
+    workspace_path: Optional[Path] = typer.Option(None, help="Path to ingestion workspace"),
+    evaluation_hours: int = typer.Option(1, "--hours", help="Hours of metrics to evaluate"),
+) -> None:
+    """Generate comprehensive ingestion report for an Obsidian vault."""
+    try:
+        # Load vault registry and descriptor
+        registry = VaultRegistry(registry_root=registry_path) if registry_path else VaultRegistry()
+        descriptor = registry.get(vault_id)
+        if not descriptor:
+            typer.echo(f"Vault {vault_id} not found in registry", err=True)
+            raise typer.Exit(code=1)
+
+        # Set up workspace and metrics collection
+        workspace = _resolve_workspace(workspace_path)
+        metrics_collector = create_metrics_collector()
+
+        # Generate quality gate evaluation if we have metrics
+        quality_result = None
+        try:
+            # Use vault-specific quality gate settings
+            vault_settings = descriptor.quality_gate_settings
+            config = QualityGateConfig(
+                enable_strict_mode=vault_settings.strict_mode,
+                max_error_rate=vault_settings.max_error_rate,
+                max_critical_error_rate=vault_settings.max_critical_error_rate,
+                max_parse_failure_rate=vault_settings.max_parse_failure_rate,
+                max_broken_link_rate=vault_settings.max_broken_link_rate,
+                min_throughput_events_per_second=vault_settings.min_throughput_events_per_second,
+                max_avg_processing_time_seconds=vault_settings.max_avg_processing_time_seconds,
+                min_consent_coverage_rate=vault_settings.min_consent_coverage_rate,
+                min_asset_processing_success_rate=vault_settings.min_asset_processing_success_rate,
+                max_quarantine_rate=vault_settings.max_quarantine_rate,
+                evaluation_time_window_hours=evaluation_hours,
+                require_minimum_sample_size=vault_settings.require_minimum_sample_size
+            )
+
+            if vault_settings.enable_quality_gates:
+                evaluator = create_quality_gate_evaluator(config=config, metrics_collector=metrics_collector)
+                quality_result = evaluator.evaluate_vault_quality(vault_id, metrics_collector)
+            else:
+                typer.echo("Quality gates disabled for this vault", err=True)
+        except Exception as e:
+            typer.echo(f"Warning: Could not evaluate quality gate: {e}", err=True)
+
+        # Generate comprehensive report
+        generator = create_report_generator()
+        report = generator.generate_report(
+            vault_id=vault_id,
+            vault_name=descriptor.name,
+            quality_gate_result=quality_result
+        )
+
+        # Format and output report
+        if output_format.lower() == "json":
+            formatter = create_json_formatter()
+            content = formatter.format_report(report)
+            if output_path:
+                formatter.write_report(report, output_path)
+                typer.echo(f"JSON report written to {output_path}")
+            else:
+                typer.echo(content)
+        else:
+            formatter = create_markdown_formatter()
+            content = formatter.format_report(report)
+            if output_path:
+                formatter.write_report(report, output_path)
+                typer.echo(f"Markdown report written to {output_path}")
+            else:
+                typer.echo(content)
+
+        # Exit with appropriate code for CI/CD integration
+        raise typer.Exit(code=report.exit_code)
+
+    except Exception as e:
+        typer.echo(f"Failed to generate report: {e}", err=True)
+        raise typer.Exit(code=2)
+
+
+@obsidian_app.command("quality-gate")
+def obsidian_quality_gate(
+    vault_id: str = typer.Argument(..., help="Vault ID to evaluate"),
+    strict_mode: bool = typer.Option(False, "--strict", help="Treat warnings as failures"),
+    output_format: str = typer.Option("summary", "--format", help="Output format: summary, json, markdown"),
+    output_path: Optional[Path] = typer.Option(None, "--output", help="Output file path"),
+    registry_path: Optional[Path] = typer.Option(None, help="Override registry directory"),
+    workspace_path: Optional[Path] = typer.Option(None, help="Path to ingestion workspace"),
+    evaluation_hours: int = typer.Option(1, "--hours", help="Hours of metrics to evaluate"),
+    max_error_rate: Optional[float] = typer.Option(None, help="Override max error rate threshold"),
+    min_throughput: Optional[float] = typer.Option(None, help="Override min throughput threshold"),
+) -> None:
+    """Evaluate quality gate for an Obsidian vault with configurable thresholds."""
+    try:
+        # Load vault registry and descriptor
+        registry = VaultRegistry(registry_root=registry_path) if registry_path else VaultRegistry()
+        descriptor = registry.get(vault_id)
+        if not descriptor:
+            typer.echo(f"Vault {vault_id} not found in registry", err=True)
+            raise typer.Exit(code=1)
+
+        # Set up workspace and metrics collection
+        workspace = _resolve_workspace(workspace_path)
+        metrics_collector = create_metrics_collector()
+
+        # Start with vault-specific quality gate settings
+        vault_settings = descriptor.quality_gate_settings
+
+        # Check if quality gates are enabled for this vault
+        if not vault_settings.enable_quality_gates:
+            typer.echo(f"Quality gates disabled for vault {vault_id}", err=True)
+            typer.echo("Enable quality gates in vault configuration to use this feature", err=True)
+            raise typer.Exit(code=1)
+
+        # Configure quality gate with vault settings and custom overrides
+        config = QualityGateConfig(
+            enable_strict_mode=strict_mode or vault_settings.strict_mode,
+            max_error_rate=max_error_rate or vault_settings.max_error_rate,
+            max_critical_error_rate=vault_settings.max_critical_error_rate,
+            max_parse_failure_rate=vault_settings.max_parse_failure_rate,
+            max_broken_link_rate=vault_settings.max_broken_link_rate,
+            min_throughput_events_per_second=min_throughput or vault_settings.min_throughput_events_per_second,
+            min_critical_throughput_events_per_second=vault_settings.min_throughput_events_per_second * 0.5,
+            max_avg_processing_time_seconds=vault_settings.max_avg_processing_time_seconds,
+            max_critical_processing_time_seconds=vault_settings.max_avg_processing_time_seconds * 2,
+            min_consent_coverage_rate=vault_settings.min_consent_coverage_rate,
+            min_critical_consent_coverage_rate=vault_settings.min_consent_coverage_rate * 0.8,
+            min_asset_processing_success_rate=vault_settings.min_asset_processing_success_rate,
+            min_critical_asset_success_rate=vault_settings.min_asset_processing_success_rate * 0.8,
+            max_quarantine_rate=vault_settings.max_quarantine_rate,
+            max_critical_quarantine_rate=vault_settings.max_quarantine_rate * 2,
+            evaluation_time_window_hours=evaluation_hours,
+            require_minimum_sample_size=vault_settings.require_minimum_sample_size
+        )
+
+        # Apply additional custom thresholds if provided
+        if max_error_rate is not None:
+            config.max_critical_error_rate = max_error_rate * 2
+
+        if min_throughput is not None:
+            config.min_critical_throughput_events_per_second = min_throughput * 0.5
+
+        # Evaluate quality gate
+        evaluator = create_quality_gate_evaluator(config=config, metrics_collector=metrics_collector)
+        result = evaluator.evaluate_vault_quality(vault_id, metrics_collector)
+
+        # Generate output based on format
+        if output_format.lower() == "json":
+            # Generate full report with JSON output
+            generator = create_report_generator()
+            report = generator.generate_report(
+                vault_id=vault_id,
+                vault_name=descriptor.name,
+                quality_gate_result=result
+            )
+            formatter = create_json_formatter()
+            content = formatter.format_report(report)
+
+            if output_path:
+                formatter.write_report(report, output_path)
+                typer.echo(f"JSON quality gate report written to {output_path}")
+            else:
+                typer.echo(content)
+
+        elif output_format.lower() == "markdown":
+            # Generate full report with Markdown output
+            generator = create_report_generator()
+            report = generator.generate_report(
+                vault_id=vault_id,
+                vault_name=descriptor.name,
+                quality_gate_result=result
+            )
+            formatter = create_markdown_formatter()
+            content = formatter.format_report(report)
+
+            if output_path:
+                formatter.write_report(report, output_path)
+                typer.echo(f"Markdown quality gate report written to {output_path}")
+            else:
+                typer.echo(content)
+
+        else:
+            # Summary output for quick CI/CD feedback
+            status_emoji = {
+                "pass": "✅",
+                "warn": "⚠️",
+                "fail": "❌"
+            }
+
+            emoji = status_emoji.get(result.status.value, "ℹ️")
+            typer.echo(f"{emoji} Quality Gate: {result.status.value.upper()}")
+            typer.echo(f"Vault: {descriptor.name}")
+            typer.echo(f"Evaluated: {result.evaluated_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            typer.echo(f"Files processed: {result.total_files_processed:,}")
+            typer.echo(f"Success rate: {((result.total_files_processed - result.total_files_failed) / max(result.total_files_processed, 1))*100:.1f}%")
+
+            if result.has_failures:
+                typer.echo(f"\n❌ CRITICAL ISSUES ({len(result.critical_issues)}):")
+                for issue in result.critical_issues:
+                    typer.echo(f"   • {issue}")
+
+            if result.has_warnings:
+                typer.echo(f"\n⚠️  WARNINGS ({len(result.warnings)}):")
+                for warning in result.warnings:
+                    typer.echo(f"   • {warning}")
+
+            if result.recommendations:
+                typer.echo(f"\n💡 RECOMMENDATIONS:")
+                for i, rec in enumerate(result.recommendations[:5], 1):
+                    typer.echo(f"   {i}. {rec}")
+
+        # Exit with appropriate code for CI/CD integration
+        exit_code = result.get_exit_code()
+
+        if exit_code == 0:
+            typer.echo(f"\n✅ Quality gate PASSED")
+        elif exit_code == 1:
+            typer.echo(f"\n⚠️  Quality gate PASSED with warnings")
+        else:
+            typer.echo(f"\n❌ Quality gate FAILED")
+
+        raise typer.Exit(code=exit_code)
+
+    except Exception as e:
+        typer.echo(f"Failed to evaluate quality gate: {e}", err=True)
+        raise typer.Exit(code=2)
 
 
 app.add_typer(obsidian_app, name="obsidian")

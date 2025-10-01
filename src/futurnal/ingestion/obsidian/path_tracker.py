@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 from ..local.state import FileRecord, StateStore
+from .identity_manager import NoteIdentityManager
 
 logger = logging.getLogger(__name__)
 
@@ -76,13 +77,20 @@ class ObsidianPathTracker:
         state_store: StateStore,
         *,
         similarity_threshold: float = 0.8,
-        max_tracking_history: int = 1000
+        max_tracking_history: int = 1000,
+        identity_manager: Optional[NoteIdentityManager] = None
     ):
         self.vault_id = vault_id
         self.vault_root = Path(vault_root)
         self.state_store = state_store
         self.similarity_threshold = similarity_threshold
         self.max_tracking_history = max_tracking_history
+
+        # Initialize identity manager
+        if identity_manager is None:
+            self.identity_manager = NoteIdentityManager(vault_id, vault_root)
+        else:
+            self.identity_manager = identity_manager
 
         # Tracking state
         self.path_changes: List[PathChange] = []
@@ -153,19 +161,35 @@ class ObsidianPathTracker:
         return detected_changes
 
     def _create_path_change(self, old_record: FileRecord, new_record: FileRecord) -> Optional[PathChange]:
-        """Create a PathChange object from old and new file records."""
+        """Create a PathChange object from old and new file records.
+
+        With the UUID system, the note ID remains constant across renames/moves.
+        We preserve the existing UUID and update its path mapping.
+        """
         try:
-            # Generate note IDs
-            old_note_id = self._path_to_note_id(old_record.path)
-            new_note_id = self._path_to_note_id(new_record.path)
+            # Get existing note ID for the old path (should already exist)
+            note_id = self.identity_manager.get_note_id_by_path(old_record.path)
+
+            if note_id is None:
+                # This shouldn't happen in normal rename detection, but handle gracefully
+                # by creating a new UUID and associating it with the old path first
+                logger.warning(f"No existing note ID found for {old_record.path}, creating new UUID")
+                note_id = self.identity_manager.get_note_id(old_record.path)
+
+            # Update the identity manager to reflect the path change
+            success = self.identity_manager.update_path(note_id, new_record.path)
+            if not success:
+                logger.error(f"Failed to update path for note ID {note_id}")
+                return None
 
             # Determine change type
             change_type = self._determine_change_type(old_record.path, new_record.path)
 
+            # Both old and new note IDs are the same - the note identity persists
             change = PathChange(
                 vault_id=self.vault_id,
-                old_note_id=old_note_id,
-                new_note_id=new_note_id,
+                old_note_id=note_id,
+                new_note_id=note_id,  # Same UUID - preserves identity
                 old_path=old_record.path,
                 new_path=new_record.path,
                 old_checksum=old_record.sha256,
@@ -173,6 +197,7 @@ class ObsidianPathTracker:
                 change_type=change_type
             )
 
+            logger.info(f"Created path change for note {note_id}: {old_record.path} -> {new_record.path}")
             return change
 
         except Exception as e:
@@ -180,13 +205,12 @@ class ObsidianPathTracker:
             return None
 
     def _path_to_note_id(self, path: Path) -> str:
-        """Convert file path to note ID."""
-        try:
-            relative_path = path.relative_to(self.vault_root)
-            return str(relative_path.with_suffix(''))
-        except ValueError:
-            # Path is not relative to vault root
-            return str(path.with_suffix(''))
+        """Get persistent UUID-based note ID for the given path.
+
+        This method uses the NoteIdentityManager to ensure note IDs remain
+        stable across renames and moves, preventing duplicate nodes.
+        """
+        return self.identity_manager.get_note_id(path)
 
     def _determine_change_type(self, old_path: Path, new_path: Path) -> str:
         """Determine the type of path change."""
@@ -292,6 +316,27 @@ class ObsidianPathTracker:
             "content_changes": content_changes,
             **change_type_counts
         }
+
+    def migrate_to_uuid_system(self) -> Dict[str, str]:
+        """Migrate from path-based note IDs to UUID-based system.
+
+        This method should be called once when transitioning existing vaults
+        to the new UUID system.
+
+        Returns:
+            Dictionary mapping old path-based IDs to new UUID-based IDs
+        """
+        logger.info("Starting migration to UUID-based note ID system")
+        migration_map = self.identity_manager.migrate_from_path_ids(self.state_store)
+
+        # Update internal tracking state
+        for old_id, new_id in migration_map.items():
+            if old_id in self.note_id_map:
+                # Update existing mapping
+                self.note_id_map[old_id] = new_id
+
+        logger.info(f"Migration completed: {len(migration_map)} notes migrated")
+        return migration_map
 
     def clear_tracking_data(self) -> None:
         """Clear all tracking data (useful for testing or reset)."""

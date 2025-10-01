@@ -11,10 +11,13 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
 from .assets import ObsidianAsset
 from .security import SecurityError
+
+if TYPE_CHECKING:
+    from .sync_metrics import SyncMetricsCollector
 
 logger = logging.getLogger(__name__)
 
@@ -93,13 +96,22 @@ class AssetTextExtractorConfig:
 class AssetTextExtractor:
     """Extracts text from assets using Unstructured.io with configurable options."""
 
-    def __init__(self, config: Optional[AssetTextExtractorConfig] = None):
+    def __init__(
+        self,
+        config: Optional[AssetTextExtractorConfig] = None,
+        metrics_collector: Optional[SyncMetricsCollector] = None,
+        vault_id: Optional[str] = None
+    ):
         """Initialize asset text extractor.
 
         Args:
             config: Optional configuration. Uses defaults if not provided.
+            metrics_collector: Optional metrics collector for tracking success/failure
+            vault_id: Vault ID for metrics labeling
         """
         self.config = config or AssetTextExtractorConfig()
+        self.metrics_collector = metrics_collector
+        self.vault_id = vault_id
 
         # Check if Unstructured.io is available
         if not UNSTRUCTURED_AVAILABLE:
@@ -135,6 +147,13 @@ class AssetTextExtractor:
 
         # Check file size limits
         if asset.file_size and asset.file_size > self.config.max_file_size_bytes:
+            # Record failure due to size limit
+            if self.metrics_collector and self.vault_id:
+                self.metrics_collector.increment_counter(
+                    "asset_processing_failure",
+                    labels={"vault_id": self.vault_id, "asset_type": "unknown", "method": "size_check", "error_type": "FileSizeLimitExceeded"}
+                )
+
             logger.warning(
                 f"Skipping {asset.target}: File size {asset.file_size} bytes exceeds limit "
                 f"{self.config.max_file_size_bytes} bytes"
@@ -156,6 +175,15 @@ class AssetTextExtractor:
         except Exception as e:
             logger.error(f"Failed to extract text from {asset.target}: {e}")
             self.errors_encountered += 1
+
+            # Record general processing failure
+            if self.metrics_collector and self.vault_id:
+                asset_type = "image" if asset.is_image else "pdf" if asset.is_pdf else "unknown"
+                self.metrics_collector.increment_counter(
+                    "asset_processing_failure",
+                    labels={"vault_id": self.vault_id, "asset_type": asset_type, "method": "general", "error_type": type(e).__name__}
+                )
+
             return self._create_error_result(asset, str(e))
 
     def _extract_from_image(self, asset: ObsidianAsset) -> AssetTextExtraction:
@@ -181,6 +209,13 @@ class AssetTextExtractor:
             self.total_text_extracted += len(extracted_text)
             self.total_processing_time_ms += processing_time
 
+            # Record successful asset processing metrics
+            if self.metrics_collector and self.vault_id:
+                self.metrics_collector.increment_counter(
+                    "asset_processing_success",
+                    labels={"vault_id": self.vault_id, "asset_type": "image", "method": "ocr"}
+                )
+
             logger.debug(
                 f"Extracted {len(extracted_text)} characters from image {asset.target} "
                 f"in {processing_time}ms using OCR"
@@ -198,6 +233,13 @@ class AssetTextExtractor:
         except Exception as e:
             processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
             self.errors_encountered += 1
+
+            # Record failed asset processing metrics
+            if self.metrics_collector and self.vault_id:
+                self.metrics_collector.increment_counter(
+                    "asset_processing_failure",
+                    labels={"vault_id": self.vault_id, "asset_type": "image", "method": "ocr", "error_type": type(e).__name__}
+                )
 
             logger.error(f"OCR failed for image {asset.target}: {e}")
             return self._create_error_result(asset, f"OCR failed: {e}", processing_time)
@@ -229,6 +271,13 @@ class AssetTextExtractor:
             self.total_text_extracted += len(extracted_text)
             self.total_processing_time_ms += processing_time
 
+            # Record successful asset processing metrics
+            if self.metrics_collector and self.vault_id:
+                self.metrics_collector.increment_counter(
+                    "asset_processing_success",
+                    labels={"vault_id": self.vault_id, "asset_type": "pdf", "method": extraction_method}
+                )
+
             logger.debug(
                 f"Extracted {len(extracted_text)} characters from PDF {asset.target} "
                 f"in {processing_time}ms using {extraction_method}"
@@ -246,6 +295,13 @@ class AssetTextExtractor:
         except Exception as e:
             processing_time = int((datetime.utcnow() - start_time).total_seconds() * 1000)
             self.errors_encountered += 1
+
+            # Record failed asset processing metrics
+            if self.metrics_collector and self.vault_id:
+                self.metrics_collector.increment_counter(
+                    "asset_processing_failure",
+                    labels={"vault_id": self.vault_id, "asset_type": "pdf", "method": "pdf_parse", "error_type": type(e).__name__}
+                )
 
             logger.error(f"PDF extraction failed for {asset.target}: {e}")
             return self._create_error_result(asset, f"PDF extraction failed: {e}", processing_time)
@@ -334,7 +390,8 @@ class AssetProcessingPipeline:
         self,
         vault_root: Path,
         vault_id: str,
-        extractor_config: Optional[AssetTextExtractorConfig] = None
+        extractor_config: Optional[AssetTextExtractorConfig] = None,
+        metrics_collector: Optional[SyncMetricsCollector] = None
     ):
         """Initialize asset processing pipeline.
 
@@ -342,6 +399,7 @@ class AssetProcessingPipeline:
             vault_root: Root directory of the vault
             vault_id: Unique identifier for the vault
             extractor_config: Optional text extraction configuration
+            metrics_collector: Optional metrics collector for tracking success/failure
         """
         from .assets import AssetPipeline  # Import here to avoid circular imports
 
@@ -350,7 +408,7 @@ class AssetProcessingPipeline:
 
         # Initialize components
         self.asset_pipeline = AssetPipeline(vault_root, vault_id)
-        self.text_extractor = AssetTextExtractor(extractor_config)
+        self.text_extractor = AssetTextExtractor(extractor_config, metrics_collector, vault_id)
 
     def process_document_assets(
         self,

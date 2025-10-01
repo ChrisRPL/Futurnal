@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from ..local.state import FileRecord, StateStore
 from .path_tracker import ObsidianPathTracker, PathChange
+from .folder_cascade_detector import FolderCascadeDetector, FolderCascade
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,7 @@ class AdvancedChangeDetector:
         vault_root: Path,
         state_store: StateStore,
         path_tracker: Optional[ObsidianPathTracker] = None,
+        folder_cascade_detector: Optional[FolderCascadeDetector] = None,
         *,
         content_similarity_threshold: float = 0.8,
         name_similarity_threshold: float = 0.7,
@@ -89,11 +91,21 @@ class AdvancedChangeDetector:
         max_similarity_candidates: int = 10,
         enable_content_analysis: bool = True,
         enable_metadata_analysis: bool = True,
+        enable_folder_cascade_detection: bool = True,
     ):
         self.vault_id = vault_id
         self.vault_root = Path(vault_root)
         self.state_store = state_store
         self.path_tracker = path_tracker
+
+        # Initialize folder cascade detector
+        if folder_cascade_detector is None and enable_folder_cascade_detection:
+            self.folder_cascade_detector = FolderCascadeDetector(vault_root)
+        else:
+            self.folder_cascade_detector = folder_cascade_detector
+
+        # Feature flags
+        self.enable_folder_cascade_detection = enable_folder_cascade_detection
 
         # Similarity thresholds
         self.content_similarity_threshold = content_similarity_threshold
@@ -116,14 +128,14 @@ class AdvancedChangeDetector:
             re.DOTALL | re.MULTILINE
         )
 
-    def detect_changes(self, current_records: List[FileRecord]) -> Tuple[List[PathChange], List[ContentChange]]:
-        """Detect both path changes and content changes.
+    def detect_changes(self, current_records: List[FileRecord]) -> Tuple[List[PathChange], List[ContentChange], List[FolderCascade]]:
+        """Detect path changes, content changes, and folder cascades.
 
         Args:
             current_records: Current file records from vault scan
 
         Returns:
-            Tuple of (path_changes, content_changes)
+            Tuple of (path_changes, content_changes, folder_cascades)
         """
         start_time = time.time()
 
@@ -139,13 +151,19 @@ class AdvancedChangeDetector:
         additional_path_changes = self._detect_advanced_path_changes(current_records, path_changes)
         path_changes.extend(additional_path_changes)
 
+        # Detect folder cascades from path changes
+        folder_cascades = []
+        if self.enable_folder_cascade_detection and self.folder_cascade_detector:
+            folder_cascades = self.folder_cascade_detector.detect_folder_cascades(path_changes)
+
         detection_time = time.time() - start_time
         logger.debug(
             f"Change detection completed in {detection_time:.2f}s: "
-            f"{len(path_changes)} path changes, {len(content_changes)} content changes"
+            f"{len(path_changes)} path changes, {len(content_changes)} content changes, "
+            f"{len(folder_cascades)} folder cascades"
         )
 
-        return path_changes, content_changes
+        return path_changes, content_changes, folder_cascades
 
     def _detect_content_changes(
         self,

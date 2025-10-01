@@ -3,6 +3,9 @@
 from .descriptor import (
     ObsidianVaultDescriptor,
     VaultRegistry,
+    VaultPrivacySettings,
+    PrivacyLevel,
+    ConsentScope,
     DEFAULT_OBSIDIAN_IGNORE_RULES,
 )
 from .normalizer import (
@@ -33,11 +36,18 @@ from .performance import (
 )
 from .processor import ObsidianDocumentProcessor
 from .connector import ObsidianVaultConnector, ObsidianVaultSource
+from .privacy_policy import (
+    ObsidianPrivacyPolicy,
+    VaultConsentManager,
+)
 
 __all__ = [
     # Descriptor and registry
     "ObsidianVaultDescriptor",
-    "VaultRegistry", 
+    "VaultRegistry",
+    "VaultPrivacySettings",
+    "PrivacyLevel",
+    "ConsentScope",
     "DEFAULT_OBSIDIAN_IGNORE_RULES",
     # Normalizer core
     "MarkdownNormalizer",
@@ -64,8 +74,11 @@ __all__ = [
     "get_performance_profiler",
     # Integration
     "ObsidianDocumentProcessor",
-    "ObsidianVaultConnector", 
+    "ObsidianVaultConnector",
     "ObsidianVaultSource",
+    # Privacy
+    "ObsidianPrivacyPolicy",
+    "VaultConsentManager",
 ]
 
 
