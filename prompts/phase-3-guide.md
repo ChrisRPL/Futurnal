@@ -1,24 +1,27 @@
 Summary: Ready-to-use prompts for implementing Phase 3 Guide features—conversational causal exploration and Aspirational Self integration.
 
-# Phase 3 — Guide Development Prompts
+# Phase 3 — Sophisticated Reasoning Development Prompts
 
-## Conversational Causal Exploration
-Prompt:
-"Design the architecture for Futurnal's conversational Guide. Explain how to orchestrate GraphRAG retrieval, hypothesis generation, and follow-up question handling within a single chat session. Include state management requirements to preserve context across user turns." 
+## Evolution Context
+Phase 3 represents the achievement of sophisticated AI reasoning—the emergence of advanced cognitive functions that demonstrate genuine experiential understanding and sophisticated causal reasoning about the user's personal patterns and growth trajectory.
 
-## Hypothesis Generation Framework
+## Sophisticated Reasoning Architecture
 Prompt:
-"Create prompt templates that convert correlation statements into plausible causal hypotheses. Reference Judea Pearl-inspired causal reasoning principles and specify how to prevent hallucinated causality. Document guardrails for presenting hypotheses as exploratory." 
+"Design the architecture for Futurnal's advanced AI reasoning system. Explain how to orchestrate experiential memory retrieval, sophisticated hypothesis generation, and nuanced conversational follow-up that demonstrates deep understanding of user context. Include state management that preserves the AI's developing understanding of user patterns across extended reasoning sessions." 
 
-## Guided Investigation Workflow
+## Advanced Reasoning Framework
 Prompt:
-"Detail the sequence of steps the Guide follows when a user selects a hypothesis to explore. Define queries against the PKG to check confounders, compare temporal sequences, and surface supporting or refuting evidence. Include user-facing explanation formats." 
+"Create sophisticated reasoning templates that enable the AI to develop increasingly nuanced causal hypotheses based on experiential patterns. Reference Judea Pearl-inspired causal reasoning principles while ensuring the AI presents insights as collaborative discoveries rather than authoritative judgments. Document guardrails that maintain scientific rigor while showcasing the AI's sophisticated understanding of personal dynamics." 
 
-## Aspirational Self Integration
+## Collaborative Intelligence Workflow
 Prompt:
-"Describe how to incorporate the Aspirational Self node into guidance flows. Outline how goal metadata influences insight prioritization, recommendation language, and misalignment alerts during conversations." 
+"Detail the sophisticated reasoning process the AI employs when collaboratively exploring experiential patterns with the user. Define how the AI intelligently queries its experiential memory to identify confounders, analyze temporal sequences, and surface nuanced evidence that demonstrates deep understanding of personal context. Include communication formats that showcase the AI's sophisticated analytical capabilities while maintaining collaborative partnership." 
 
-## Ethical & User Trust Safeguards
+## Aspirational Intelligence Integration
 Prompt:
-"Enumerate messaging patterns and UI controls that reinforce Futurnal as a reflective partner. Ensure disclaimers about non-clinical advice, provide options to flag sensitive topics, and maintain transparency for optional cloud escalations." 
+"Describe how to integrate the Aspirational Self system as the AI's core guidance framework. Outline how the AI's understanding of user goals influences sophisticated insight prioritization, personalized communication approaches, and intelligent misalignment detection. Include the Reward Signal Dashboard that provides explicit tracking of progress against aspirational goals, demonstrating the AI's sophisticated understanding of user growth trajectory." 
+
+## Sophisticated AI Partnership Safeguards
+Prompt:
+"Enumerate communication patterns and interaction controls that showcase Futurnal as a sophisticated yet trustworthy AI partner. Ensure appropriate disclaimers about the AI's role as a reasoning companion rather than clinical advisor, provide intelligent handling of sensitive topics, and maintain full transparency about any optional cloud consultations while preserving the AI's sophisticated local capabilities." 
 

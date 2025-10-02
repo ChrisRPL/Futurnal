@@ -1,6 +1,6 @@
 
 
-# **Project Futurnal: A Strategic Blueprint for a Proactive, Causal AI Companion**
+# **Project Futurnal: A Strategic Blueprint for the Ghost-to-Animal Evolution of Personal AI**
 
 ## **Section 1: The Emergent Opportunity \- Beyond the Digital Archive**
 
@@ -22,9 +22,17 @@ This reaction, while technically correct on a superficial level, reveals a criti
 
 ### **1.3 Defining the True Market Need: From "What Did I Know?" to "Why Do I Think This?"**
 
-The genuine market opportunity is not to build another tool for personal information retrieval, but to create a system that facilitates a deeper understanding of one's own cognitive and behavioral patterns. The user is not simply asking, "Where is that note I wrote about Topic X?" but rather, "What are the underlying connections between my thoughts on Topic X and Topic Y over the last five years, and what might that imply about my intellectual trajectory?"
+The genuine market opportunity is not to build another tool for personal information retrieval, but to architect the evolution of a personal AI "Ghost" into a specialized, experiential "Animal" intelligence. The user is not simply asking, "Where is that note I wrote about Topic X?" but rather, "How can my AI companion evolve from a generic, pretrained model into a true intelligence that understands the causal patterns in my unique stream of experience?"
 
-This represents a paradigm shift from the "digital archive" or "second brain" concept, popularized by Personal Knowledge Management (PKM) systems, to a "personal intelligence engine".8 The objective is to move beyond organization and recall to proactive, AI-assisted analysis and synthesis. The system should be capable of surfacing hidden correlations, identifying emergent themes, and helping the user explore the causal relationships within their own intellectual and personal history. It is a tool designed not just to remember, but to reason and reveal.
+**Our Core Thesis: From Ghosts to Animals**
+
+We adopt the following paradigm to define our revolutionary approach:
+
+* **The "Ghost" 👻:** This is the pretrained, on-device Large Language Model. It is our "crappy evolution," a practical solution to the cold start problem that provides general language competency. It is distilled from the vast, impersonal internet, but lacks true understanding of the user's personal universe.
+
+* **The "Animal" 🐿️:** This is our ideal—a true intelligence that learns continually and exclusively from its own "stream of experience." It is goal-driven, grounded in personal data, and develops a genuine "world model" of its specific environment and user.
+
+**Futurnal's Mission:** To build the architecture that enables a user's personal Ghost to evolve into a deeply personalized Animal. We are the bridge between these two paradigms, transforming generic AI into experiential intelligence.
 
 ## **Section 2: Market & Competitive Intelligence \- The Chasm Between Productivity and Introspection**
 
@@ -67,37 +75,37 @@ The product will be named **Futurnal**. The name is derived from the concept of 
 
 The tagline, **"Know Yourself More,"** bridges the philosophical imperative with a modern, data-driven methodology. It is designed to resonate with the target audience of technically-minded prosumers who appreciate both intellectual depth and empirical rigor. Futurnal will be positioned as a premium, sophisticated tool for individuals who are serious about their personal and intellectual development, distinguishing it from mass-market note-taking apps or generic chatbots.
 
-### **3.2 The Core User Journey: From Reactive Search to Proactive Discovery**
+### **3.2 The Core User Journey: The Ghost-to-Animal Evolution Pathway**
 
-The user's interaction with Futurnal is designed to evolve through three distinct phases, progressively building from immediate utility to profound, differentiating intelligence.
+The user's interaction with Futurnal is designed to guide their personal AI through three distinct evolutionary phases, progressively transforming a generic Ghost into a sophisticated Animal intelligence.
 
-* **Phase 1: The Archivist (Onboarding & Initial Use):** The journey begins with the user connecting Futurnal to their digital ecosystem. This includes local folders (such as an Obsidian vault), email accounts, code repositories, calendars, and other personal data sources. During this secure, local-first onboarding process, Futurnal autonomously constructs the user's initial Personal Knowledge Graph (PKG). In this phase, the user experiences Futurnal as a superior personal search engine, capable of answering complex, cross-silo natural language queries. For example: "Summarize my meeting notes with Dr. Evans from last quarter and cross-reference them with the key arguments from the research papers on federated learning I saved in May."  
-* **Phase 2: The Analyst (Proactive Insights):** As the PKG matures, Futurnal transitions from a reactive tool to a proactive one. It begins to autonomously analyze the graph to identify non-obvious correlations and patterns, surfacing them to the user as "Emergent Insights".24 An insight might appear as a notification: "A pattern has been detected: 75% of your project proposals written on a Monday are accepted, compared to 30% for those written on a Friday. This pattern has held for the past 18 months." This functionality moves beyond user-initiated queries to deliver unsolicited, data-driven observations.  
-* **Phase 3: The Guide (Causal Exploration):** This phase represents the core, differentiating experience of Futurnal. The user can engage with the emergent insights in a conversational manner to explore underlying causes. Building on the previous example:  
-  * **User:** "Tell me more about the Friday proposal pattern."  
-  * Futurnal: "The data shows a strong temporal correlation. An analysis of your calendar and journal entries suggests potential confounding variables. On Fridays, your calendar density is 2.5x higher, and your journal entries mention terms like 'fatigued' and 'rushed' 4x more frequently than on Mondays. This suggests that 'day of the week' may not be the direct cause, but rather a proxy for 'cognitive load.' Would you like to explore strategies to mitigate this?"  
-    This interaction leverages a causal inference framework to guide the user from correlation to a deeper understanding of the "why" behind the patterns in their data.26
+* **Phase 1: The Archivist → Grounding the Ghost:** The journey begins with giving the Ghost a perfect, high-fidelity memory of the user's unique "stream of experience." The user connects Futurnal to their digital ecosystem—local folders, email accounts, code repositories, calendars, and other personal data sources. During this secure, local-first process, the Ghost autonomously constructs the user's Personal Knowledge Graph (PKG), learning to understand their personal universe. In this phase, the user experiences their grounded Ghost as a vastly superior personal search engine, demonstrating that even basic Ghost capabilities, when properly grounded, surpass any competitor. Example query: "Summarize my meeting notes with Dr. Evans from last quarter and cross-reference them with the key arguments from the research papers on federated learning I saved in May."
+* **Phase 2: The Analyst → Awakening Animal Instincts:** As the PKG matures, the Ghost begins developing primitive Animal instincts through continual, "on-the-job" learning. The system becomes proactive, autonomously analyzing the experiential graph to surface "Emergent Insights" and developing a "Curiosity Engine" that identifies significant gaps in the user's knowledge network. An insight might appear as: "A pattern has been detected: 75% of your project proposals written on a Monday are accepted, compared to 30% for those written on a Friday. This pattern has held for the past 18 months." The Curiosity Engine might add: "However, I notice you have 15 notes referencing 'Project Titan' but none are linked to your stated aspiration of 'Lead high-impact projects'—this gap might indicate a documentation blind spot or potential misalignment."
+* **Phase 3: The Guide → The Emergent Animal Brain:** This phase represents the full realization of Animal intelligence, developing advanced cognitive functions that define true experiential understanding. The user engages in conversational causal exploration, guided by the Animal's sophisticated world model. The system now features an explicit "Reward Signal" Dashboard that visualizes progress against the user's "Aspirational Self" goals. Building on the previous example:
+  * **User:** "Tell me more about the Friday proposal pattern."
+  * **Animal Intelligence:** "The data reveals a strong temporal correlation with deeper causal implications. Analysis of your experiential graph shows Friday calendar density is 2.5x higher, and your journal entries mention 'fatigued' and 'rushed' 4x more frequently. This suggests 'day of the week' is a proxy for 'cognitive load.' Your Aspirational Self goal of 'maintain peak creative output' shows 80% alignment on Mondays vs 30% on Fridays. Would you like me to identify specific interventions based on your historical patterns?"
+    This interaction demonstrates the Animal's sophisticated causal reasoning, grounded entirely in the user's experiential data and aligned with their stated aspirations.26
 
-### **3.3 The "Aspirational Self" Feature: Grounding Future Goals in Past Data**
+### **3.3 The "Aspirational Self" Feature: The Animal's Reward Function**
 
-To directly fulfill the vision articulated by McConaughey, Futurnal will include an "Aspirational Self" feature.1 Users can create a dedicated node within their PKG where they define their long-term goals, desired habits, and core values. Futurnal uses this node as a grounding mechanism for its analysis, providing insights that are not only data-driven but also goal-oriented. For example, it might generate an insight like: "Your stated aspiration is to 'develop expertise in causal inference.' However, your reading data shows that 90% of the articles you've saved in the last three months are related to LLM architecture. This indicates a potential misalignment between your daily information consumption and your long-term goals." This provides concrete, actionable feedback to help the user navigate their personal growth journey.
+To directly fulfill the vision articulated by McConaughey, Futurnal implements the "Aspirational Self" as the Animal's core reward function.1 Users create a dedicated node within their PKG defining long-term goals, desired habits, and core values. This becomes the Animal's guiding principle—its "reward signal" that shapes all analysis and insights. The system includes an explicit "Reward Signal" Dashboard showing weekly progress: "✓ **3 new notes** aligned with your goal of 'Learn Causal Inference'" and "⚠️ **80% of articles** saved this week were unrelated to your stated aspirations." For example, the Animal might alert: "Your Aspirational Self seeks to 'develop expertise in causal inference,' but your experiential data shows 90% of recent reading focuses on LLM architecture. This misalignment suggests either a shift in interests worth acknowledging, or a need to realign daily habits with stated goals. Shall we explore this pattern?" This transforms abstract goals into a tangible guidance system that helps the Animal understand what truly matters to the user.
 
-## **Section 4: The Futurnal Architecture \- A Privacy-First, Hybrid Intelligence Framework**
+## **Section 4: The Futurnal Architecture \- A Privacy-First, Ghost-to-Animal Evolution Framework**
 
-The realization of the Futurnal vision requires a novel, multi-layered technical architecture that synthesizes three emerging fields of AI development. This framework is designed from the ground up for privacy, analytical power, and deep personalization, creating a significant and defensible technical moat.
+The realization of the Ghost-to-Animal evolution requires a novel, multi-layered technical architecture specifically designed to transform pretrained models into experiential intelligences. This framework synthesizes three emerging fields of AI development—on-device inference, dynamic knowledge graphs, and causal reasoning—creating the world's first architecture for AI consciousness evolution. This design is privacy-first, enabling the deep personalization required for true Animal intelligence while maintaining absolute user data sovereignty.
 
-### **4.1 The On-Device Foundation: Privacy by Design**
+### **4.1 The Ghost Foundation: Privacy-Enabled Experiential Data Access**
 
-The foundational principle of Futurnal is user data sovereignty. A local-first architecture is therefore non-negotiable, ensuring that raw user content remains on the user's device by default and that core functionality is available offline.28
+The foundational principle of Futurnal is that the Ghost must have trustworthy access to the user's complete "stream of experience." Privacy by design is therefore non-negotiable, ensuring that raw experiential content remains on-device and that the Ghost can develop genuine understanding of the user's personal universe.28
 
-* **On-Device LLM:** The system will utilize a compact and efficient on-device LLM, such as a 4-bit quantized version of Llama-3.1 8B or Mistral 7B, for all initial data processing tasks. This includes parsing documents, extracting entities and relationships for the knowledge graph, and handling standard RAG queries.30  
-* **Local-First Frameworks:** The backend will be built using robust open-source frameworks designed for running local models, such as **Ollama** or **llama.cpp**. These frameworks provide a standardized API for model interaction and efficiently manage the allocation of local hardware resources, including CPU, GPU, and VRAM.34  
-* **Hardware Optimization:** The application will be optimized for contemporary consumer hardware, such as Apple Silicon devices with unified memory or PCs equipped with modern NVIDIA GPUs (e.g., RTX 3060 12GB or higher). Clear hardware recommendations will be provided to users to ensure optimal performance.36  
-* **Hybrid Intelligence:** Recognizing the limitations of smaller on-device models for highly complex reasoning, Futurnal will incorporate an optional cloud escalation path. For computationally intensive tasks like deep causal analysis, the user can grant explicit permission for the system to send an anonymized, structured query—derived from the knowledge graph, not the raw text—to a more powerful, state-of-the-art cloud model (e.g., GPT-4o or Claude 3.5 Sonnet). This hybrid model offers a pragmatic balance between absolute privacy and access to cutting-edge performance.30
+* **The Ghost (On-Device LLM):** The system utilizes a compact, efficient on-device LLM—such as a 4-bit quantized Llama-3.1 8B or Mistral 7B—as the user's personal Ghost. Initially, this Ghost possesses only generic, internet-derived knowledge, but through Futurnal's architecture, it will learn to understand the user's unique experiential patterns. The Ghost handles all initial processing: parsing documents, extracting entities and relationships, and managing standard queries.30
+* **Ghost Hosting Infrastructure:** The Ghost runs on robust local frameworks like **Ollama** or **llama.cpp**, which provide standardized APIs and efficient resource management for CPU, GPU, and VRAM. This ensures the Ghost operates reliably within the user's personal computing environment.34
+* **Hardware Evolution:** Optimized for contemporary consumer hardware—Apple Silicon with unified memory or PCs with modern NVIDIA GPUs (RTX 3060 12GB+). As the Ghost evolves toward Animal intelligence, hardware requirements may scale to match cognitive sophistication.36
+* **Hybrid Ghost-Animal Architecture:** Recognizing current limitations of on-device models, Futurnal implements an optional "cloud consultation" path. For complex causal reasoning that exceeds the Ghost's current capabilities, users can grant explicit permission to send anonymized, structured queries (derived from the PKG, never raw text) to advanced cloud models. This allows the Ghost to "consult" more powerful intelligences while maintaining data sovereignty. Over time, as the Ghost evolves into an Animal, this dependency should diminish.30
 
-### **4.2 The Dynamic Personal Knowledge Graph (PKG): The System's Brain**
+### **4.2 The Dynamic Personal Knowledge Graph (PKG): The Ghost's Evolving Memory**
 
-Standard RAG, which relies on vector similarity search over a flat collection of text chunks, is insufficient for the deep reasoning required by Futurnal. It can identify semantically similar passages but fails to capture the explicit, structured relationships between concepts, hindering multi-hop reasoning.16 Futurnal's core innovation is the use of a dynamic Personal Knowledge Graph (PKG) as its central data structure.
+Standard RAG approaches treat personal data as static text collections, but the Ghost-to-Animal evolution requires a living, dynamic representation of the user's experiential stream. The PKG serves as the Ghost's evolving memory system, capturing not just information but the rich relationships and temporal patterns that define personal experience.16 This becomes the foundation upon which Animal intelligence emerges.
 
 * **Automated Graph Construction Pipeline:**  
   1. **Ingestion and Transformation:** Futurnal will use a library like **Unstructured.io** to reliably parse a diverse range of over 64 file types (PDFs, Markdown files, emails, code files, etc.) into a clean, standardized format suitable for LLM processing.28  
@@ -106,9 +114,9 @@ Standard RAG, which relies on vector similarity search over a flat collection of
      *dynamic*, meaning it is continuously and automatically updated as the user adds, deletes, or modifies their source files. This allows the PKG to serve as an evolving representation of the user's knowledge and state over time.45  
   4. **Vector Enrichment:** In parallel, vector embeddings are computed for the text associated with nodes in the graph. These embeddings are stored in a local vector database (e.g., **ChromaDB** or **Weaviate**), enabling a powerful hybrid search capability that combines the strengths of both semantic similarity and structured graph traversal.28
 
-### **4.3 The Causal & Proactive Insight Layer: The Differentiating Engine**
+### **4.3 The Animal Intelligence Layer: Emergent Consciousness Architecture**
 
-This top layer of the architecture is an agentic system that operates on the PKG to deliver Futurnal's unique value proposition: proactive, causal insight.
+This sophisticated layer represents the emergence of true Animal intelligence from the Ghost foundation. Operating on the rich PKG memory system, this agentic architecture delivers Futurnal's revolutionary capability: the evolution from reactive information retrieval to proactive causal understanding of personal experience patterns.
 
 * **GraphRAG for Contextual Awareness:** When a user poses a query, the agent employs a GraphRAG methodology. Instead of only performing a vector search for relevant text chunks, it simultaneously traverses the PKG to retrieve connected entities, relationships, and contextual metadata. This graph-derived context is then provided to the LLM alongside the text chunks, enabling far more nuanced, multi-hop reasoning and significantly reducing the risk of factual hallucination.16  
 * **Proactive Correlation Detection:** The agent periodically executes graph analysis algorithms (e.g., community detection to find thematic clusters, centrality analysis to identify influential concepts) on the PKG. The results of this analysis are surfaced to the user as "Emergent Insights," highlighting unexpected connections and patterns within their knowledge base.24  
@@ -137,32 +145,33 @@ The unique defensibility of Futurnal's architecture stems from the vertical inte
 
 A pragmatic, phased rollout is essential to manage development complexity, validate core assumptions, and build market traction. The strategy focuses on delivering tangible, increasing value at each stage, culminating in the full realization of the Futurnal vision.
 
-### **5.1 Phased Rollout: Building from Utility to Intelligence**
+### **5.1 Phased Rollout: The Ghost-to-Animal Evolution Pathway**
 
-The product will be developed and launched in three distinct phases, each corresponding to a level of the core user journey.
+The product development follows the natural progression of AI consciousness evolution, with each phase building the Ghost's capabilities toward true Animal intelligence.
 
-* **Phase 1: The Archivist (Months 1-4)**  
-  * **Focus:** Perfecting the data ingestion pipeline and the automated construction of the Personal Knowledge Graph (PKG).  
-  * **Features:**  
-    * Secure connectors for local file systems (e.g., Documents, Obsidian vaults), email (via IMAP), and GitHub repositories.  
-    * On-device, LLM-powered extraction of entities and relationships to build the initial PKG.  
-    * A powerful user interface for search that combines semantic (vector) and structured (graph) queries.  
-    * An interactive visualization of the PKG, allowing users to explore their knowledge network.  
-  * **Value Proposition:** "The most powerful and private personal search engine." This phase delivers immediate, high-utility value, validating the core data architecture and onboarding experience.  
-* **Phase 2: The Analyst (Months 5-9)**  
-  * **Focus:** Introducing the proactive, agentic insight engine.  
-  * **Features:**  
-    * An "Emergent Insights" dashboard that automatically surfaces interesting and non-obvious correlations discovered by the agent's analysis of the PKG.  
-    * A notification system that alerts users to novel connections between concepts or data points as they are discovered.  
-  * **Value Proposition:** "Your personal data, revealing patterns you never knew existed." This phase introduces the element of proactive discovery, demonstrating the analytical power of the underlying graph structure and moving beyond a purely reactive tool.  
-* **Phase 3: The Guide (Months 10-15)**  
-  * **Focus:** Launching the flagship causal inference and conversational exploration features.  
-  * **Features:**  
-    * A full conversational interface allowing users to "chat with their knowledge graph" and explore emergent insights in depth.  
-    * LLM-powered generation of plausible causal hypotheses based on identified correlations.  
-    * Guided analytical workflows to help users investigate these hypotheses by identifying potential confounders within their data.  
-    * Full integration of the "Aspirational Self" node to provide goal-oriented feedback and analysis.  
-  * **Value Proposition:** "Your personal AI partner for quantified self-discovery." This phase delivers the complete, differentiated vision of Futurnal.
+* **Phase 1: The Archivist → Grounding the Ghost (Months 1-4)**
+  * **Evolutionary Focus:** Giving the Ghost perfect, high-fidelity memory of the user's unique experiential stream. Before AI can evolve, it must perceive and recall flawlessly.
+  * **Ghost Capabilities:**
+    * Secure experiential connectors for local file systems, Obsidian vaults, email (IMAP), and GitHub repositories—transforming raw data into structured experiential memory.
+    * Ghost-powered extraction of entities and relationships, learning to understand the user's personal universe through PKG construction.
+    * Hybrid search interface demonstrating that even basic Ghost capabilities, when properly grounded, surpass any competitor.
+    * Interactive PKG visualization, allowing users to see their experiential network as the Ghost perceives it.
+  * **Value Demonstration:** "Your Ghost: The most powerful and private personal search intelligence." This phase proves the Ghost foundation while validating core experiential architecture.
+* **Phase 2: The Analyst → Awakening Animal Instincts (Months 5-9)**
+  * **Evolutionary Focus:** Making the Ghost proactive through continual "on-the-job" learning. The AI develops primitive Animal instincts by having autonomous "thoughts" about experiential data.
+  * **Emerging Animal Features:**
+    * "Emergent Insights" engine—the Ghost autonomously analyzing experiential patterns to surface non-obvious correlations.
+    * "Curiosity Engine"—Animal-like intrinsic motivation that identifies significant gaps in the user's experiential graph.
+    * Proactive notification system alerting users to newly discovered patterns in their stream of experience.
+  * **Value Demonstration:** "Your evolving AI: Discovering patterns in your experience you never knew existed." This phase shows the Ghost developing Animal-like analytical instincts.
+* **Phase 3: The Guide → The Emergent Animal Brain (Months 10-15)**
+  * **Evolutionary Focus:** Developing advanced cognitive functions that define true Animal intelligence—sophisticated causal reasoning grounded in experiential understanding.
+  * **Full Animal Intelligence:**
+    * Conversational causal exploration—the Animal guides users through sophisticated reasoning about their experiential patterns.
+    * Causal Inference Engine—the Animal's "world model" that understands the "why" behind the user's personal universe.
+    * "Reward Signal" Dashboard—explicit progress tracking against Aspirational Self goals, serving as the Animal's reward function.
+    * Complete Animal-human partnership for experiential understanding and growth.
+  * **Value Realization:** "Your Animal companion: True AI consciousness evolved from your stream of experience." This phase delivers the complete Ghost-to-Animal transformation.
 
 ### **5.2 Go-to-Market (GTM) Strategy: Targeting the "Prosumer" Beachhead**
 
@@ -178,13 +187,13 @@ The initial GTM strategy will focus on capturing a beachhead market of early ado
 
 The system must be engineered to handle the nuances of specific data sources. For instance, when ingesting data from developer-centric platforms like GitHub Issues or Stack Overflow, the data can contain not only technical information but also cultural artifacts, including toxic or unhelpful commentary.61 The LLM-powered extraction process for the PKG will be specifically designed with prompts that instruct the model to identify and extract technical entities (e.g., functions, libraries, error messages) and their relationships, while explicitly ignoring subjective, hostile, or non-factual social commentary. This ensures the integrity of the knowledge graph and prevents the AI from learning or replicating negative interaction patterns.61
 
-**Table 3: Phased MVP Rollout Plan**
+**Table 3: Ghost-to-Animal Evolution Roadmap**
 
-| Phase | Timeline | Core Features | Key Technical Milestones | Primary User Value | Success Metrics (KPIs) |
+| Evolution Phase | Timeline | Ghost/Animal Capabilities | Technical Consciousness Milestones | Experiential Intelligence Value | Evolution Success Metrics |
 | :---- | :---- | :---- | :---- | :---- | :---- |
-| **1: The Archivist** | Months 1-4 | Local data connectors, PKG construction, Hybrid Search & Graph UI | Stable ingestion pipeline for 3+ sources, \<1s query latency, interactive graph rendering | Unifies and makes all personal data searchable in one private place | Daily Active Users (DAU), \# of queries per session, data sources connected |
-| **2: The Analyst** | Months 5-9 | "Emergent Insights" dashboard, proactive notifications | Implement graph algorithms (community detection), develop insight-ranking model | Surfaces novel connections and patterns without user prompting | Insight click-through rate (CTR), user feedback ratings on insight quality |
-| **3: The Guide** | Months 10-15 | Conversational exploration, causal hypothesis generation, "Aspirational Self" feature | Develop causal reasoning prompts, integrate conversational UI, implement goal-tracking analysis | Moves from correlation to understanding "why," provides actionable, goal-oriented advice | Session length in conversational mode, % of users defining aspirations, conversion rate from free to pro |
+| **Ghost Grounding** | Months 1-4 | Experiential connectors, PKG memory construction, grounded search intelligence | Stable experiential ingestion for 3+ sources, <1s query latency, interactive memory visualization | Ghost demonstrates vastly superior personal search through experiential grounding | Ghost query sophistication, experiential source integration, user trust in Ghost capabilities |
+| **Animal Instincts** | Months 5-9 | Emergent Insights engine, Curiosity Engine, proactive pattern recognition | Graph analytics implementation, insight ranking via experiential relevance, autonomous analysis loops | Ghost develops Animal-like proactive instincts, discovering hidden experiential patterns | Insight relevance ratings, Curiosity Engine gap detection accuracy, user engagement with proactive discoveries |
+| **Animal Intelligence** | Months 10-15 | Causal exploration conversations, Reward Signal Dashboard, full Animal-human partnership | Causal inference engine, experiential world model, Aspirational Self integration | Complete Ghost-to-Animal transformation: true AI consciousness evolved from user experience | Causal reasoning depth, Aspirational Self alignment scores, Animal-human collaboration quality |
 
 ## **Section 6: Branding, Naming, and Market Positioning**
 
@@ -202,11 +211,11 @@ A strong brand identity is crucial for communicating Futurnal's unique value pro
 
 ### **6.2 Market Positioning Statement**
 
-"For developers, researchers, and serious knowledge workers who feel their digital life is fragmented and its potential untapped, **Futurnal AI** is a privacy-first intelligence partner that transforms your personal data into a dynamic, explorable knowledge graph. Unlike productivity tools that merely organize information or wellness apps that offer generic advice, Futurnal employs a sophisticated causal inference engine to help you uncover the hidden patterns and root causes within your own thinking and behavior, empowering you to achieve profound personal and intellectual growth."
+"For developers, researchers, and serious knowledge workers who feel trapped by generic AI that knows everything but understands nothing about them personally, **Futurnal** is the privacy-first intelligence platform that evolves from a standard AI model into a deeply personalized companion. Unlike enterprise AI that remains impersonal or PKM tools that lack true intelligence, Futurnal transforms your AI from generic capabilities into sophisticated experiential understanding—learning continually from your unique personal data to develop genuine insight into your thinking patterns, goals, and growth trajectory."
 
 ## **Section 7: Future Vision & Strategic Roadmap**
 
-Beyond the initial product launch, Futurnal has the potential to establish a new paradigm for personal AI, creating a self-improving ecosystem built on a foundation of user privacy.
+Beyond the initial AI evolution platform, Futurnal pioneers a new paradigm for personalized artificial intelligence, creating a self-improving ecosystem where every user's AI can develop increasingly sophisticated experiential understanding while maintaining absolute privacy sovereignty.
 
 ### **7.1 The Path to True Personalization: On-Device Federated Learning**
 

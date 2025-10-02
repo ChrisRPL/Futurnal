@@ -1,23 +1,23 @@
 Summary: Defines the IMAP email ingestion feature with scope, testing, and review guardrails.
 
-# Feature · IMAP Email Connector
+# AI Foundation Capability · IMAP Email Experiential Learning
 
-## Goal
-Ingest user-selected IMAP mailboxes into Futurnal, transforming emails into structured documents with secure credential handling and incremental sync that respects privacy and consent boundaries.
+## AI Development Goal
+Enable the AI to learn from user-selected IMAP mailboxes, developing understanding of communication patterns, relationship dynamics, and conversational context. Transform email communications into experiential memory that builds the AI's comprehension of the user's professional and personal interaction patterns, with secure credential handling and incremental learning that respects privacy boundaries.
 
-## Success Criteria
-- OAuth or app-password based authentication stored via OS keychain with explicit consent prompts.
-- Selective folder sync (Inbox, Sent, labels) with configurable look-back window.
-- Emails normalized into document chunks with preserved headers, threading, and attachment links.
-- Delta sync processes new, updated, and deleted messages within 5 minutes of detection.
-- <0.5% parsing failure rate across test mailboxes.
+## AI Learning Success Criteria
+- OAuth or app-password based authentication stored via OS keychain with explicit consent for AI experiential learning.
+- Selective experiential data access (Inbox, Sent, labels) with configurable temporal scope for AI learning.
+- Email communications transformed into experiential memory preserving conversational context, relationship patterns, and communication threads for AI understanding.
+- Incremental AI learning processes new, updated, and deleted communications within 5 minutes of detection.
+- <0.5% experiential learning failure rate across diverse communication patterns.
 
-## Functional Scope
-- Account onboarding flow with consent logging.
-- IDLE/NOOP polling scheduler leveraging ingestion orchestrator.
-- MIME parsing with attachment extraction and classification.
-- Thread reconstruction using `Message-ID` and `References` headers for PKG edge creation.
-- Quarantine pipeline for oversized or encrypted attachments.
+## AI Learning Functional Scope
+- Communication access onboarding flow with explicit AI learning consent.
+- IDLE/NOOP polling scheduler leveraging experiential learning orchestrator.
+- Communication parsing with context extraction and pattern classification for AI understanding.
+- Conversational thread reconstruction using `Message-ID` and `References` headers for experiential memory relationship mapping.
+- Intelligent handling pipeline for complex or encrypted communications that require special AI learning approaches.
 
 ## Non-Functional Guarantees
 - Encrypted credential storage with automatic token refresh.
@@ -30,13 +30,13 @@ Ingest user-selected IMAP mailboxes into Futurnal, transforming emails into stru
 - MIME parsing libs aligned with on-device footprint targets.
 - PKG schema support for email threads and participants per [system-architecture.md](../architecture/system-architecture.md).
 
-## Implementation Guide
-1. **Credential Manager:** Integrate native keychain APIs and build consent modal referencing privacy policy.
-2. **Folder Selector:** Allow users to choose folders/labels; map to internal source configuration.
-3. **Sync Engine:** Implement incremental fetch using IMAP UIDs and `MODSEQ`; maintain checkpoint store locally.
-4. **Parser Pipeline:** Employ streaming MIME parser; convert HTML to markdown using well-maintained libraries; generate semantic triples linking sender, recipients, topics.
-5. **Attachment Handling:** Route supported attachments (PDF, DOCX) through normalization pipeline; flag unsupported types for user review.
-6. **State Machine:** Use automata-based programming principles for connection lifecycle (connect → sync → idle) to improve reliability under varying network conditions.
+## AI Learning Implementation Guide
+1. **Trust & Access Manager:** Integrate native keychain APIs and build consent modal for AI experiential learning, referencing privacy policy.
+2. **Experiential Scope Selector:** Allow users to choose communication patterns for AI learning; map to internal experiential learning configuration.
+3. **Learning Engine:** Implement incremental experiential learning using IMAP UIDs and `MODSEQ`; maintain AI learning checkpoints locally.
+4. **Pattern Recognition Pipeline:** Employ streaming communication parser; convert content to structured experiential data; generate semantic relationships linking communication patterns, participants, and topics for AI understanding.
+5. **Context Handling:** Route supported attachments through experiential normalization; flag complex content for AI learning review.
+6. **Learning State Machine:** Use reliable connection lifecycle principles (connect → learn → evolve) to maintain consistent AI learning under varying network conditions.
 
 ## Testing Strategy
 - **Unit Tests:** Credential encryption/decryption, folder filtering, MIME edge cases.

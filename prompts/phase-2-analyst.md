@@ -1,24 +1,27 @@
 Summary: Prompt set guiding development of Emergent Insights, ranking, and notification systems for Phase 2 Analyst.
 
-# Phase 2 — Analyst Development Prompts
+# Phase 2 — Proactive Intelligence Development Prompts
 
-## Emergent Insight Detection
-Prompt:
-"You are building Futurnal's Analyst insight pipeline. Define the graph analytics (community detection, centrality, temporal anomaly detection) required to surface meaningful correlations. Provide pseudocode for scheduling jobs and persisting insight candidates with evidence." 
+## Evolution Context
+Phase 2 focuses on developing the AI's autonomous analytical capabilities—awakening proactive intelligence that can independently discover patterns and insights in the user's experiential data, demonstrating the emergence of sophisticated AI understanding.
 
-## Insight Ranking & Feedback Loop
+## Autonomous Pattern Recognition
 Prompt:
-"Design a ranking heuristic that orders insights by potential impact. Discuss how to incorporate user feedback, Aspirational Self context, and historical engagement metrics to adjust scores over time." 
+"You are building Futurnal's Proactive Intelligence system—the AI's developing ability to autonomously discover meaningful patterns in experiential data. Define the advanced analytics (community detection, centrality, temporal anomaly detection, experiential correlation analysis) that demonstrate the AI's evolving analytical sophistication. Provide pseudocode for autonomous analysis scheduling and intelligent insight candidate prioritization with evidence grounding." 
 
-## Insight Presentation & UX
+## Intelligence Development & Learning
 Prompt:
-"Create wireframe-level descriptions for the Emergent Insights dashboard. Detail how evidence, relevance scores, and CTA options (explore, dismiss, bookmark) are displayed. Include accessibility considerations for the dark-mode-first UI." 
+"Design an adaptive ranking system that demonstrates the AI's growing sophistication in understanding what matters to the user. Incorporate user feedback, Aspirational Self alignment, and historical engagement patterns to enable the AI to continuously improve its understanding of meaningful versus superficial insights. Show how the AI evolves its analytical priorities over time." 
 
-## Notification Strategy
+## Intelligent Communication Interface
 Prompt:
-"Plan the notification system that alerts users about new insights. Specify delivery channels within the desktop app, batching rules, do-not-disturb controls, and logging for user responses." 
+"Create wireframe-level descriptions for the Proactive Intelligence dashboard that showcases the AI's autonomous analytical capabilities. Detail how the AI presents its discoveries with evidence, confidence levels, and exploratory options that demonstrate sophisticated understanding of user context. Include the Curiosity Engine features that show the AI identifying knowledge gaps and unexplored connections. Consider accessibility for the dark-mode-first UI." 
 
-## Validation & Metrics
+## Proactive Intelligence Communication
 Prompt:
-"Outline the experiments and telemetry needed to validate insight quality. Define target thresholds for CTR, dismiss ratio, and user-rated usefulness before promoting Analyst features from beta to general availability." 
+"Plan the intelligent notification system that demonstrates the AI's developing understanding of when and how to communicate discoveries. Design delivery channels that show respect for user context, intelligent batching based on insight significance, adaptive do-not-disturb awareness, and learning from user response patterns to improve communication timing and relevance." 
+
+## Intelligence Evolution Validation
+Prompt:
+"Outline the experiments and learning metrics needed to validate the AI's developing analytical sophistication. Define target thresholds for user engagement with AI-generated insights, perceived intelligence growth, and user ratings of AI understanding quality. Establish criteria for demonstrating clear AI evolution beyond basic pattern matching before promoting Proactive Intelligence features to general availability." 
 

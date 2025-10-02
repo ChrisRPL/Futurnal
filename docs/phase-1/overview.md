@@ -1,46 +1,46 @@
 Summary: Outlines the Phase 1 Archivist plan with feature-level specs, testing, and review checkpoints.
 
-# Phase 1 · Archivist Planning Overview
+# Phase 1 · Personalized Foundation Planning Overview
 
-## Phase Objective
-Phase 1 focuses on proving Futurnal's Archivist value proposition: private ingestion, dynamic PKG creation, and hybrid search that surpasses traditional note and PKG tools. This plan translates the [system requirements](../requirements/system-requirements.md) and [system architecture](../architecture/system-architecture.md) into testable feature workstreams, sequenced for incremental validation.
+## Evolution Objective
+Phase 1 focuses on establishing the AI's experiential memory foundation—grounding generic AI capabilities in the user's personal universe to demonstrate vastly superior personalized intelligence. This phase proves that even foundational AI capabilities, when properly grounded in experiential data, surpass traditional knowledge tools. The plan translates the [system requirements](../requirements/system-requirements.md) and [system architecture](../architecture/system-architecture.md) into testable AI development workstreams, sequenced for incremental AI personalization validation.
 
-## Planning Principles
-- Deliver user-facing value at the end of each feature iteration while keeping ingestion → PKG → search wiring intact.
-- Maintain privacy-first constraints, escalating to cloud models only through explicit consent flows.
-- Keep graph and vector indices synchronized; features that mutate one must update the other.
-- Anchor implementation choices in state-of-the-art, on-device friendly techniques validated via @Web research.
+## AI Development Principles
+- Deliver demonstrable AI personalization progress at each iteration while maintaining experiential memory → AI understanding → personalized intelligence pipeline integrity.
+- Maintain privacy-first foundation essential for deep experiential data access and AI evolution.
+- Keep experiential memory systems synchronized; AI learning must maintain consistency across memory and understanding layers.
+- Anchor AI development in state-of-the-art, on-device AI evolution techniques that enable genuine personalization without compromising privacy.
 
-## Feature Breakdown
-Each feature below has a dedicated playbook in `docs/phase-1/feature-*.md` describing scope, testing, and review. Sequencing assumes parallel tracks where dependencies allow.
+## AI Foundation Development
+Each capability below has a dedicated playbook in `docs/phase-1/feature-*.md` describing AI development scope, learning validation, and evolution review criteria. Sequencing assumes parallel AI development tracks where experiential learning dependencies allow.
 
-| Order | Feature | Outcome | Primary Dependencies |
+| Order | AI Foundation Capability | Experiential Intelligence Outcome | AI Development Dependencies |
 | --- | --- | --- | --- |
-| 1 | [Local Files Connector](feature-local-files-connector.md) | Baseline ingestion loop for filesystem sources | Unstructured.io parsing, ingestion orchestrator |
-- See also [Local Files Production Plan](local-files-production-plan/README.md) for the remaining tasks required to harden the connector before GA.
-| 2 | [Obsidian Vault Connector](feature-obsidian-connector.md) | Vault-aware ingestion with link preservation | Local connector primitives |
-| 3 | [IMAP Email Connector](feature-imap-connector.md) | Email ingestion with selective sync | Scheduler, metadata normalizer |
-| 4 | [GitHub Repository Connector](feature-github-connector.md) | Repository mirror with code/document segregation | Scheduler, normalizer |
-| 5 | [Ingestion Orchestrator](feature-ingestion-orchestrator.md) | Deterministic job routing & retries | Connectors |
-| 6 | [Document Normalization Pipeline](feature-document-normalization.md) | Unified chunk + provenance store | Unstructured.io, orchestrator |
-| 7 | [Entity & Relationship Extraction](feature-entity-relationship-extraction.md) | Triple generation powering PKG | Normalized documents, local LLM |
-| 8 | [PKG Graph Storage Layer](feature-pkg-graph-storage.md) | Embedded Neo4j with versioned triples | Extraction pipeline |
-| 9 | [Vector Embedding Service](feature-vector-embedding-service.md) | Embedding pipeline + store sync | Normalized documents |
-| 10 | [Hybrid Search API](feature-hybrid-search-api.md) | Graph + vector retrieval contract | Graph layer, embedding service |
-| 11 | [Search Desktop Shell](feature-search-desktop-shell.md) | Electron/Tauri interface for queries | Hybrid search API |
-| 12 | [Graph Visualization Module](feature-graph-visualization.md) | Interactive PKG explorer | Graph layer |
-| 13 | [Privacy & Audit Logging](feature-privacy-audit-logging.md) | Consent and audit trail foundations | Orchestrator, connectors |
-| 14 | [Cloud Escalation Consent Flow](feature-cloud-escalation-consent.md) | Structured off-device reasoning requests | Privacy & audit logging |
-| 15 | [Performance Telemetry Baseline](feature-performance-telemetry.md) | Profiling + health metrics | Orchestrator, search API |
+| 1 | [Local Files Connector](feature-local-files-connector.md) | AI learns to understand filesystem experiential patterns | Experiential parsing, learning orchestrator |
+- See also [Local Files Production Plan](local-files-production-plan/README.md) for hardening AI learning reliability before GA.
+| 2 | [Obsidian Vault Connector](feature-obsidian-connector.md) | AI develops sophisticated understanding of note-taking patterns and knowledge connections | Local experiential learning primitives |
+| 3 | [IMAP Email Connector](feature-imap-connector.md) | AI learns communication patterns and relationship dynamics | Scheduler, experiential normalizer |
+| 4 | [GitHub Repository Connector](feature-github-connector.md) | AI understands coding patterns and project evolution | Scheduler, normalizer |
+| 5 | [Ingestion Orchestrator](feature-ingestion-orchestrator.md) | Reliable AI learning pipeline with intelligent retry capabilities | Experiential connectors |
+| 6 | [Document Normalization Pipeline](feature-document-normalization.md) | Standardized experiential data for AI learning | Experiential parsing, orchestrator |
+| 7 | [Entity & Relationship Extraction](feature-entity-relationship-extraction.md) | AI pattern learning powering experiential memory construction | Normalized experiential data, local AI |
+| 8 | [PKG Graph Storage Layer](feature-pkg-graph-storage.md) | Embedded experiential memory with evolving understanding | AI learning pipeline |
+| 9 | [Vector Embedding Service](feature-vector-embedding-service.md) | Semantic understanding pipeline synchronized with experiential memory | Normalized experiential data |
+| 10 | [Hybrid Search API](feature-hybrid-search-api.md) | Personalized intelligence demonstrating experiential understanding | Experiential memory, embedding service |
+| 11 | [Search Desktop Shell](feature-search-desktop-shell.md) | User interface showcasing AI's personalized understanding | Personalized intelligence API |
+| 12 | [Graph Visualization Module](feature-graph-visualization.md) | Interactive experiential memory explorer showing AI's perspective | Experiential memory layer |
+| 13 | [Privacy & Audit Logging](feature-privacy-audit-logging.md) | Trust foundation enabling deep experiential data access for AI evolution | Orchestrator, connectors |
+| 14 | [Cloud Escalation Consent Flow](feature-cloud-escalation-consent.md) | Optional intelligence consultation for advanced reasoning | Privacy & audit logging |
+| 15 | [Performance Telemetry Baseline](feature-performance-telemetry.md) | AI development profiling + learning quality metrics | Orchestrator, personalized intelligence API |
 
-## Testing & Review Cadence
-- **Feature Completion Definition:** Implementation merged, automated tests passing, exploratory QA notes captured, code review checklist signed off, and documentation updated.
-- **Code Review Rhythm:** Minimum two-person review per feature; reviewers use feature-specific checklist plus shared [planning prompts](../prompts/phase-1-archivist.md).
-- **Regression Sweeps:** Nightly ingestion and search smoke tests across connectors to guard against schema drift.
+## AI Development & Learning Validation
+- **AI Capability Completion Definition:** Implementation merged, automated learning tests passing, AI personalization quality validated, code review checklist signed off, and AI development documentation updated.
+- **AI Development Review Rhythm:** Minimum two-person review per AI capability; reviewers validate AI learning quality using capability-specific checklist plus shared [AI development prompts](../prompts/phase-1-archivist.md).
+- **AI Learning Regression Sweeps:** Nightly experiential learning and personalized intelligence tests across connectors to ensure consistent AI development progress.
 
-## Documentation Responsibilities
-- Update this overview when feature scope shifts or new dependencies emerge.
-- Cross-link future Analyst/Guide docs once Phase 1 dependencies stabilize.
-- Reflect learnings back into [DEVELOPMENT_GUIDE.md](../DEVELOPMENT_GUIDE.md) and roadmap milestones.
+## AI Evolution Documentation Responsibilities
+- Update this overview when AI development scope shifts or new learning dependencies emerge.
+- Cross-link future Proactive Intelligence/Sophisticated Reasoning docs once Phase 1 AI foundation stabilizes.
+- Reflect AI development learnings back into [DEVELOPMENT_GUIDE.md](../DEVELOPMENT_GUIDE.md) and evolution roadmap milestones.
 
 
