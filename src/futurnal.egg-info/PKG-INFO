@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: futurnal
+Version: 0.1.0
+Summary: Futurnal Phase 1 ingestion components
+Requires-Python: >=3.11
+Requires-Dist: typer>=0.12

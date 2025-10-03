@@ -244,3 +244,4 @@ def get_content_cache() -> ContentCache:
 def get_performance_profiler() -> PerformanceProfiler:
     """Get the global performance profiler instance."""
     return _performance_profiler
+

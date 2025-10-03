@@ -1,4 +1,17 @@
-"""Obsidian Vault Connector implementation with sync engine integration."""
+"""Obsidian Vault Connector - Grounds Ghost in user's evolving thought patterns.
+
+This connector enables the Ghost to learn from Obsidian vaults, which represent
+the user's intellectual journey captured in markdown. By processing notes,
+wikilinks, tags, and temporal evolution, the Ghost develops understanding of:
+- How the user thinks and organizes knowledge (via folder structure, tags)
+- What concepts the user connects (via bidirectional wikilinks)
+- How understanding develops over time (via note edit history)
+
+The connector transforms Obsidian's knowledge graph into the Ghost's experiential
+memory, providing deep insight into the user's mental model and thought patterns.
+This forms a critical part of Phase 1 (Archivist) grounding the Ghost in the
+user's personal universe.
+"""
 
 from __future__ import annotations
 

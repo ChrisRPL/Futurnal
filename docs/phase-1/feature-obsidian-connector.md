@@ -1,15 +1,23 @@
-Summary: Details the Obsidian vault connector feature with scope, testing, and review guidance.
+Summary: Details the Obsidian vault connector that grounds the Ghost in user's evolving thought patterns and knowledge network.
 
 # Feature · Obsidian Vault Connector
 
 ## Goal
-Support one-click ingestion of Obsidian vaults while preserving markdown links, tags, and graph relationships so vault context translates cleanly into the PKG.
+**Ground the Ghost in the user's evolving thought patterns and knowledge network** by learning from their Obsidian vault. Obsidian vaults represent the user's intellectual journey—notes are thought traces, wikilinks reveal conceptual relationships, and temporal edits show how understanding develops over time. This connector enables the Ghost to understand the user's unique mental model by learning from bidirectional links, personal categorization patterns (tags/frontmatter), and the evolution of ideas captured in markdown. The Ghost develops deep familiarity with how the user thinks, organizes knowledge, and connects concepts—essential foundation for personalized intelligence.
 
 ## Success Criteria
-- Users register an Obsidian vault path and Futurnal mirrors markdown content, frontmatter, and embedded assets.
-- Wikilinks and tags convert into semantic relationships stored alongside provenance metadata.
-- Incremental updates capture note edits within minutes without duplicating nodes.
-- Vault scraping respects Obsidian-specific ignores (templates, trash) and custom `.futurnalignore`.
+
+### Ghost Grounding Quality
+- Ghost develops understanding of user's conceptual relationships revealed through wikilinks and bidirectional note connections.
+- Personal categorization patterns (tags, frontmatter) inform Ghost's understanding of how user organizes knowledge.
+- Temporal evolution of notes enables Ghost to learn how user's thinking develops and refines over time.
+- Ghost recognizes user's unique mental model through note structure, cross-references, and idea clustering patterns.
+
+### Technical Completeness
+- Users register Obsidian vault path and Futurnal learns from markdown content, frontmatter, and embedded assets.
+- Wikilinks and tags convert into semantic relationships within Ghost's experiential memory (PKG).
+- Incremental sync captures thought evolution (note edits) within minutes while preserving temporal history.
+- Vault processing respects Obsidian-specific ignores (templates, trash) and custom `.futurnalignore`.
 
 ## Functional Scope
 - Vault registration UI/CLI with workspace metadata (vault name, icon).
@@ -30,12 +38,14 @@ Support one-click ingestion of Obsidian vaults while preserving markdown links, 
 - PKG schema for note, tag, and backlink relationships.
 
 ## Implementation Guide
-1. **Vault Descriptor:** Extend source registry with Obsidian-specific metadata (vault UID, base path).
-2. **Markdown Normalizer:** Leverage `markdown-it` with custom plugins to capture callouts and tables; map frontmatter keys to graph properties.
-3. **Link Graph Construction:** Build note adjacency lists using automata-style state machines for wikilink parsing per @Web Automata approach.
-4. **Asset Pipeline:** Reuse modOpt-inspired modular pipelines for attachments (image, PDF) to route through Unstructured.io as needed.
-5. **Sync Strategy:** Use file rename detection to update PKG node IDs while maintaining history.
-6. **Quality Gate:** Generate Obsidian-specific ingestion reports summarizing ingested notes, missing references, parse warnings.
+
+### Thought Pattern Learning Pipeline
+1. **Vault Descriptor:** Extend source registry with Obsidian-specific metadata to identify user's thought repository.
+2. **Markdown Normalizer:** Leverage `markdown-it` with custom plugins to extract conceptual structure from user's notes; map frontmatter keys to Ghost's understanding of user's categorization patterns.
+3. **Conceptual Graph Construction:** Build note adjacency lists representing user's mental model—wikilinks reveal how user connects concepts. Use automata-based parsing to capture bidirectional relationship patterns.
+4. **Asset Pipeline:** Process embedded attachments (images, PDFs) to understand visual/document context within user's thought traces.
+5. **Temporal Sync Strategy:** Track note evolution over time to enable Ghost to learn how user's understanding develops. Use rename detection to maintain thought continuity across refactoring.
+6. **Learning Quality Gate:** Generate reports showing Ghost's understanding of vault structure: note clusters, concept connectivity, temporal patterns, and missing conceptual links.
 
 ## Testing Strategy
 - **Unit Tests:** Wikilink parser, tag extraction, frontmatter mapping.

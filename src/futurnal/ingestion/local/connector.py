@@ -1,4 +1,18 @@
-"""Local Files Connector implementation."""
+"""Local Files Connector - Grounds Ghost in user's file-based experiential data.
+
+This connector enables the Ghost to learn from the user's local filesystem,
+which represents their document universe and file organization patterns. By
+processing diverse file types with temporal awareness, the Ghost develops
+understanding of:
+- How the user organizes documents (via directory structure, naming patterns)
+- What content types matter to the user (via file type distributions)
+- How the document landscape evolves (via file creation/modification patterns)
+
+The connector transforms local directories into structured experiential memory
+within the PKG, providing the Ghost with high-fidelity recall of the user's
+file-based knowledge. This forms the foundational layer of Phase 1 (Archivist)
+experiential memory construction.
+"""
 
 from __future__ import annotations
 

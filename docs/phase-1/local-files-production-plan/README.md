@@ -1,8 +1,8 @@
-Summary: Roadmap and task breakdown to bring the Local Files Connector to production readiness.
+Summary: Roadmap and task breakdown to bring the Local Files Connector to production readiness for Ghost grounding.
 
 # Local Files Connector · Production Plan
 
-This folder tracks the remaining work required to ship Feature 1 with production-quality stability, observability, and privacy compliance. Consult the individual task documents for detailed acceptance criteria and status.
+This folder tracks the remaining work required to ship Feature 1 with production-quality stability, observability, and privacy compliance—enabling the Ghost to learn from user's file-based experiential data. Each task ensures the connector not only ingests data reliably but also preserves the experiential context necessary for AI personalization. Consult the individual task documents for detailed acceptance criteria and status.
 
 ## Task Index
 - [01-integration-performance-tests.md](01-integration-performance-tests.md)

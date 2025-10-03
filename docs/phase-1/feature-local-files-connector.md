@@ -1,15 +1,22 @@
-Summary: Defines the local filesystem ingestion feature including scope, testing, and review checkpoints.
+Summary: Defines the local filesystem connector that grounds the Ghost in user's file-based experiential data.
 
 # Feature · Local Files Connector
 
 ## Goal
-Enable users to ingest local directories into Futurnal with deterministic scheduling, provenance capture, and privacy-first processing while laying the groundwork for additional connectors.
+**Ground the Ghost in user's file-based experiential data sources**, enabling the AI to develop understanding of the user's personal document universe. This connector transforms local directories into structured experiential memory within the Personal Knowledge Graph, providing the foundation for AI personalization and evolution. The Ghost learns from the user's file organization patterns, document relationships, and temporal evolution of content—building the high-fidelity memory required for true personalized intelligence.
 
 ## Success Criteria
+
+### Experiential Memory Construction
+- Ghost develops understanding of user's file organization patterns and document relationships.
+- Temporal evolution of files is captured, enabling the AI to learn from content changes over time.
+- Experiential metadata (provenance, temporal context, relational structure) enriches the PKG for AI learning.
+
+### Technical Performance
 - Users configure one or more local directory sources with inclusion/exclusion rules.
-- Ingestion completes within target throughput (≥5 MB/s on reference hardware) with <1% parse failures.
-- Parsed documents carry provenance metadata (path, hash, timestamp) and are stored in normalized format ready for downstream pipelines.
-- Scheduler supports incremental updates (create/update/delete) within minutes.
+- Processing completes within target throughput (≥5 MB/s on reference hardware) with <1% parse failures.
+- Documents carry complete provenance metadata (path, hash, timestamp) and temporal context.
+- Scheduler supports incremental updates (create/update/delete) within minutes, preserving experiential history.
 
 ## Functional Scope
 - Source registration via CLI or desktop UI stub.
@@ -30,13 +37,15 @@ Enable users to ingest local directories into Futurnal with deterministic schedu
 - Local scheduler primitives from [feature-ingestion-orchestrator](feature-ingestion-orchestrator.md).
 
 ## Implementation Guide
-1. **Source Definition Schema:** Implement `LocalDirectorySource` with include/exclude glob patterns.
-2. **Change Detection Engine:** Use file hashes stored in lightweight SQLite to detect diffs; leverage macOS `FSEvents` for optional real-time updates.
-3. **Batch Planner:** Apply automata-based job state tracking (@Web Automata-Based Programming) to manage crawl → parse → persist transitions clearly. Link storage commits to Neo4j PKG nodes and Chroma vectors in the same transaction boundary; purge both stores on deletions.
-4. **Parsing Pipeline:** Stream files through Unstructured.io with chunk-size heuristics aligned to Phase 1 prompts. Persist parsed artifacts into `workspace/parsed/` for audit replay.
-5. **Error Handling:** Integrate resilient retry strategy referencing modOpt modular patterns for configurable backoff. Route repeated failures to a quarantine queue and surface via CLI.
-6. **Metrics Hook:** Emit ingestion duration and throughput to telemetry baseline. Forward audit summaries to the privacy logging module once connected.
-7. **Operator Tooling:** Expose CLI commands for viewing telemetry (`futurnal local-sources telemetry`) and recent audit events (`futurnal local-sources audit`) so operators can validate ingest health without leaving the desktop shell.
+
+### Experiential Memory Construction Pipeline
+1. **Source Definition Schema:** Implement `LocalDirectorySource` with include/exclude glob patterns to define which experiential data sources the Ghost should learn from.
+2. **Change Detection Engine:** Use file hashes stored in lightweight SQLite to track temporal evolution of user's document universe; leverage macOS `FSEvents` for real-time experiential updates.
+3. **Batch Planner:** Apply automata-based job state tracking to manage experiential data flow: discover → analyze → memorize. Link storage commits to Neo4j PKG nodes (Ghost's memory) and Chroma vectors (semantic understanding) in the same transaction boundary.
+4. **Experiential Parsing Pipeline:** Stream files through Unstructured.io to extract semantic understanding while preserving temporal and relational context. Persist parsed artifacts into `workspace/parsed/` for Ghost's audit and learning replay.
+5. **Error Handling:** Integrate resilient retry strategy for files the Ghost cannot initially understand. Route repeated failures to quarantine queue while maintaining experiential metadata.
+6. **Learning Quality Metrics:** Emit processing duration, throughput, and **experiential context preservation** metrics to telemetry. Track Ghost's growing understanding of user's document patterns.
+7. **Operator Tooling:** Expose CLI commands for viewing Ghost's learning progress (`futurnal local-sources telemetry`) and experiential audit events (`futurnal local-sources audit`).
 
 ## Testing Strategy
 - **Unit Tests:** Change detection (hash diff), ignore rules, metadata serialization.

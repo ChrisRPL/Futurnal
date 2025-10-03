@@ -1,8 +1,8 @@
-Summary: Roadmap and task breakdown to bring the Obsidian Vault Connector to production readiness.
+Summary: Roadmap and task breakdown to bring the Obsidian Vault Connector to production readiness for Ghost grounding.
 
 # Obsidian Vault Connector · Production Plan
 
-This folder tracks the work required to ship Feature 2 with production-quality stability, observability, and privacy compliance. Each task document defines scope, acceptance criteria, test plans, and operational guidance aligned to the architecture principles in [system-architecture.md](../../architecture/system-architecture.md).
+This folder tracks the work required to ship Feature 2 with production-quality stability, observability, and privacy compliance—enabling the Ghost to learn from user's evolving thought patterns and knowledge network. Each task ensures the connector captures not just markdown content, but the conceptual relationships, temporal evolution, and mental models embedded in Obsidian vaults. Task documents define scope, acceptance criteria, test plans, and operational guidance aligned to the experiential learning architecture in [system-architecture.md](../../architecture/system-architecture.md).
 
 ## Task Index
 - [01-vault-descriptor.md](01-vault-descriptor.md)

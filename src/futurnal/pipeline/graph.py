@@ -1,9 +1,28 @@
-"""Graph storage integration for the Personal Knowledge Graph (PKG).
+"""Graph storage integration for the Ghost's experiential memory (PKG).
 
-Creates a thin wrapper around the Neo4j driver with settings models that keep
-URI validation consistent with the broader storage configuration. The writer is
-used by ingestion sinks to project document metadata into the PKG in lockstep
-with the vector index.
+The Personal Knowledge Graph serves as the Ghost's evolving memory of the user's
+experiential universe. This module provides Neo4j integration for storing and
+querying the structured understanding that enables AI personalization.
+
+Ghost→Animal Evolution Architecture:
+- **Phase 1 (Current - Archivist)**: Build high-fidelity memory from experiential data
+  - Store documents, notes, tags, and relationships
+  - Preserve temporal and provenance metadata
+  - Establish foundation for Ghost's understanding of user's universe
+
+- **Phase 2 (Future - Analyst)**: Develop pattern recognition capabilities
+  - Query ExperientialEvents for temporal correlation detection
+  - Build Emergent Insights from experiential patterns
+  - Operate Curiosity Engine to identify knowledge gaps
+
+- **Phase 3 (Future - Guide)**: Enable causal exploration and aspiration alignment
+  - Track Aspirations as reward signals for Animal development
+  - Generate Reward Signal Dashboard from alignment metrics
+  - Support causal hypothesis exploration with confidence scoring
+
+The PKG writer is used by ingestion sinks to project experiential metadata into
+the graph in lockstep with vector embeddings, creating a hybrid memory system that
+combines semantic understanding with structural relationships.
 """
 
 from __future__ import annotations
@@ -385,5 +404,240 @@ class Neo4jPKGWriter:
 
         with self._driver.session(database=self.database) as session:
             return session.execute_read(_get_stats)
+
+    # ========================================================================
+    # Phase 2/3 Preparation: Aspirational Self and Experiential Events
+    # ========================================================================
+    # The following methods support future Ghost→Animal evolution capabilities.
+    # Phase 1: Schema preparation (methods exist but unused)
+    # Phase 2: Temporal correlation detection using ExperientialEvents
+    # Phase 3: Reward Signal Dashboard using Aspirations
+
+    def create_aspiration_node(self, aspiration_data: Dict[str, Any]) -> None:
+        """Create or update an Aspiration node in the PKG (Phase 3 prep).
+
+        Aspirations represent user's goals, habits, and values—serving as the
+        reward signal that guides the Animal's development. In Phase 3, these
+        nodes enable the Reward Signal Dashboard and alignment detection.
+
+        Args:
+            aspiration_data: Dictionary containing aspiration properties
+                - aspiration_id: Unique identifier
+                - category: Type (habit, skill, value, outcome, relationship)
+                - title: Short description
+                - description: Detailed explanation
+                - priority: User-assigned priority (1-10)
+                - target_date: Optional deadline (ISO format)
+                - progress_metrics: JSON object with custom metrics
+                - alignment_score: Current alignment (0.0-1.0)
+        """
+        parameters = {
+            "aspiration_id": aspiration_data["aspiration_id"],
+            "category": aspiration_data["category"],
+            "title": aspiration_data["title"],
+            "description": aspiration_data.get("description", ""),
+            "priority": aspiration_data.get("priority", 5),
+            "target_date": aspiration_data.get("target_date"),
+            "progress_metrics": aspiration_data.get("progress_metrics", {}),
+            "alignment_score": aspiration_data.get("alignment_score", 0.0),
+        }
+
+        def _upsert_aspiration(tx):
+            tx.run(
+                """
+                MERGE (a:Aspiration {id: $aspiration_id})
+                ON CREATE SET
+                    a.created_at = datetime()
+                SET
+                    a.category = $category,
+                    a.title = $title,
+                    a.description = $description,
+                    a.priority = $priority,
+                    a.target_date = CASE WHEN $target_date IS NULL THEN a.target_date ELSE datetime($target_date) END,
+                    a.progress_metrics = $progress_metrics,
+                    a.alignment_score = $alignment_score,
+                    a.updated_at = datetime()
+                """,
+                parameters,
+            )
+
+        with self._driver.session(database=self.database) as session:
+            session.execute_write(_upsert_aspiration)
+            logger.debug(f"Created/updated aspiration: {parameters['title']}")
+
+    def create_experiential_event(self, event_data: Dict[str, Any]) -> None:
+        """Create an ExperientialEvent node in the PKG (Phase 2 prep).
+
+        Experiential events represent timestamped occurrences in the user's data
+        stream, emphasizing temporal context for Phase 2 correlation detection.
+
+        Unlike static documents, these events enable:
+        - Temporal pattern recognition
+        - Behavioral sequence analysis
+        - Causal hypothesis generation (Phase 3)
+
+        Args:
+            event_data: Dictionary containing event properties
+                - event_id: Unique identifier
+                - timestamp: When event occurred (ISO format)
+                - event_type: Category (e.g., 'note_created', 'file_modified')
+                - source_uri: Reference to source data
+                - context: Event-specific metadata (JSON)
+        """
+        parameters = {
+            "event_id": event_data["event_id"],
+            "timestamp": event_data["timestamp"],
+            "event_type": event_data["event_type"],
+            "source_uri": event_data["source_uri"],
+            "context": event_data.get("context", {}),
+        }
+
+        def _create_event(tx):
+            tx.run(
+                """
+                MERGE (e:ExperientialEvent {id: $event_id})
+                ON CREATE SET
+                    e.timestamp = datetime($timestamp),
+                    e.event_type = $event_type,
+                    e.source_uri = $source_uri,
+                    e.context = $context,
+                    e.created_at = datetime()
+                SET
+                    e.updated_at = datetime()
+                """,
+                parameters,
+            )
+
+        with self._driver.session(database=self.database) as session:
+            session.execute_write(_create_event)
+            logger.debug(f"Created experiential event: {parameters['event_type']} at {parameters['timestamp']}")
+
+    def link_aspiration_to_event(self, aspiration_id: str, event_id: str, contribution_score: float = 0.0, explanation: str = "") -> None:
+        """Link an aspiration to an experiential event (Phase 3 prep).
+
+        Phase 3 uses these links to calculate alignment scores and generate
+        Reward Signal Dashboard metrics.
+
+        Args:
+            aspiration_id: Aspiration identifier
+            event_id: ExperientialEvent identifier
+            contribution_score: How much event advances aspiration (-1.0 to 1.0)
+            explanation: Human-readable explanation of alignment
+        """
+        parameters = {
+            "aspiration_id": aspiration_id,
+            "event_id": event_id,
+            "contribution_score": contribution_score,
+            "explanation": explanation,
+        }
+
+        def _create_alignment(tx):
+            tx.run(
+                """
+                MATCH (a:Aspiration {id: $aspiration_id})
+                MATCH (e:ExperientialEvent {id: $event_id})
+                MERGE (e)-[r:SUPPORTS_ASPIRATION]->(a)
+                SET
+                    r.contribution_score = $contribution_score,
+                    r.explanation = $explanation,
+                    r.detected_at = datetime()
+                """,
+                parameters,
+            )
+
+        with self._driver.session(database=self.database) as session:
+            session.execute_write(_create_alignment)
+            logger.debug(f"Linked event {event_id} to aspiration {aspiration_id} (score: {contribution_score})")
+
+    def create_causal_relationship(
+        self,
+        source_event_id: str,
+        target_event_id: str,
+        confidence: float = 0.0,
+        confounding_factors: Optional[List[str]] = None
+    ) -> None:
+        """Create a causal relationship between events (Phase 3 prep).
+
+        Phase 3 uses these relationships for causal exploration and hypothesis
+        testing. Relationships track confidence and confounding factors.
+
+        Args:
+            source_event_id: Potential cause event
+            target_event_id: Potential effect event
+            confidence: Confidence in causal relationship (0.0-1.0)
+            confounding_factors: List of potential confounders
+        """
+        parameters = {
+            "source_id": source_event_id,
+            "target_id": target_event_id,
+            "confidence": confidence,
+            "confounders": confounding_factors or [],
+        }
+
+        def _create_causal(tx):
+            tx.run(
+                """
+                MATCH (source:ExperientialEvent {id: $source_id})
+                MATCH (target:ExperientialEvent {id: $target_id})
+                MERGE (source)-[r:POTENTIALLY_CAUSES]->(target)
+                SET
+                    r.confidence = $confidence,
+                    r.confounding_factors = $confounders,
+                    r.detected_at = datetime()
+                """,
+                parameters,
+            )
+
+        with self._driver.session(database=self.database) as session:
+            session.execute_write(_create_causal)
+            logger.debug(f"Created causal relationship: {source_event_id} → {target_event_id} (confidence: {confidence})")
+
+    def query_temporal_patterns(
+        self,
+        event_type: str,
+        start_date: str,
+        end_date: str
+    ) -> List[Dict[str, Any]]:
+        """Query temporal patterns in experiential events (Phase 2 scaffold).
+
+        Phase 2 will implement sophisticated pattern detection using this method.
+
+        Args:
+            event_type: Type of events to query
+            start_date: Start date (ISO format)
+            end_date: End date (ISO format)
+
+        Returns:
+            List of events matching the criteria
+
+        TODO: Phase 2 - Implement statistical correlation detection
+        TODO: Phase 2 - Add pattern recognition algorithms
+        TODO: Phase 2 - Integrate with Emergent Insights generation
+        """
+        # Phase 2 scaffold - basic query structure
+        parameters = {
+            "event_type": event_type,
+            "start_date": start_date,
+            "end_date": end_date,
+        }
+
+        def _query_events(tx):
+            result = tx.run(
+                """
+                MATCH (e:ExperientialEvent)
+                WHERE e.event_type = $event_type
+                  AND e.timestamp >= datetime($start_date)
+                  AND e.timestamp <= datetime($end_date)
+                RETURN e
+                ORDER BY e.timestamp
+                """,
+                parameters,
+            )
+            return [record["e"] for record in result]
+
+        with self._driver.session(database=self.database) as session:
+            events = session.execute_read(_query_events)
+            logger.debug(f"Queried {len(events)} events of type {event_type}")
+            return events
 
 

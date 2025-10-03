@@ -1,4 +1,28 @@
-"""Semantic triple extraction pipeline for Personal Knowledge Graph construction."""
+"""Semantic triple extraction pipeline for Ghost's experiential memory construction.
+
+Extracts structured relationships from document metadata to build the Ghost's
+understanding of the user's personal universe. Triples form the foundational
+knowledge representation enabling AI personalization.
+
+Ghost→Animal Evolution Trajectory:
+- **Phase 1 (CURRENT - Archivist)**: Mechanical metadata extraction
+  - Extract basic document properties, tags, links from structured metadata
+  - Build static graph relationships with high precision
+  - Establish vocabulary and schema for experiential memory
+
+- **Phase 2 (FUTURE - Analyst)**: AI-learned pattern extraction
+  - Use LLM to extract semantic relationships from unstructured content
+  - Add confidence scoring based on extraction method
+  - Enable incremental learning as Ghost's understanding develops
+
+- **Phase 3 (FUTURE - Guide)**: Causal relationship inference
+  - Infer causal relationships from temporal event sequences
+  - Generate hypothesis triples for user-guided exploration
+  - Link relationships to Aspirational Self for alignment tracking
+
+Current implementation provides the extraction infrastructure that Phase 2/3
+will enhance with increasingly sophisticated AI capabilities.
+"""
 
 from __future__ import annotations
 
@@ -77,8 +101,28 @@ class Entity:
 
 
 class MetadataTripleExtractor:
-    """Extracts semantic triples from structured document metadata."""
-    
+    """Extracts semantic triples from structured document metadata.
+
+    Phase-Specific Behavior:
+    - **Phase 1 (CURRENT)**: Mechanical extraction from known metadata fields
+      - Deterministic mapping of frontmatter, tags, links to triples
+      - High precision, 100% confidence on extracted relationships
+      - Foundation for Ghost's structured understanding
+
+    - **Phase 2 (FUTURE)**: AI-assisted extraction from content
+      - LLM-based relationship extraction from unstructured text
+      - Confidence scoring based on extraction method and certainty
+      - Incremental learning updates as Ghost's understanding evolves
+
+    - **Phase 3 (FUTURE)**: Causal inference and hypothesis generation
+      - Temporal relationship analysis for causal pattern detection
+      - Generate hypothesis triples linking to Aspirational Self
+      - Support user-guided exploration of causal relationships
+
+    Current implementation establishes the extraction vocabulary and
+    infrastructure that future phases will enhance with AI capabilities.
+    """
+
     def __init__(self):
         self.extracted_count = 0
     
@@ -486,3 +530,4 @@ class TripleEnrichedNormalizationSink:
                     "error": str(e),
                 }
             )
+

@@ -171,3 +171,4 @@ def validate_yaml_safety(yaml_content: str) -> None:
     
     if yaml_content.count('*') > 1000:  # Excessive references
         raise SecurityError("Excessive YAML references detected")
+
