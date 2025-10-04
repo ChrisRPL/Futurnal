@@ -9,6 +9,18 @@ from .descriptor import (
     PrivacyLevel,
 )
 from .config import ImapMailboxConfig
+from .credential_manager import (
+    AppPassword,
+    CredentialManager,
+    CredentialType,
+    ImapCredential,
+    OAuth2Tokens,
+    OAuthProvider,
+    OAuthProviderRegistry,
+    auto_refresh_wrapper,
+    clear_sensitive_string,
+    secure_credential_context,
+)
 
 __all__ = [
     "AuthMode",
@@ -18,6 +30,16 @@ __all__ = [
     "MailboxPrivacySettings",
     "MailboxRegistry",
     "PrivacyLevel",
+    "AppPassword",
+    "CredentialManager",
+    "CredentialType",
+    "ImapCredential",
+    "OAuth2Tokens",
+    "OAuthProvider",
+    "OAuthProviderRegistry",
+    "auto_refresh_wrapper",
+    "clear_sensitive_string",
+    "secure_credential_context",
 ]
 
 
