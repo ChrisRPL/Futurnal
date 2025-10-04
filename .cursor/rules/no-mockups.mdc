@@ -1,0 +1,10 @@
+---
+alwaysApply: true
+description: Enforce production-ready implementations
+---
+# Production-Ready Code Only
+
+- Never introduce mockups, placeholders, or dummy logic.
+- Every feature, API, or integration must be fully functional and wired end-to-end.
+- Treat stubs as technical debt: replace them with real implementations before shipping.
+- Ensure tests execute against real behaviour, not mocked-out functionality.

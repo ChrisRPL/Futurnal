@@ -172,3 +172,4 @@ The markdown normalizer is now **fully integrated** into the Futurnal architectu
 
 **Result**: From isolated component to production-integrated architecture that fulfills all requirements specified in `03-markdown-normalizer.md`.
 
+

@@ -1,0 +1,11 @@
+---
+globs: docs/**,DEVELOPMENT_GUIDE.md
+description: Documentation style and organization guidance for Futurnal
+---
+# Documentation Style Rules
+
+- Begin each document with a one-line summary describing its purpose, mirroring existing files.
+- Keep documentation ASCII-only unless quoting existing Unicode content.
+- Preserve the current section structure (Mission, Competitive Landscape, etc.) to stay aligned with Futurnal's organization strategy.
+- When adding new docs, link them from [DEVELOPMENT_GUIDE.md](mdc:DEVELOPMENT_GUIDE.md) to maintain the onboarding flow.
+- Cross-reference related materials using relative links to leverage Cursor navigation features (e.g., `[system-architecture.md](mdc:architecture/system-architecture.md)`).

@@ -6,8 +6,9 @@ import json
 import uuid
 from collections import Counter
 from datetime import datetime, timedelta
+from hashlib import sha256
 from pathlib import Path
-from typing import Callable, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional
 
 import typer
 from croniter import croniter
@@ -30,6 +31,30 @@ from ..orchestrator.queue import JobQueue, JobStatus
 from ..privacy import AuditLogger, ConsentRegistry, redact_path
 from ..privacy.audit import AuditEvent
 from ..ingestion.obsidian.descriptor import VaultRegistry, ObsidianVaultDescriptor
+from ..ingestion.imap.descriptor import (
+    AuthMode,
+    ConsentScope,
+    ImapMailboxDescriptor,
+    MailboxPrivacySettings,
+    MailboxRegistry,
+    PrivacyLevel,
+    create_credential_id,
+    generate_mailbox_id,
+)
+from ..ingestion.obsidian.quality_gate import (
+    QualityGateConfig,
+    QualityGateEvaluator,
+    create_quality_gate_evaluator
+)
+from ..ingestion.obsidian.report_generator import (
+    ReportGenerator,
+    JSONReportFormatter,
+    MarkdownReportFormatter,
+    create_report_generator,
+    create_json_formatter,
+    create_markdown_formatter
+)
+from ..ingestion.obsidian.sync_metrics import create_metrics_collector
 from ..ingestion.obsidian.quality_gate import (
     QualityGateConfig,
     QualityGateEvaluator,
@@ -47,9 +72,114 @@ from ..ingestion.obsidian.sync_metrics import create_metrics_collector
 
 app = typer.Typer(help="Manage Futurnal local data sources")
 obsidian_app = typer.Typer(help="Manage Obsidian vault sources")
+imap_app = typer.Typer(help="Manage IMAP mailbox sources")
+imap_app = typer.Typer(help="Manage IMAP mailbox sources")
+imap_app = typer.Typer(help="Manage IMAP mailbox sources")
 
 DEFAULT_CONFIG_PATH = Path.home() / ".futurnal" / "sources.json"
 DEFAULT_WORKSPACE_PATH = Path.home() / ".futurnal" / "workspace"
+DEFAULT_IMAP_REGISTRY = Path.home() / ".futurnal" / "sources" / "imap"
+DEFAULT_IMAP_WORKSPACE = DEFAULT_WORKSPACE_PATH / "imap"
+
+
+def _parse_csv(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _parse_datetime_option(option_name: str, value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise typer.BadParameter(
+            f"Invalid datetime for {option_name}; use ISO 8601 (e.g. 2024-01-01T12:30:00)"
+        ) from exc
+
+
+def _resolve_consent_scopes(values: Iterable[str]) -> List[ConsentScope]:
+    scopes = {
+        ConsentScope.MAILBOX_ACCESS,
+        ConsentScope.EMAIL_CONTENT_ANALYSIS,
+    }
+    for raw in values:
+        candidate = raw.strip()
+        if not candidate:
+            continue
+        normalized = candidate.lower().replace("-", "_")
+        resolved = None
+        for scope in ConsentScope:
+            if normalized == scope.name.lower() or candidate.lower() == scope.value.lower():
+                resolved = scope
+                break
+        if resolved is None:
+            raise typer.BadParameter(
+                f"Unknown consent scope '{candidate}'. Valid options: "
+                + ", ".join(scope.name.lower() for scope in ConsentScope)
+            )
+        scopes.add(resolved)
+    return sorted(scopes, key=lambda item: item.value)
+
+
+def _hash_email(email: str) -> str:
+    return sha256(email.encode()).hexdigest()[:16]
+
+
+def _build_privacy_settings(
+    *,
+    privacy_level: PrivacyLevel,
+    consent_scopes: Iterable[ConsentScope],
+    sender_anonymization: bool,
+    recipient_anonymization: bool,
+    subject_redaction: bool,
+    redact_patterns: Optional[List[str]] = None,
+    exclude_patterns: Optional[List[str]] = None,
+    privacy_keywords: Optional[List[str]] = None,
+    audit_sync_events: bool = True,
+    audit_content_changes: bool = False,
+    retain_audit_days: Optional[int] = None,
+) -> MailboxPrivacySettings:
+    kwargs: Dict[str, object] = {
+        "privacy_level": privacy_level,
+        "required_consent_scopes": list(consent_scopes),
+        "enable_sender_anonymization": sender_anonymization,
+        "enable_recipient_anonymization": recipient_anonymization,
+        "enable_subject_redaction": subject_redaction,
+        "audit_sync_events": audit_sync_events,
+        "audit_content_changes": audit_content_changes,
+    }
+    if redact_patterns is not None:
+        kwargs["redact_email_patterns"] = redact_patterns
+    if exclude_patterns is not None:
+        kwargs["exclude_email_patterns"] = exclude_patterns
+    if privacy_keywords is not None and privacy_keywords:
+        kwargs["privacy_subject_keywords"] = privacy_keywords
+    if retain_audit_days is not None:
+        kwargs["retain_audit_days"] = retain_audit_days
+    return MailboxPrivacySettings(**kwargs)
+
+
+def _load_imap_registry(registry_path: Optional[Path]) -> MailboxRegistry:
+    return MailboxRegistry(registry_root=registry_path) if registry_path else MailboxRegistry()
+
+
+def _privacy_level_from_string(value: str) -> PrivacyLevel:
+    try:
+        return PrivacyLevel(value.lower())
+    except ValueError as exc:
+        valid = ", ".join(level.value for level in PrivacyLevel)
+        raise typer.BadParameter(f"Invalid privacy level '{value}'. Valid options: {valid}") from exc
+
+
+def _auth_mode_from_string(value: str) -> AuthMode:
+    try:
+        return AuthMode(value.lower())
+    except ValueError as exc:
+        valid = ", ".join(mode.value for mode in AuthMode)
+        raise typer.BadParameter(f"Invalid auth mode '{value}'. Valid options: {valid}") from exc
+
 TELEMETRY_DIR_NAME = "telemetry"
 TELEMETRY_LOG_FILE = "telemetry.log"
 TELEMETRY_SUMMARY_FILE = "telemetry_summary.json"
@@ -233,7 +363,9 @@ def list_sources(
     sources = _load_sources(config_path)
 
     # If filtering by obsidian type, also include Obsidian vault descriptors
-    if source_type and source_type.lower() == "obsidian":
+    lower_type = source_type.lower() if source_type else None
+
+    if lower_type == "obsidian":
         try:
             registry = VaultRegistry()
             obsidian_descriptors = registry.list()
@@ -264,27 +396,57 @@ def list_sources(
         if not sources:
             typer.echo("No Obsidian vaults found")
             return
+    elif lower_type == "imap":
+        try:
+            registry = MailboxRegistry()
+            mailboxes = registry.list()
+            imap_sources: Dict[str, Dict[str, object]] = {}
+            for descriptor in mailboxes:
+                source_name = descriptor.name or f"imap-{descriptor.id[:8]}"
+                hashed = _hash_email(descriptor.email_address)
+                imap_sources[source_name] = {
+                    "name": source_name,
+                    "root_path": f"imap://{descriptor.imap_host}/{hashed}",
+                    "type": "imap",
+                    "descriptor": descriptor,
+                }
+            all_sources = {}
+            all_sources.update(sources)
+            all_sources.update(imap_sources)
+            sources = {
+                name: src for name, src in all_sources.items() if src.get("type") == "imap"
+            }
+        except Exception:
+            sources = {}
+
+        if not sources:
+            typer.echo("No IMAP mailboxes found")
+            return
+
     elif not sources:
         typer.echo("No sources configured")
         return
 
     for source_name, source in sources.items():
         # Handle both LocalIngestionSource objects and dict representations
-        if hasattr(source, 'root_path'):
+        if hasattr(source, "root_path"):
             root_path = str(source.root_path)
+            source_dict: Dict[str, Any] | None = None
         else:
-            root_path = source['root_path']
-        
-        # Use redaction to safely display path
-        if source.get('type') == 'obsidian' and 'descriptor' in source:
-            # Use Obsidian redaction policy
-            descriptor = source['descriptor']
+            source_dict = source  # type: ignore[assignment]
+            root_path = str(source_dict["root_path"])
+
+        redacted_path: str
+        if source_dict and source_dict.get("type") == "obsidian" and "descriptor" in source_dict:
+            descriptor = source_dict["descriptor"]
             redaction_policy = descriptor.build_redaction_policy()
             redacted_path = redaction_policy.apply(root_path).redacted
+        elif source_dict and source_dict.get("type") == "imap" and "descriptor" in source_dict:
+            descriptor = source_dict["descriptor"]
+            redacted_path = redact_path(descriptor.email_address).redacted
         else:
-            # Use general redaction for local sources
             redacted_path = redact_path(root_path).redacted
-        
+
         typer.echo(f"- {source_name}: {redacted_path}")
 
 
@@ -342,6 +504,245 @@ def obsidian_add(
         typer.echo("   3. View ingestion reports:")
         typer.echo("      futurnal sources telemetry")
         typer.echo("      futurnal sources audit")
+
+
+# -----------------
+# IMAP Commands
+# -----------------
+
+
+def _construct_mailbox_descriptor(
+    *,
+    email_address: str,
+    imap_host: str,
+    imap_port: int,
+    name: Optional[str],
+    icon: Optional[str],
+    auth_mode: AuthMode,
+    credential_id: Optional[str],
+    folders: Iterable[str],
+    folder_patterns: Iterable[str],
+    exclude_folders: Iterable[str],
+    sync_from_date: Optional[datetime],
+    max_message_age_days: Optional[int],
+    provider: Optional[str],
+    privacy_level: PrivacyLevel,
+    consent_scopes: Iterable[ConsentScope],
+    sender_anonymization: bool,
+    recipient_anonymization: bool,
+    subject_redaction: bool,
+    redact_patterns: Iterable[str],
+    exclude_patterns: Iterable[str],
+    privacy_keywords: Iterable[str],
+    audit_sync_events: bool,
+    audit_content_changes: bool,
+    retain_audit_days: Optional[int],
+) -> ImapMailboxDescriptor:
+    descriptor_privacy = _build_privacy_settings(
+        privacy_level=privacy_level,
+        consent_scopes=consent_scopes,
+        sender_anonymization=sender_anonymization,
+        recipient_anonymization=recipient_anonymization,
+        subject_redaction=subject_redaction,
+        redact_patterns=list(redact_patterns),
+        exclude_patterns=list(exclude_patterns),
+        privacy_keywords=list(privacy_keywords),
+        audit_sync_events=audit_sync_events,
+        audit_content_changes=audit_content_changes,
+        retain_audit_days=retain_audit_days,
+    )
+
+    mailbox_id = generate_mailbox_id(email_address, imap_host)
+    derived_credential_id = credential_id or create_credential_id(mailbox_id)
+
+    descriptor = ImapMailboxDescriptor.from_registration(
+        email_address=email_address,
+        imap_host=imap_host,
+        imap_port=imap_port,
+        name=name,
+        icon=icon,
+        auth_mode=auth_mode,
+        credential_id=derived_credential_id,
+        folders=folders,
+        folder_patterns=folder_patterns,
+        exclude_folders=exclude_folders,
+        sync_from_date=sync_from_date,
+        max_message_age_days=max_message_age_days,
+        provider=provider,
+        privacy_settings=descriptor_privacy,
+    )
+
+    return descriptor.update(id=mailbox_id, credential_id=derived_credential_id)
+
+
+def _display_mailbox_descriptor(descriptor: ImapMailboxDescriptor) -> None:
+    redacted_email = redact_path(descriptor.email_address).redacted
+    typer.echo(f"   Mailbox ID: {descriptor.id}")
+    typer.echo(f"   Email: {redacted_email}")
+    typer.echo(f"   Host: {descriptor.imap_host}:{descriptor.imap_port}")
+    typer.echo(f"   Provider: {descriptor.provider or 'generic'}")
+    typer.echo(f"   Auth mode: {descriptor.auth_mode.value}")
+    typer.echo(f"   Folders: {', '.join(descriptor.folders) or 'INBOX'}")
+
+
+@imap_app.command("add")
+def imap_add(
+    email: str = typer.Option(..., help="Mailbox email address"),
+    host: str = typer.Option(..., help="IMAP hostname"),
+    port: int = typer.Option(993, help="IMAP port", min=1, max=65535),
+    name: Optional[str] = typer.Option(None, help="Human-readable mailbox name"),
+    icon: Optional[str] = typer.Option(None, help="Emoji or icon"),
+    auth: str = typer.Option("oauth2", help="Authentication mode: oauth2|app_password"),
+    credential_id: Optional[str] = typer.Option(None, help="Credential identifier in keychain"),
+    folders: Optional[str] = typer.Option(None, help="Comma-separated folder whitelist"),
+    folder_patterns: Optional[str] = typer.Option(None, help="Comma-separated folder glob patterns"),
+    exclude_folders: Optional[str] = typer.Option(None, help="Comma-separated folders to skip"),
+    sync_from: Optional[str] = typer.Option(None, help="Only ingest messages after this ISO timestamp"),
+    max_age_days: Optional[int] = typer.Option(None, help="Limit ingestion to this many recent days"),
+    provider: Optional[str] = typer.Option(None, help="Provider hint (gmail, office365, generic)"),
+    privacy_level: str = typer.Option("standard", help="Privacy level: strict|standard|permissive"),
+    consent: Optional[str] = typer.Option(None, help="Extra consent scopes (comma-separated)"),
+    disable_sender_anonymization: bool = typer.Option(False, help="Allow sender addresses in telemetry"),
+    disable_recipient_anonymization: bool = typer.Option(False, help="Allow recipient addresses in telemetry"),
+    enable_subject_redaction: bool = typer.Option(False, help="Redact subject lines in telemetry"),
+    redact_pattern: Optional[str] = typer.Option(None, help="Comma-separated regex patterns to redact"),
+    exclude_pattern: Optional[str] = typer.Option(None, help="Comma-separated patterns to skip ingress"),
+    privacy_keywords: Optional[str] = typer.Option(None, help="Comma-separated subject keywords triggering redaction"),
+    disable_audit_sync: bool = typer.Option(False, help="Disable audit logging for sync events"),
+    enable_audit_content: bool = typer.Option(False, help="Enable checksum-based audit content logging"),
+    retain_audit_days: Optional[int] = typer.Option(None, help="Override audit log retention days"),
+    registry_path: Optional[Path] = typer.Option(None, help="Override IMAP registry path"),
+    workspace_root: Optional[Path] = typer.Option(None, help="Override IMAP workspace root"),
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output"),
+) -> None:
+    auth_mode = _auth_mode_from_string(auth)
+    privacy = _privacy_level_from_string(privacy_level)
+
+    parsed_folders = _parse_csv(folders) or ["INBOX"]
+    parsed_folder_patterns = _parse_csv(folder_patterns)
+    parsed_exclude_folders = _parse_csv(exclude_folders)
+    parsed_redact_patterns = _parse_csv(redact_pattern)
+    parsed_exclude_patterns = _parse_csv(exclude_pattern)
+    parsed_keywords = _parse_csv(privacy_keywords)
+    parsed_consent_scopes = _resolve_consent_scopes(_parse_csv(consent))
+    sync_from_date = _parse_datetime_option("sync-from", sync_from)
+
+    descriptor = _construct_mailbox_descriptor(
+        email_address=email,
+        imap_host=host,
+        imap_port=port,
+        name=name,
+        icon=icon,
+        auth_mode=auth_mode,
+        credential_id=credential_id,
+        folders=parsed_folders,
+        folder_patterns=parsed_folder_patterns,
+        exclude_folders=parsed_exclude_folders,
+        sync_from_date=sync_from_date,
+        max_message_age_days=max_age_days,
+        provider=provider,
+        privacy_level=privacy,
+        consent_scopes=parsed_consent_scopes,
+        sender_anonymization=not disable_sender_anonymization,
+        recipient_anonymization=not disable_recipient_anonymization,
+        subject_redaction=enable_subject_redaction,
+        redact_patterns=parsed_redact_patterns,
+        exclude_patterns=parsed_exclude_patterns,
+        privacy_keywords=parsed_keywords,
+        audit_sync_events=not disable_audit_sync,
+        audit_content_changes=enable_audit_content,
+        retain_audit_days=retain_audit_days,
+    )
+
+    registry = _load_imap_registry(registry_path)
+    saved = registry.add_or_update(descriptor)
+
+    if json_out:
+        typer.echo(json.dumps(saved.model_dump(mode="json"), indent=2))
+    else:
+        typer.echo(f"✅ Registered IMAP mailbox '{saved.name or saved.id[:8]}'")
+        _display_mailbox_descriptor(saved)
+        typer.echo("\n📋 Next Steps:")
+        typer.echo("   1. Configure credentials via futurnal sources imap credentials add")
+        typer.echo("   2. Convert to ingestion source:")
+        typer.echo(f"      futurnal sources imap to-local-source {saved.id}")
+        typer.echo("   3. Start ingestion: futurnal sources run <source_name>")
+
+
+@imap_app.command("list")
+def imap_list(
+    json_out: bool = typer.Option(False, "--json", help="Emit JSON output"),
+    registry_path: Optional[Path] = typer.Option(None, help="Override registry directory"),
+) -> None:
+    registry = _load_imap_registry(registry_path)
+    items = registry.list()
+    if json_out:
+        typer.echo(json.dumps([i.model_dump(mode="json") for i in items], indent=2))
+        return
+    if not items:
+        typer.echo("No IMAP mailboxes registered")
+        return
+    for descriptor in items:
+        typer.echo(f"- {descriptor.id}: {redact_path(descriptor.email_address).redacted}")
+
+
+@imap_app.command("show")
+def imap_show(
+    mailbox_id: str,
+    registry_path: Optional[Path] = typer.Option(None, help="Override registry directory"),
+) -> None:
+    registry = _load_imap_registry(registry_path)
+    descriptor = registry.get(mailbox_id)
+    typer.echo(json.dumps(descriptor.model_dump(mode="json"), indent=2))
+
+
+@imap_app.command("remove")
+def imap_remove(
+    mailbox_id: str,
+    yes: bool = typer.Option(False, "--yes", help="Skip confirmation prompt"),
+    registry_path: Optional[Path] = typer.Option(None, help="Override registry directory"),
+) -> None:
+    registry = _load_imap_registry(registry_path)
+    try:
+        descriptor = registry.get(mailbox_id)
+    except FileNotFoundError:
+        typer.echo(f"❌ Mailbox '{mailbox_id}' not found")
+        raise typer.Exit(code=1)
+
+    if not yes:
+        typer.echo("⚠️  About to remove IMAP mailbox:")
+        typer.echo(f"   Name: {descriptor.name or descriptor.id[:8]}")
+        typer.echo(f"   Email: {redact_path(descriptor.email_address).redacted}")
+        typer.echo(f"   ID: {mailbox_id}")
+        confirm = typer.confirm("Are you sure you want to remove this mailbox?")
+        if not confirm:
+            typer.echo("❌ Operation cancelled")
+            raise typer.Exit(code=0)
+
+    registry.remove(mailbox_id)
+    typer.echo(f"✅ Removed IMAP mailbox '{descriptor.name or descriptor.id[:8]}' ({mailbox_id})")
+
+
+@imap_app.command("to-local-source")
+def imap_to_local_source(
+    mailbox_id: str,
+    registry_path: Optional[Path] = typer.Option(None, help="Override registry directory"),
+    workspace_root: Optional[Path] = typer.Option(None, help="Override IMAP workspace root"),
+    max_workers: Optional[int] = typer.Option(None, help="Max concurrent workers"),
+    max_files_per_batch: Optional[int] = typer.Option(None, help="Max files per batch"),
+    schedule: str = typer.Option("@manual", help="Cron schedule or @manual/@interval"),
+    priority: str = typer.Option("normal", help="Job priority (low/normal/high)"),
+) -> None:
+    registry = _load_imap_registry(registry_path)
+    descriptor = registry.get(mailbox_id)
+    local_source = descriptor.to_local_source(
+        workspace_root=workspace_root,
+        max_workers=max_workers,
+        max_files_per_batch=max_files_per_batch,
+        schedule=schedule,
+        priority=priority,
+    )
+    typer.echo(json.dumps(local_source.model_dump(mode="json"), indent=2))
 
 
 @obsidian_app.command("list")
@@ -662,6 +1063,7 @@ def obsidian_quality_gate(
 
 
 app.add_typer(obsidian_app, name="obsidian")
+app.add_typer(imap_app, name="imap")
 
 
 @app.command("telemetry")

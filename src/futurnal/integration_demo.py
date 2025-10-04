@@ -164,3 +164,4 @@ This is referenced by the sample note.""")
 if __name__ == "__main__":
     demo_obsidian_integration()
 
+
