@@ -21,6 +21,15 @@ from .credential_manager import (
     clear_sensitive_string,
     secure_credential_context,
 )
+from .connection_manager import (
+    ConnectionMetrics,
+    ConnectionState,
+    IdleConnection,
+    ImapConnection,
+    ImapConnectionPool,
+    NetworkMonitor,
+    RetryStrategy,
+)
 
 __all__ = [
     "AuthMode",
@@ -40,6 +49,13 @@ __all__ = [
     "auto_refresh_wrapper",
     "clear_sensitive_string",
     "secure_credential_context",
+    "ConnectionMetrics",
+    "ConnectionState",
+    "IdleConnection",
+    "ImapConnection",
+    "ImapConnectionPool",
+    "NetworkMonitor",
+    "RetryStrategy",
 ]
 
 

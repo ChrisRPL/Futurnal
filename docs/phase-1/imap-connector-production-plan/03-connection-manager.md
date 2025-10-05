@@ -475,6 +475,20 @@ class NetworkMonitor:
 
 ## Implementation Notes
 
+### Status Update · October 2025
+
+Implementation landed in `src/futurnal/ingestion/imap/connection_manager.py` with
+complementary tests in `tests/ingestion/imap/test_connection_manager.py`.
+Key coverage:
+
+- TLS-only enforcement with certifi-backed trust store
+- Retry strategy with exponential backoff and authentication safeguards
+- Connection pooling and lifecycle metrics
+- IMAP IDLE renewal with automatic reconnection
+- Offline-aware operation queue via `NetworkMonitor`
+
+All unit tests pass: `pytest tests/ingestion/imap/test_connection_manager.py`.
+
 ### IMAPClient Configuration
 ```python
 client = IMAPClient(
