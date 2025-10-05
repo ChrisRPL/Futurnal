@@ -30,6 +30,14 @@ from .connection_manager import (
     NetworkMonitor,
     RetryStrategy,
 )
+from .email_parser import (
+    AttachmentMetadata,
+    EmailAddress,
+    EmailMessage,
+    EmailParser,
+)
+from .email_normalizer import EmailNormalizer
+from .email_triples import extract_email_triples
 
 __all__ = [
     "AuthMode",
@@ -56,6 +64,12 @@ __all__ = [
     "ImapConnectionPool",
     "NetworkMonitor",
     "RetryStrategy",
+    "AttachmentMetadata",
+    "EmailAddress",
+    "EmailMessage",
+    "EmailParser",
+    "EmailNormalizer",
+    "extract_email_triples",
 ]
 
 
