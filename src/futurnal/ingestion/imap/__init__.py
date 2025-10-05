@@ -38,6 +38,15 @@ from .email_parser import (
 )
 from .email_normalizer import EmailNormalizer
 from .email_triples import extract_email_triples
+from .thread_models import (
+    EmailThread,
+    ParticipantRole,
+    ThreadNode,
+    ThreadParticipant,
+)
+from .thread_reconstructor import ThreadReconstructor
+from .subject_evolution import SubjectEvolutionTracker
+from .thread_triples import extract_thread_triples
 
 __all__ = [
     "AuthMode",
@@ -70,6 +79,13 @@ __all__ = [
     "EmailParser",
     "EmailNormalizer",
     "extract_email_triples",
+    "EmailThread",
+    "ParticipantRole",
+    "ThreadNode",
+    "ThreadParticipant",
+    "ThreadReconstructor",
+    "SubjectEvolutionTracker",
+    "extract_thread_triples",
 ]
 
 
