@@ -47,6 +47,21 @@ from .thread_models import (
 from .thread_reconstructor import ThreadReconstructor
 from .subject_evolution import SubjectEvolutionTracker
 from .thread_triples import extract_thread_triples
+from .sync_state import (
+    ImapSyncState,
+    ImapSyncStateStore,
+    SyncResult,
+)
+from .sync_engine import ImapSyncEngine
+from .idle_monitor import IdleMonitor
+from .noop_poller import NoopPoller
+from .attachment_models import (
+    AttachmentProcessingStatus,
+    EmailAttachment,
+)
+from .attachment_extractor import AttachmentExtractor
+from .attachment_processor import AttachmentProcessor
+from .attachment_triples import extract_attachment_triples
 
 __all__ = [
     "AuthMode",
@@ -86,6 +101,17 @@ __all__ = [
     "ThreadReconstructor",
     "SubjectEvolutionTracker",
     "extract_thread_triples",
+    "ImapSyncState",
+    "ImapSyncStateStore",
+    "ImapSyncEngine",
+    "IdleMonitor",
+    "NoopPoller",
+    "SyncResult",
+    "AttachmentProcessingStatus",
+    "EmailAttachment",
+    "AttachmentExtractor",
+    "AttachmentProcessor",
+    "extract_attachment_triples",
 ]
 
 
