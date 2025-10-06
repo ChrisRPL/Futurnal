@@ -21,11 +21,19 @@ except Exception as exc:  # pragma: no cover
     ) from exc
 
 from futurnal.privacy.audit import AuditEvent, AuditLogger
+from futurnal.privacy.consent import ConsentRequiredError
 
 from .connection_manager import ImapConnectionPool
 from .descriptor import ImapMailboxDescriptor
 from .sync_state import ImapSyncState, ImapSyncStateStore, SyncResult
 
+# Import privacy components (optional to maintain backward compatibility)
+try:
+    from .consent_manager import ImapConsentManager, ImapConsentScopes
+    from .audit_events import log_email_sync_event, log_consent_check_failed
+    PRIVACY_COMPONENTS_AVAILABLE = True
+except ImportError:
+    PRIVACY_COMPONENTS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +47,7 @@ class ImapSyncEngine:
         connection_pool: ImapConnectionPool,
         state_store: ImapSyncStateStore,
         audit_logger: Optional[AuditLogger] = None,
+        consent_manager: Optional[object] = None,  # ImapConsentManager (optional)
     ):
         """Initialize sync engine.
 
@@ -46,10 +55,12 @@ class ImapSyncEngine:
             connection_pool: Connection pool for IMAP operations
             state_store: State store for sync persistence
             audit_logger: Optional audit logger for sync events
+            consent_manager: Optional consent manager for enforcement (ImapConsentManager)
         """
         self.connection_pool = connection_pool
         self.state_store = state_store
         self.audit_logger = audit_logger
+        self.consent_manager = consent_manager
         self.descriptor = connection_pool.descriptor
 
     async def sync_folder(self, folder: str) -> SyncResult:
@@ -60,9 +71,31 @@ class ImapSyncEngine:
 
         Returns:
             Sync result with changes detected
+
+        Raises:
+            ConsentRequiredError: If required consent not granted
         """
         start_time = time.time()
         result = SyncResult()
+
+        # Consent enforcement: Check required consents before sync
+        if self.consent_manager and PRIVACY_COMPONENTS_AVAILABLE:
+            try:
+                # Require mailbox access consent
+                self.consent_manager.require_consent(
+                    mailbox_id=self.descriptor.id,
+                    scope=ImapConsentScopes.MAILBOX_ACCESS.value,
+                )
+            except ConsentRequiredError as e:
+                # Log consent check failure
+                if self.audit_logger and PRIVACY_COMPONENTS_AVAILABLE:
+                    log_consent_check_failed(
+                        self.audit_logger,
+                        mailbox_id=self.descriptor.id,
+                        scope=ImapConsentScopes.MAILBOX_ACCESS.value,
+                        operation="folder_sync",
+                    )
+                raise
 
         try:
             # Load sync state
@@ -347,6 +380,8 @@ class ImapSyncEngine:
     def _log_sync_event(self, folder: str, result: SyncResult) -> None:
         """Log sync event without exposing content.
 
+        Uses enhanced logging helper if available.
+
         Args:
             folder: Folder name
             result: Sync result
@@ -354,28 +389,45 @@ class ImapSyncEngine:
         if not self.audit_logger:
             return
 
-        event = AuditEvent(
-            job_id=f"imap_sync_{self.descriptor.id}_{folder}_{int(time.time())}",
-            source="imap_sync_engine",
-            action="folder_sync",
-            status="success" if not result.errors else "partial_success",
-            timestamp=datetime.utcnow(),
-            metadata={
-                "mailbox_id": self.descriptor.id,
-                "folder": folder,
-                "new_messages": len(result.new_messages),
-                "updated_messages": len(result.updated_messages),
-                "deleted_messages": len(result.deleted_messages),
-                "total_changes": result.total_changes,
-                "duration_seconds": round(result.sync_duration_seconds, 2),
-                "errors": len(result.errors),
-            },
-        )
+        # Use enhanced logging if available
+        if PRIVACY_COMPONENTS_AVAILABLE:
+            try:
+                log_email_sync_event(
+                    self.audit_logger,
+                    mailbox_id=self.descriptor.id,
+                    folder=folder,
+                    new_messages=len(result.new_messages),
+                    updated_messages=len(result.updated_messages),
+                    deleted_messages=len(result.deleted_messages),
+                    sync_duration_seconds=result.sync_duration_seconds,
+                    errors=len(result.errors),
+                )
+            except Exception:  # pragma: no cover - audit failures should not break sync
+                pass
+        else:
+            # Fallback to basic logging
+            event = AuditEvent(
+                job_id=f"imap_sync_{self.descriptor.id}_{folder}_{int(time.time())}",
+                source="imap_sync_engine",
+                action="folder_sync",
+                status="success" if not result.errors else "partial_success",
+                timestamp=datetime.utcnow(),
+                metadata={
+                    "mailbox_id": self.descriptor.id,
+                    "folder": folder,
+                    "new_messages": len(result.new_messages),
+                    "updated_messages": len(result.updated_messages),
+                    "deleted_messages": len(result.deleted_messages),
+                    "total_changes": result.total_changes,
+                    "duration_seconds": round(result.sync_duration_seconds, 2),
+                    "errors": len(result.errors),
+                },
+            )
 
-        try:
-            self.audit_logger.record(event)
-        except Exception:  # pragma: no cover - audit failures should not break sync
-            pass
+            try:
+                self.audit_logger.record(event)
+            except Exception:  # pragma: no cover - audit failures should not break sync
+                pass
 
 
 __all__ = ["ImapSyncEngine"]

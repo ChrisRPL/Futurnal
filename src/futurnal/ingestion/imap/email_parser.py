@@ -35,6 +35,16 @@ from pydantic import BaseModel, Field, field_validator
 
 from .descriptor import MailboxPrivacySettings
 from ...privacy.audit import AuditEvent, AuditLogger
+from ...privacy.consent import ConsentRequiredError
+
+# Import privacy components (optional to maintain backward compatibility)
+try:
+    from .consent_manager import ImapConsentManager, ImapConsentScopes
+    from .email_redaction import EmailHeaderRedactionPolicy
+    from .audit_events import log_email_processing_event, log_consent_check_failed
+    PRIVACY_COMPONENTS_AVAILABLE = True
+except ImportError:
+    PRIVACY_COMPONENTS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -203,15 +213,28 @@ class EmailParser:
         *,
         privacy_policy: Optional[MailboxPrivacySettings] = None,
         audit_logger: Optional[AuditLogger] = None,
+        consent_manager: Optional[object] = None,  # ImapConsentManager (optional)
     ):
         """Initialize email parser.
 
         Args:
             privacy_policy: Privacy settings for keyword detection and anonymization
             audit_logger: Audit logger for privacy-compliant event recording
+            consent_manager: Optional consent manager for enforcement (ImapConsentManager)
         """
         self.privacy_policy = privacy_policy or MailboxPrivacySettings()
         self.audit_logger = audit_logger
+        self.consent_manager = consent_manager
+
+        # Create redaction policy for audit logging
+        if PRIVACY_COMPONENTS_AVAILABLE and privacy_policy:
+            self.redaction_policy = EmailHeaderRedactionPolicy(
+                redact_sender=privacy_policy.enable_sender_anonymization,
+                redact_recipients=privacy_policy.enable_recipient_anonymization,
+                redact_subject=privacy_policy.enable_subject_redaction,
+            )
+        else:
+            self.redaction_policy = None
 
         # Configure html2text for clean conversion
         self.html_converter = html2text.HTML2Text()
@@ -245,7 +268,27 @@ class EmailParser:
 
         Raises:
             ValueError: If message cannot be parsed
+            ConsentRequiredError: If required consent not granted
         """
+        # Consent enforcement: Check required consents before parsing
+        if self.consent_manager and PRIVACY_COMPONENTS_AVAILABLE:
+            try:
+                # Require email content analysis consent
+                self.consent_manager.require_consent(
+                    mailbox_id=mailbox_id,
+                    scope=ImapConsentScopes.EMAIL_CONTENT_ANALYSIS.value,
+                )
+            except ConsentRequiredError as e:
+                # Log consent check failure
+                if self.audit_logger and PRIVACY_COMPONENTS_AVAILABLE:
+                    log_consent_check_failed(
+                        self.audit_logger,
+                        mailbox_id=mailbox_id,
+                        scope=ImapConsentScopes.EMAIL_CONTENT_ANALYSIS.value,
+                        operation="email_parsing",
+                    )
+                raise
+
         try:
             # Parse with Python email.parser (handles encoding automatically)
             msg = message_from_bytes(raw_message, policy=email_policy)
@@ -615,6 +658,7 @@ class EmailParser:
         """Log parsing event without email content.
 
         Privacy-compliant logging: hashes message IDs, never logs content.
+        Uses enhanced redaction if available.
 
         Args:
             email_message: Parsed email message
@@ -622,30 +666,39 @@ class EmailParser:
         if not self.audit_logger:
             return
 
-        # Hash message ID for privacy
-        message_id_hash = sha256(email_message.message_id.encode()).hexdigest()[:16]
-
-        self.audit_logger.record(
-            AuditEvent(
-                job_id=f"email_parse_{email_message.uid}",
-                source="imap_email_parser",
-                action="email_parsed",
+        # Use enhanced logging with redaction if available
+        if PRIVACY_COMPONENTS_AVAILABLE and self.redaction_policy:
+            log_email_processing_event(
+                self.audit_logger,
+                email_message=email_message,
+                redaction_policy=self.redaction_policy,
                 status="success",
-                timestamp=datetime.utcnow(),
-                metadata={
-                    "message_id_hash": message_id_hash,
-                    "folder": email_message.folder,
-                    "uid": email_message.uid,
-                    "has_attachments": email_message.has_attachments,
-                    "attachment_count": len(email_message.attachments),
-                    "body_length": len(email_message.body_normalized or ""),
-                    "contains_sensitive": email_message.contains_sensitive_keywords,
-                    "participant_count": email_message.participant_count,
-                    "is_reply": email_message.is_reply,
-                    "mailbox_id": email_message.mailbox_id,
-                },
             )
-        )
+        else:
+            # Fallback to basic logging
+            message_id_hash = sha256(email_message.message_id.encode()).hexdigest()[:16]
+
+            self.audit_logger.record(
+                AuditEvent(
+                    job_id=f"email_parse_{email_message.uid}",
+                    source="imap_email_parser",
+                    action="email_parsed",
+                    status="success",
+                    timestamp=datetime.utcnow(),
+                    metadata={
+                        "message_id_hash": message_id_hash,
+                        "folder": email_message.folder,
+                        "uid": email_message.uid,
+                        "has_attachments": email_message.has_attachments,
+                        "attachment_count": len(email_message.attachments),
+                        "body_length": len(email_message.body_normalized or ""),
+                        "contains_sensitive": email_message.contains_sensitive_keywords,
+                        "participant_count": email_message.participant_count,
+                        "is_reply": email_message.is_reply,
+                        "mailbox_id": email_message.mailbox_id,
+                    },
+                )
+            )
 
 
 __all__ = [

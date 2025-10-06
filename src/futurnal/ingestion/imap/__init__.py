@@ -62,6 +62,23 @@ from .attachment_models import (
 from .attachment_extractor import AttachmentExtractor
 from .attachment_processor import AttachmentProcessor
 from .attachment_triples import extract_attachment_triples
+from .consent_manager import (
+    ImapConsentManager,
+    ImapConsentScopes,
+)
+from .email_redaction import (
+    EmailHeaderRedactionPolicy,
+    create_redaction_policy_for_privacy_level,
+)
+from .audit_events import (
+    ImapAuditEvents,
+    log_attachment_event,
+    log_connection_event,
+    log_consent_check_failed,
+    log_email_processing_event,
+    log_email_sync_event,
+    log_thread_reconstruction_event,
+)
 
 __all__ = [
     "AuthMode",
@@ -112,6 +129,17 @@ __all__ = [
     "AttachmentExtractor",
     "AttachmentProcessor",
     "extract_attachment_triples",
+    "ImapConsentManager",
+    "ImapConsentScopes",
+    "EmailHeaderRedactionPolicy",
+    "create_redaction_policy_for_privacy_level",
+    "ImapAuditEvents",
+    "log_attachment_event",
+    "log_connection_event",
+    "log_consent_check_failed",
+    "log_email_processing_event",
+    "log_email_sync_event",
+    "log_thread_reconstruction_event",
 ]
 
 
