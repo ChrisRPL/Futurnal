@@ -18,6 +18,12 @@ pythonpath = ["src"]
 testpaths = ["tests"]
 markers = [
     "performance: mark performance benchmark tests",
+    "provider_gmail: Gmail-specific IMAP tests",
+    "provider_office365: Office365-specific IMAP tests",
+    "provider_generic: Generic IMAP server tests",
+    "security: Security and privacy validation tests",
+    "accuracy: Thread reconstruction and extraction accuracy tests",
+    "integration: End-to-end workflow integration tests",
 ]
 
 
