@@ -86,12 +86,32 @@ class IngestionOrchestrator:
         # Initialize Obsidian connector
         from ..ingestion.obsidian.connector import ObsidianVaultConnector
         from ..ingestion.obsidian.descriptor import VaultRegistry
-        
+
         self._vault_registry = VaultRegistry()
         self._obsidian_connector = ObsidianVaultConnector(
             workspace_dir=self._workspace_dir,
             state_store=state_store,
             vault_registry=self._vault_registry,
+            element_sink=element_sink,
+            audit_logger=self._audit_logger,
+            consent_registry=self._consent_registry,
+        )
+
+        # Initialize IMAP connector
+        from ..ingestion.imap.connector import ImapEmailConnector
+        from ..ingestion.imap.descriptor import MailboxRegistry
+        from ..ingestion.imap.sync_state import ImapSyncStateStore
+
+        self._mailbox_registry = MailboxRegistry(
+            registry_root=self._workspace_dir / "sources" / "imap",
+            audit_logger=self._audit_logger,
+        )
+        imap_state_db = self._workspace_dir / "imap" / "sync_state.db"
+        self._imap_state_store = ImapSyncStateStore(path=imap_state_db)
+        self._imap_connector = ImapEmailConnector(
+            workspace_dir=self._workspace_dir,
+            state_store=self._imap_state_store,
+            mailbox_registry=self._mailbox_registry,
             element_sink=element_sink,
             audit_logger=self._audit_logger,
             consent_registry=self._consent_registry,
@@ -199,13 +219,27 @@ class IngestionOrchestrator:
         if debounce and last_event and (now - last_event) < debounce:
             return
         self._debounce_windows[source_name] = now
-        job = IngestionJob(
-            job_id=job_id,
-            job_type=JobType.LOCAL_FILES,
-            payload={
+
+        # Determine job type from source name
+        if source_name.startswith("imap-"):
+            job_type = JobType.IMAP_MAILBOX
+            # Extract mailbox_id from source name (format: "imap-{mailbox_id[:8]}")
+            mailbox_id = registration.source.root_path.name  # Gets mailbox ID from workspace path
+            payload = {
+                "mailbox_id": mailbox_id,
+                "trigger": trigger,
+            }
+        else:
+            job_type = JobType.LOCAL_FILES
+            payload = {
                 "source_name": source_name,
                 "trigger": trigger,
-            },
+            }
+
+        job = IngestionJob(
+            job_id=job_id,
+            job_type=job_type,
+            payload=payload,
             priority=registration.priority,
             scheduled_for=datetime.utcnow(),
         )
@@ -216,6 +250,7 @@ class IngestionOrchestrator:
                 "ingestion_job_id": job_id,
                 "ingestion_source": source_name,
                 "ingestion_trigger": trigger,
+                "job_type": job_type.value,
             },
         )
 
@@ -325,6 +360,8 @@ class IngestionOrchestrator:
             return await self._ingest_local(job)
         elif job.job_type == JobType.OBSIDIAN_VAULT:
             return await self._ingest_obsidian(job)
+        elif job.job_type == JobType.IMAP_MAILBOX:
+            return await self._ingest_imap(job)
         else:
             raise ValueError(f"Unsupported job type {job.job_type}")
 
@@ -349,6 +386,28 @@ class IngestionOrchestrator:
             files_processed += 1
             bytes_processed += element.get("size_bytes", 0)
         return files_processed, bytes_processed
+
+    async def _ingest_imap(self, job: IngestionJob) -> tuple[int, int]:
+        """Process IMAP mailbox sync job.
+
+        Args:
+            job: Ingestion job with mailbox_id in payload
+
+        Returns:
+            Tuple of (messages_processed, bytes_processed)
+        """
+        mailbox_id = job.payload["mailbox_id"]
+        messages_processed = 0
+        bytes_processed = 0
+
+        # Ingest mailbox (runs async sync internally)
+        for element in self._imap_connector.ingest(mailbox_id, job_id=job.job_id):
+            await self._handle_ingested_element(element)
+            messages_processed += element.get("new_messages", 0)
+            # Estimate bytes (actual message size tracking would require more instrumentation)
+            bytes_processed += messages_processed * 5000  # Rough estimate: 5KB per message
+
+        return messages_processed, bytes_processed
 
     async def _handle_ingested_element(self, element: dict) -> None:
         logger.debug(

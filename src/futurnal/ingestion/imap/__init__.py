@@ -79,6 +79,7 @@ from .audit_events import (
     log_email_sync_event,
     log_thread_reconstruction_event,
 )
+from .connector import ImapEmailConnector
 
 __all__ = [
     "AuthMode",
@@ -140,6 +141,7 @@ __all__ = [
     "log_email_processing_event",
     "log_email_sync_event",
     "log_thread_reconstruction_event",
+    "ImapEmailConnector",
 ]
 
 

@@ -38,6 +38,7 @@ def collect_health_report(
     results.append(_check_state_store(workspace))
     results.append(_check_neo4j(settings))
     results.append(_check_chroma(settings))
+    results.append(_check_imap_sync(workspace))
 
     status = "ok" if all(result.status == "ok" for result in results) else "warning"
     return {
@@ -98,4 +99,78 @@ def _check_chroma(settings: Settings) -> HealthCheckResult:
         return HealthCheckResult(name="chroma", status="ok", detail="Collection reachable")
     except Exception as exc:  # noqa: BLE001
         return HealthCheckResult(name="chroma", status="warning", detail=str(exc))
+
+
+def _check_imap_sync(workspace: Path) -> HealthCheckResult:
+    """Check IMAP mailbox sync status."""
+    try:
+        from futurnal.ingestion.imap.descriptor import MailboxRegistry
+        from futurnal.ingestion.imap.sync_state import ImapSyncStateStore
+
+        # Check if IMAP is configured
+        registry_root = workspace / "sources" / "imap"
+        if not registry_root.exists():
+            return HealthCheckResult(
+                name="imap_sync",
+                status="ok",
+                detail="No IMAP mailboxes configured",
+            )
+
+        # Load registry and state store
+        registry = MailboxRegistry(registry_root=registry_root)
+        mailboxes = registry.list()
+
+        if not mailboxes:
+            return HealthCheckResult(
+                name="imap_sync",
+                status="ok",
+                detail="No IMAP mailboxes registered",
+            )
+
+        # Check sync state
+        state_db = workspace / "imap" / "sync_state.db"
+        if not state_db.exists():
+            return HealthCheckResult(
+                name="imap_sync",
+                status="warning",
+                detail=f"{len(mailboxes)} mailbox(es) configured but never synced",
+            )
+
+        state_store = ImapSyncStateStore(path=state_db)
+        total_messages = 0
+        sync_errors = 0
+        never_synced = 0
+
+        for mailbox in mailboxes:
+            for folder in mailbox.folders:
+                state = state_store.fetch(mailbox.id, folder)
+                if state:
+                    total_messages += state.message_count
+                    sync_errors += state.sync_errors
+                else:
+                    never_synced += 1
+
+        if sync_errors > 10:
+            return HealthCheckResult(
+                name="imap_sync",
+                status="warning",
+                detail=f"{len(mailboxes)} mailbox(es), {total_messages} messages, {sync_errors} errors",
+            )
+
+        detail = f"{len(mailboxes)} mailbox(es), {total_messages} messages synced"
+        if never_synced > 0:
+            detail += f", {never_synced} folder(s) pending first sync"
+
+        return HealthCheckResult(
+            name="imap_sync",
+            status="ok",
+            detail=detail,
+        )
+
+    except Exception as exc:  # noqa: BLE001
+        return HealthCheckResult(
+            name="imap_sync",
+            status="warning",
+            detail=f"Health check failed: {exc}",
+        )
 
