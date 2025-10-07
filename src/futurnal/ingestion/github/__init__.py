@@ -2,7 +2,7 @@
 
 This package implements the GitHub connector as specified in Phase 1 (Archivist),
 providing secure OAuth and PAT-based authentication, repository metadata management,
-and privacy-first credential storage.
+privacy-first credential storage, and dual-mode repository synchronization.
 """
 
 from .api_client import (
@@ -12,6 +12,7 @@ from .api_client import (
     TokenInfo,
     create_api_client,
 )
+from .connector import ElementSink, GitHubRepositoryConnector
 from .api_client_manager import (
     APIRequestMetrics,
     CacheEntry,
@@ -47,12 +48,43 @@ from .descriptor import (
     create_credential_id,
     generate_repository_id,
 )
+from .git_clone_sync import GitCloneRepositorySync
+from .graphql_sync import GraphQLRepositorySync
 from .oauth_flow import (
     DeviceCodeResponse,
     DeviceFlowResult,
     DeviceFlowStatus,
     GitHubOAuthDeviceFlow,
     start_github_oauth_flow,
+)
+from .sync_models import (
+    BranchSyncState,
+    DiskSpaceEstimate,
+    FileContent,
+    FileEntry,
+    SyncResult,
+    SyncState,
+    SyncStatus,
+    SyncStrategy,
+)
+from .sync_orchestrator import GitHubSyncOrchestrator
+from .sync_state_manager import SyncStateManager
+from .sync_utils import (
+    PatternMatcher,
+    check_disk_space_sufficient,
+    cleanup_clone_directory,
+    ensure_clone_directory,
+    estimate_git_clone_size,
+    format_bytes,
+    format_progress,
+    format_sync_statistics,
+    get_available_disk_space,
+    get_available_disk_space_gb,
+    get_default_clone_base_dir,
+    get_git_binary_path,
+    parse_git_remote_url,
+    truncate_sha,
+    validate_git_installed,
 )
 
 __all__ = [
@@ -100,4 +132,37 @@ __all__ = [
     "GitHubAPIClientManager",
     "GraphQLRateLimitInfo",
     "RateLimitInfo",
+    # Sync models
+    "BranchSyncState",
+    "DiskSpaceEstimate",
+    "FileContent",
+    "FileEntry",
+    "SyncResult",
+    "SyncState",
+    "SyncStatus",
+    "SyncStrategy",
+    # Sync implementations
+    "GitCloneRepositorySync",
+    "GitHubSyncOrchestrator",
+    "GraphQLRepositorySync",
+    "SyncStateManager",
+    # Connector
+    "ElementSink",
+    "GitHubRepositoryConnector",
+    # Sync utilities
+    "PatternMatcher",
+    "check_disk_space_sufficient",
+    "cleanup_clone_directory",
+    "ensure_clone_directory",
+    "estimate_git_clone_size",
+    "format_bytes",
+    "format_progress",
+    "format_sync_statistics",
+    "get_available_disk_space",
+    "get_available_disk_space_gb",
+    "get_default_clone_base_dir",
+    "get_git_binary_path",
+    "parse_git_remote_url",
+    "truncate_sha",
+    "validate_git_installed",
 ]
