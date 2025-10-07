@@ -50,6 +50,7 @@ from .descriptor import (
 )
 from .git_clone_sync import GitCloneRepositorySync
 from .graphql_sync import GraphQLRepositorySync
+from .incremental_sync import IncrementalSyncEngine
 from .oauth_flow import (
     DeviceCodeResponse,
     DeviceFlowResult,
@@ -171,6 +172,7 @@ __all__ = [
     "GitCloneRepositorySync",
     "GitHubSyncOrchestrator",
     "GraphQLRepositorySync",
+    "IncrementalSyncEngine",
     "SyncStateManager",
     # Connector
     "ElementSink",

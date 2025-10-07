@@ -173,6 +173,18 @@ class BranchSyncState(BaseModel):
     total_bytes: int = Field(default=0, ge=0, description="Total bytes synced")
     sync_errors: int = Field(default=0, ge=0, description="Number of sync errors")
 
+    # Incremental sync fields
+    parent_commit_sha: Optional[str] = Field(
+        default=None,
+        description="Previous HEAD before update (for force-push detection)",
+    )
+    force_push_detected: bool = Field(
+        default=False, description="Whether force push was detected"
+    )
+    commits_processed: int = Field(
+        default=0, ge=0, description="Total commits processed for this branch"
+    )
+
     @field_validator("last_sync_time")
     @classmethod
     def _ensure_timezone(cls, value: datetime) -> datetime:
@@ -344,6 +356,23 @@ class SyncResult(BaseModel):
     )
     error_details: Optional[Dict[str, str]] = Field(
         default=None, description="Detailed error information"
+    )
+
+    # Incremental sync fields
+    new_commits: List[str] = Field(
+        default_factory=list, description="Commit SHAs processed in this sync"
+    )
+    modified_files: List[str] = Field(
+        default_factory=list, description="Files modified in this sync"
+    )
+    deleted_files: List[str] = Field(
+        default_factory=list, description="Files deleted in this sync"
+    )
+    added_files: List[str] = Field(
+        default_factory=list, description="Files added in this sync"
+    )
+    force_push_handled: bool = Field(
+        default=False, description="Whether force push was handled"
     )
 
     @field_validator("started_at", "completed_at")
