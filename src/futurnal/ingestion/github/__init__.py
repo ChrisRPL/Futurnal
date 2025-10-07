@@ -86,6 +86,14 @@ from .sync_utils import (
     truncate_sha,
     validate_git_installed,
 )
+from .classifier_models import (
+    FileCategory,
+    FileClassification,
+    ProgrammingLanguage,
+)
+from .file_classifier import FileClassifier
+from .language_detector import detect_language
+from .secret_detector import SecretDetector
 
 __all__ = [
     # Descriptor and registry
@@ -165,4 +173,11 @@ __all__ = [
     "parse_git_remote_url",
     "truncate_sha",
     "validate_git_installed",
+    # File classification
+    "FileCategory",
+    "FileClassification",
+    "ProgrammingLanguage",
+    "FileClassifier",
+    "detect_language",
+    "SecretDetector",
 ]
