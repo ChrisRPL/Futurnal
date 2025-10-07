@@ -839,3 +839,138 @@ async def test_auto_refresh_wrapper_wrong_type(
     # Should raise ValueError
     with pytest.raises(ValueError, match="only supports OAuthTokens"):
         await auto_refresh_wrapper(manager, "test_cred")
+
+
+# ---------------------------------------------------------------------------
+# New metadata fields tests (username, expires_at, token_prefix)
+# ---------------------------------------------------------------------------
+
+
+def test_oauth_tokens_username_in_metadata(
+    temp_credentials_dir, mock_keyring, mock_audit_logger
+):
+    """Test that username is stored in GitHubCredential metadata."""
+    manager = GitHubCredentialManager(
+        metadata_path=temp_credentials_dir,
+        keyring_module=mock_keyring,
+        audit_logger=mock_audit_logger,
+    )
+
+    # Store OAuth tokens with username
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+    tokens = OAuthTokens(
+        access_token="gho_test123",
+        scopes=["repo"],
+        expires_at=expires_at,
+        username="octocat",
+    )
+    manager.store_oauth_tokens(credential_id="test_cred", tokens=tokens)
+
+    # Retrieve metadata
+    metadata = manager.get_credential_metadata("test_cred")
+
+    assert metadata.username == "octocat"
+    assert metadata.expires_at is not None
+    assert metadata.expires_at == expires_at
+
+
+def test_oauth_tokens_expires_at_in_metadata(
+    temp_credentials_dir, mock_keyring, mock_audit_logger
+):
+    """Test that expires_at is stored in GitHubCredential metadata."""
+    manager = GitHubCredentialManager(
+        metadata_path=temp_credentials_dir,
+        keyring_module=mock_keyring,
+        audit_logger=mock_audit_logger,
+    )
+
+    # Store OAuth tokens with expiration
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=2)
+    tokens = OAuthTokens(
+        access_token="gho_test456",
+        scopes=["repo", "user"],
+        expires_at=expires_at,
+    )
+    manager.store_oauth_tokens(credential_id="test_cred_exp", tokens=tokens)
+
+    # Retrieve metadata (without accessing keychain)
+    metadata = manager.get_credential_metadata("test_cred_exp")
+
+    assert metadata.expires_at is not None
+    # Compare timestamps (allow small drift)
+    assert abs((metadata.expires_at - expires_at).total_seconds()) < 1
+
+
+def test_personal_access_token_prefix(
+    temp_credentials_dir, mock_keyring, mock_audit_logger
+):
+    """Test that PersonalAccessToken includes token_prefix."""
+    manager = GitHubCredentialManager(
+        metadata_path=temp_credentials_dir,
+        keyring_module=mock_keyring,
+        audit_logger=mock_audit_logger,
+    )
+
+    token = "ghp_" + "x" * 36
+    manager.store_personal_access_token(
+        credential_id="test_pat", token=token, scopes=["repo"]
+    )
+
+    # Retrieve credentials
+    creds = manager.retrieve_credentials("test_pat")
+
+    assert isinstance(creds, PersonalAccessToken)
+    assert creds.token_prefix == "ghp_xxx"
+    assert creds.token == token
+
+
+def test_personal_access_token_fine_grained_prefix(
+    temp_credentials_dir, mock_keyring, mock_audit_logger
+):
+    """Test token_prefix for fine-grained PAT."""
+    manager = GitHubCredentialManager(
+        metadata_path=temp_credentials_dir,
+        keyring_module=mock_keyring,
+        audit_logger=mock_audit_logger,
+    )
+
+    token = "github_pat_" + "y" * 71
+    manager.store_personal_access_token(
+        credential_id="test_pat_fg", token=token, scopes=["repo"]
+    )
+
+    # Retrieve credentials
+    creds = manager.retrieve_credentials("test_pat_fg")
+
+    assert isinstance(creds, PersonalAccessToken)
+    assert creds.token_prefix == "github_"
+    assert creds.token == token
+
+
+def test_metadata_serialization_with_new_fields(
+    temp_credentials_dir, mock_keyring, mock_audit_logger
+):
+    """Test that new fields are properly serialized in metadata."""
+    manager = GitHubCredentialManager(
+        metadata_path=temp_credentials_dir,
+        keyring_module=mock_keyring,
+        audit_logger=mock_audit_logger,
+    )
+
+    expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+    tokens = OAuthTokens(
+        access_token="gho_serialization_test",
+        scopes=["repo"],
+        expires_at=expires_at,
+        username="testuser",
+    )
+    manager.store_oauth_tokens(credential_id="test_serialize", tokens=tokens)
+
+    # Load raw metadata from file
+    raw_metadata = manager._load_metadata()
+    cred_data = raw_metadata["test_serialize"]
+
+    # Verify fields are in serialized form
+    assert cred_data["username"] == "testuser"
+    assert cred_data["expires_at"] is not None
+    assert "T" in cred_data["expires_at"]  # ISO format timestamp

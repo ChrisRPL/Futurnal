@@ -47,9 +47,15 @@ class GitHubCredential(BaseModel):
     credential_id: str = Field(..., description="Unique credential identifier")
     credential_type: CredentialType = Field(..., description="Type of credential")
     github_host: str = Field(default="github.com", description="GitHub hostname")
+    username: Optional[str] = Field(
+        default=None, description="GitHub username (fetched from API)"
+    )
     created_at: datetime = Field(..., description="Creation timestamp")
     last_used_at: Optional[datetime] = Field(
         default=None, description="Last access timestamp"
+    )
+    expires_at: Optional[datetime] = Field(
+        default=None, description="Token expiration timestamp (for OAuth)"
     )
     scopes: List[str] = Field(
         default_factory=list, description="OAuth scopes granted"
@@ -58,7 +64,7 @@ class GitHubCredential(BaseModel):
         default=None, description="User-provided description"
     )
 
-    @field_validator("created_at", "last_used_at")
+    @field_validator("created_at", "last_used_at", "expires_at")
     @classmethod
     def _ensure_timezone(
         cls, value: Optional[datetime]
@@ -76,9 +82,13 @@ class GitHubCredential(BaseModel):
             "credential_id": self.credential_id,
             "credential_type": self.credential_type.value,
             "github_host": self.github_host,
+            "username": self.username,
             "created_at": self.created_at.isoformat(),
             "last_used_at": self.last_used_at.isoformat()
             if self.last_used_at
+            else None,
+            "expires_at": self.expires_at.isoformat()
+            if self.expires_at
             else None,
             "scopes": self.scopes,
             "note": self.note,
@@ -91,9 +101,11 @@ class GitHubCredential(BaseModel):
             credential_id=payload["credential_id"],
             credential_type=CredentialType(payload["credential_type"]),
             github_host=payload.get("github_host", "github.com"),
+            username=payload.get("username"),
             created_at=_parse_timestamp(payload.get("created_at"))
             or datetime.now(timezone.utc),
             last_used_at=_parse_timestamp(payload.get("last_used_at")),
+            expires_at=_parse_timestamp(payload.get("expires_at")),
             scopes=payload.get("scopes", []),
             note=payload.get("note"),
         )
@@ -115,6 +127,7 @@ class PersonalAccessToken(BaseModel):
     """Personal Access Token (classic or fine-grained)."""
 
     token: str = Field(..., description="Personal access token")
+    token_prefix: str = Field(..., description="First 7 chars for identification (e.g., 'ghp_xxx')")
     scopes: List[str] = Field(default_factory=list, description="Token scopes")
 
 
@@ -339,7 +352,7 @@ class GitHubCredentialManager:
         note: Optional[str] = None,
         operator: Optional[str] = None,
     ) -> GitHubCredential:
-        """Store OAuth token in keychain."""
+        """Store OAuth token in keychain (simple version without expiration)."""
         existing = self._load_metadata().get(credential_id)
         created_at = (
             _parse_timestamp(existing.get("created_at"))
@@ -356,7 +369,7 @@ class GitHubCredentialManager:
         }
         self._write_secret(credential_id, secret_payload)
 
-        # Create metadata
+        # Create metadata (no username or expires_at for simple tokens)
         credential = GitHubCredential(
             credential_id=credential_id,
             credential_type=CredentialType.OAUTH_TOKEN,
@@ -513,8 +526,11 @@ class GitHubCredentialManager:
                 status="success",
                 credential=updated,
             )
+            token = secret["token"]
             return PersonalAccessToken(
-                token=secret["token"], scopes=secret.get("scopes", [])
+                token=token,
+                token_prefix=token[:7] if len(token) >= 7 else token,
+                scopes=secret.get("scopes", [])
             )
         else:
             raise ValueError(f"Unsupported credential type: {credential_type}")
@@ -623,8 +639,10 @@ class GitHubCredentialManager:
             credential_id=credential_id,
             credential_type=CredentialType.OAUTH_TOKEN,
             github_host=github_host,
+            username=tokens.username,
             created_at=created_at,
             last_used_at=existing.get("last_used_at") if existing else None,
+            expires_at=tokens.expires_at,
             scopes=tokens.scopes,
             note=note,
         )
