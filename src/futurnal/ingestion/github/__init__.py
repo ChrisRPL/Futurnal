@@ -94,6 +94,24 @@ from .classifier_models import (
 from .file_classifier import FileClassifier
 from .language_detector import detect_language
 from .secret_detector import SecretDetector
+from .issue_pr_models import (
+    Comment,
+    GitHubUser,
+    IssueMetadata,
+    IssueState,
+    Label,
+    Milestone,
+    PRState,
+    PullRequestMetadata,
+    Reaction,
+    ReviewDecision,
+)
+from .issue_normalizer import IssueNormalizer
+from .pr_normalizer import PullRequestNormalizer
+from .issue_pr_triples import (
+    extract_issue_triples,
+    extract_pr_triples,
+)
 
 __all__ = [
     # Descriptor and registry
@@ -180,4 +198,21 @@ __all__ = [
     "FileClassifier",
     "detect_language",
     "SecretDetector",
+    # Issue and PR models
+    "Comment",
+    "GitHubUser",
+    "IssueMetadata",
+    "IssueState",
+    "Label",
+    "Milestone",
+    "PRState",
+    "PullRequestMetadata",
+    "Reaction",
+    "ReviewDecision",
+    # Issue and PR normalizers
+    "IssueNormalizer",
+    "PullRequestNormalizer",
+    # Issue and PR triples
+    "extract_issue_triples",
+    "extract_pr_triples",
 ]
