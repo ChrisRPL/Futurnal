@@ -12,6 +12,15 @@ from .api_client import (
     TokenInfo,
     create_api_client,
 )
+from .api_client_manager import (
+    APIRequestMetrics,
+    CacheEntry,
+    CircuitBreaker,
+    ExponentialBackoff,
+    GitHubAPIClientManager,
+    GraphQLRateLimitInfo,
+    RateLimitInfo,
+)
 from .credential_manager import (
     CredentialType,
     EnterpriseOAuthConfig,
@@ -83,4 +92,12 @@ __all__ = [
     "RepositoryInfo",
     "TokenInfo",
     "create_api_client",
+    # API client manager
+    "APIRequestMetrics",
+    "CacheEntry",
+    "CircuitBreaker",
+    "ExponentialBackoff",
+    "GitHubAPIClientManager",
+    "GraphQLRateLimitInfo",
+    "RateLimitInfo",
 ]
