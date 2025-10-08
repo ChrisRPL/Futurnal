@@ -18,6 +18,7 @@ class JobType(str, Enum):
     LOCAL_FILES = "local_files"
     OBSIDIAN_VAULT = "obsidian_vault"
     IMAP_MAILBOX = "imap_mailbox"
+    GITHUB_REPOSITORY = "github_repository"
 
 
 @dataclass(slots=True)

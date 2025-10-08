@@ -116,6 +116,27 @@ class IngestionOrchestrator:
             audit_logger=self._audit_logger,
             consent_registry=self._consent_registry,
         )
+
+        # Initialize GitHub connector
+        from ..ingestion.github.api_client_manager import GitHubAPIClientManager
+        from ..ingestion.github.credential_manager import GitHubCredentialManager
+        from ..ingestion.github.orchestrator_integration import GitHubConnectorManager
+
+        github_workspace = self._workspace_dir / "github"
+        github_workspace.mkdir(parents=True, exist_ok=True)
+
+        self._github_credential_manager = GitHubCredentialManager()
+        self._github_api_client_manager = GitHubAPIClientManager(
+            credential_manager=self._github_credential_manager
+        )
+        self._github_connector = GitHubConnectorManager(
+            workspace_dir=self._workspace_dir,
+            credential_manager=self._github_credential_manager,
+            api_client_manager=self._github_api_client_manager,
+            element_sink=element_sink,
+            audit_logger=self._audit_logger,
+            consent_registry=self._consent_registry,
+        )
         self._max_retries = 3
         self._retry_backoff_seconds = 60
         hardware_cpu_count = os.cpu_count() or 4
@@ -362,6 +383,8 @@ class IngestionOrchestrator:
             return await self._ingest_obsidian(job)
         elif job.job_type == JobType.IMAP_MAILBOX:
             return await self._ingest_imap(job)
+        elif job.job_type == JobType.GITHUB_REPOSITORY:
+            return await self._ingest_github(job)
         else:
             raise ValueError(f"Unsupported job type {job.job_type}")
 
@@ -408,6 +431,62 @@ class IngestionOrchestrator:
             bytes_processed += messages_processed * 5000  # Rough estimate: 5KB per message
 
         return messages_processed, bytes_processed
+
+    async def _ingest_github(self, job: IngestionJob) -> tuple[int, int]:
+        """Process GitHub repository sync job.
+
+        Args:
+            job: Ingestion job with repo_id in payload
+
+        Returns:
+            Tuple of (files_processed, bytes_processed)
+        """
+        repo_id = job.payload["repo_id"]
+        trigger = job.payload.get("trigger", "schedule")
+
+        logger.info(
+            f"Processing GitHub repository sync: {repo_id} (trigger: {trigger})",
+            extra={
+                "ingestion_job_id": job.job_id,
+                "github_repo_id": repo_id,
+                "github_trigger": trigger,
+            },
+        )
+
+        # Perform sync via GitHub connector manager
+        result = await self._github_connector.sync_repository(
+            repo_id=repo_id,
+            job_id=job.job_id,
+        )
+
+        files_processed = result.files_synced
+        bytes_processed = result.bytes_synced
+
+        # Log sync result
+        if result.is_success():
+            logger.info(
+                f"GitHub sync completed: {files_processed} files, {bytes_processed} bytes",
+                extra={
+                    "ingestion_job_id": job.job_id,
+                    "github_repo_id": repo_id,
+                    "github_files_synced": files_processed,
+                    "github_bytes_synced": bytes_processed,
+                    "github_commits_processed": result.commits_processed,
+                },
+            )
+        else:
+            logger.error(
+                f"GitHub sync failed: {result.error_message}",
+                extra={
+                    "ingestion_job_id": job.job_id,
+                    "github_repo_id": repo_id,
+                    "github_error": result.error_message,
+                },
+            )
+            # Raise exception to trigger retry logic
+            raise RuntimeError(f"GitHub sync failed: {result.error_message}")
+
+        return files_processed, bytes_processed
 
     async def _handle_ingested_element(self, element: dict) -> None:
         logger.debug(

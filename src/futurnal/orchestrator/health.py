@@ -39,6 +39,7 @@ def collect_health_report(
     results.append(_check_neo4j(settings))
     results.append(_check_chroma(settings))
     results.append(_check_imap_sync(workspace))
+    results.append(_check_github_sync(workspace))
 
     status = "ok" if all(result.status == "ok" for result in results) else "warning"
     return {
@@ -170,6 +171,83 @@ def _check_imap_sync(workspace: Path) -> HealthCheckResult:
     except Exception as exc:  # noqa: BLE001
         return HealthCheckResult(
             name="imap_sync",
+            status="warning",
+            detail=f"Health check failed: {exc}",
+        )
+
+
+def _check_github_sync(workspace: Path) -> HealthCheckResult:
+    """Check GitHub repository sync status."""
+    try:
+        from futurnal.ingestion.github.descriptor import RepositoryRegistry
+        from futurnal.ingestion.github.sync_state_manager import SyncStateManager
+
+        # Check if GitHub is configured
+        registry_root = workspace / "sources" / "github"
+        if not registry_root.exists():
+            return HealthCheckResult(
+                name="github_sync",
+                status="ok",
+                detail="No GitHub repositories configured",
+            )
+
+        # Load registry
+        registry = RepositoryRegistry(registry_root=registry_root)
+        repositories = registry.list()
+
+        if not repositories:
+            return HealthCheckResult(
+                name="github_sync",
+                status="ok",
+                detail="No GitHub repositories registered",
+            )
+
+        # Check sync state
+        state_dir = workspace / "github" / "sync_state"
+        if not state_dir.exists():
+            return HealthCheckResult(
+                name="github_sync",
+                status="warning",
+                detail=f"{len(repositories)} repository(ies) configured but never synced",
+            )
+
+        state_manager = SyncStateManager(state_dir=state_dir)
+        total_files_synced = 0
+        total_bytes_synced = 0
+        sync_errors = 0
+        never_synced = 0
+
+        for repo in repositories:
+            state = state_manager.load(repo.id)
+            if state:
+                total_files_synced += state.files_synced
+                total_bytes_synced += state.bytes_synced
+                sync_errors += state.sync_errors
+            else:
+                never_synced += 1
+
+        if sync_errors > 10:
+            return HealthCheckResult(
+                name="github_sync",
+                status="warning",
+                detail=f"{len(repositories)} repository(ies), {total_files_synced} files, {sync_errors} errors",
+            )
+
+        detail = f"{len(repositories)} repository(ies), {total_files_synced} files synced"
+        if total_bytes_synced > 0:
+            detail += f", {total_bytes_synced / (1024*1024):.1f} MB"
+        if never_synced > 0:
+            detail += f", {never_synced} repo(s) pending first sync"
+
+        return HealthCheckResult(
+            name="github_sync",
+            status="ok",
+            detail=detail,
+        )
+
+    except Exception as exc:  # noqa: BLE001
+        return HealthCheckResult(
+            name="github_sync",
             status="warning",
             detail=f"Health check failed: {exc}",
         )
