@@ -43,6 +43,7 @@ from .quarantine import QuarantineStore, classify_failure, quarantine_reason_to_
 from .retry_policy import RetryBudget, RetryPolicyRegistry
 from .resource_monitor import ResourceMonitor
 from .resource_registry import ResourceProfileRegistry
+from .source_control import PausedSourcesRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,11 @@ class IngestionOrchestrator:
         self._resource_profiles = resource_profiles or ResourceProfileRegistry()
         self._per_connector_semaphores: Dict[JobType, asyncio.Semaphore] = {}
         self._sampling_task: Optional[asyncio.Task] = None
+
+        # Source pause/resume registry
+        self._paused_sources = PausedSourcesRegistry(
+            self._workspace_dir / "orchestrator" / "paused_sources.json"
+        )
 
         # Store element sink and state store for lazy connector initialization
         self._element_sink = element_sink
@@ -227,9 +233,14 @@ class IngestionOrchestrator:
 
     def _enqueue_job(self, source_name: str, *, force: bool = False, trigger: str = "schedule") -> None:
         registration = self._sources[source_name]
-        if registration.paused and not force:
+
+        # Check both in-memory paused flag and global pause registry
+        is_paused = registration.paused or self._paused_sources.is_paused(source_name)
+
+        if is_paused and not force:
             logger.debug(
-                "Skipping enqueue because source is paused", extra={"ingestion_source": source_name, "ingestion_event": "pause_skip"}
+                "Skipping enqueue because source is paused",
+                extra={"ingestion_source": source_name, "ingestion_event": "pause_skip"}
             )
             return
         job_id = str(uuid.uuid4())

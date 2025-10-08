@@ -148,6 +148,148 @@ class JobQueue:
             row = cur.fetchone()
         return int(row[0]) if row else 0
 
+    def running_count(self) -> int:
+        """Get count of currently running jobs."""
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                "SELECT COUNT(*) FROM jobs WHERE status = 'running'"
+            )
+            row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+    def completed_count(self, since: Optional[datetime] = None) -> int:
+        """Get count of completed jobs, optionally since a given time.
+
+        Args:
+            since: Optional datetime to filter jobs after this time
+
+        Returns:
+            Count of completed jobs
+        """
+        with self._lock:
+            cur = self._conn.cursor()
+            if since:
+                cur.execute(
+                    "SELECT COUNT(*) FROM jobs WHERE status = 'succeeded' AND updated_at >= ?",
+                    (since.isoformat(),),
+                )
+            else:
+                cur.execute(
+                    "SELECT COUNT(*) FROM jobs WHERE status = 'succeeded'"
+                )
+            row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+    def failed_count(self, since: Optional[datetime] = None) -> int:
+        """Get count of failed jobs, optionally since a given time.
+
+        Args:
+            since: Optional datetime to filter jobs after this time
+
+        Returns:
+            Count of failed jobs
+        """
+        with self._lock:
+            cur = self._conn.cursor()
+            if since:
+                cur.execute(
+                    "SELECT COUNT(*) FROM jobs WHERE status = 'failed' AND updated_at >= ?",
+                    (since.isoformat(),),
+                )
+            else:
+                cur.execute(
+                    "SELECT COUNT(*) FROM jobs WHERE status = 'failed'"
+                )
+            row = cur.fetchone()
+        return int(row[0]) if row else 0
+
+    def get_job(self, job_id: str) -> Optional[dict]:
+        """Get single job by ID.
+
+        Args:
+            job_id: Job identifier
+
+        Returns:
+            Job dict with all fields, or None if not found
+        """
+        with self._lock:
+            cur = self._conn.cursor()
+            cur.execute(
+                """
+                SELECT job_id, job_type, payload, priority, scheduled_for, status, attempts, created_at, updated_at
+                FROM jobs WHERE job_id = ?
+                """,
+                (job_id,),
+            )
+            row = cur.fetchone()
+
+        if not row:
+            return None
+
+        (
+            job_id,
+            job_type,
+            payload,
+            priority,
+            scheduled_for,
+            job_status,
+            attempts,
+            created_at,
+            updated_at,
+        ) = row
+
+        parsed_payload = json.loads(payload)
+        try:
+            priority_enum = JobPriority(priority)
+            priority_value = priority_enum.name.lower()
+        except ValueError:
+            priority_value = str(priority)
+
+        return {
+            "job_id": job_id,
+            "job_type": job_type,
+            "payload": parsed_payload,
+            "priority": priority_value,
+            "scheduled_for": scheduled_for,
+            "status": job_status,
+            "attempts": attempts,
+            "created_at": created_at,
+            "updated_at": updated_at,
+        }
+
+    def cancel_job(self, job_id: str) -> None:
+        """Cancel a pending or running job.
+
+        Args:
+            job_id: Job identifier
+
+        Raises:
+            ValueError: If job is not in pending or running status
+        """
+        with self._lock:
+            # Check current status
+            cur = self._conn.cursor()
+            cur.execute("SELECT status FROM jobs WHERE job_id = ?", (job_id,))
+            row = cur.fetchone()
+
+            if not row:
+                raise ValueError(f"Job {job_id} not found")
+
+            current_status = row[0]
+            if current_status not in ("pending", "running"):
+                raise ValueError(
+                    f"Cannot cancel job with status '{current_status}'. "
+                    "Only pending or running jobs can be cancelled."
+                )
+
+            # Update to cancelled status
+            with self._conn:
+                self._conn.execute(
+                    "UPDATE jobs SET status = 'failed', updated_at = ? WHERE job_id = ?",
+                    (datetime.utcnow().isoformat(), job_id),
+                )
+
     def snapshot(
         self,
         *,

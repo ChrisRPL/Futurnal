@@ -13,11 +13,14 @@ from .resource_profile import (
 )
 from .resource_monitor import ResourceMonitor
 from .resource_registry import ResourceProfileRegistry
+from .status import collect_status_report
+from .source_control import PausedSourcesRegistry
 
 __all__ = [
     "JobStatus",
     "IngestionOrchestrator",
     "collect_health_report",
+    "collect_status_report",
     "QuarantineStore",
     "QuarantineReason",
     "QuarantinedJob",
@@ -29,6 +32,7 @@ __all__ = [
     "ConnectorResourceStats",
     "ResourceMonitor",
     "ResourceProfileRegistry",
+    "PausedSourcesRegistry",
 ]
 
 
