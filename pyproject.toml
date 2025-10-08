@@ -33,6 +33,9 @@ markers = [
     "github_provider_enterprise: GitHub Enterprise Server specific tests",
     "github_regression: GitHub critical path regression tests",
     "github_manual: GitHub manual verification tests requiring user interaction",
+    # Orchestrator load and fairness testing markers
+    "load: Load and fairness tests for orchestrator",
+    "slow: Slow-running tests (>10s)",
 ]
 
 
