@@ -1,0 +1,196 @@
+# Futurnal Orchestrator Configuration
+#
+# This is a production-ready example configuration for the Futurnal ingestion orchestrator.
+# All settings include recommended values with secure defaults enabled.
+#
+# Configuration Schema Version: 2
+# Last Updated: 2025-10-08
+
+version: 2
+
+# Worker Pool Configuration
+# Controls concurrent processing capacity and hardware resource management
+workers:
+  # Maximum number of concurrent worker threads
+  # Range: 1-32
+  # Default: 8
+  # Recommendation: Set to number of CPU cores or slightly higher for I/O-bound workloads
+  max_workers: 8
+
+  # Respect hardware CPU count limits
+  # When true, prevents exceeding system CPU core count
+  # Default: true
+  # Recommendation: Keep enabled for stability on resource-constrained systems
+  hardware_cap_enabled: true
+
+# Job Queue Configuration
+# Persistent SQLite-backed queue for reliable job processing
+queue:
+  # SQLite database path for job queue
+  # Default: ~/.futurnal/queue.db
+  # Recommendation: Use SSD storage for better performance
+  database_path: ~/.futurnal/queue.db
+
+  # Enable SQLite Write-Ahead Logging (WAL) mode
+  # WAL mode provides better concurrency and crash recovery
+  # Default: true
+  # Recommendation: Keep enabled for production durability
+  wal_mode: true
+
+  # WAL checkpoint interval (in transactions)
+  # Controls how often WAL is checkpointed to main database
+  # Range: 1-10000
+  # Default: 100
+  # Recommendation: Lower values = more frequent checkpoints = better crash recovery but slower
+  checkpoint_interval: 100
+
+# Retry Policy Configuration
+# Controls retry behavior for failed ingestion jobs
+retry:
+  # Maximum retry attempts for failed jobs
+  # Range: 1-10
+  # Default: 3
+  # Recommendation: 3-5 for most use cases
+  max_attempts: 3
+
+  # Base delay between retries (in seconds)
+  # Range: 1-3600
+  # Default: 60
+  # Recommendation: 60s for network-related failures, 300s for rate-limited APIs
+  base_delay_seconds: 60
+
+  # Exponential backoff multiplier
+  # Each retry delay = base_delay * (multiplier ^ attempt)
+  # Range: 1.0-10.0
+  # Default: 2.0
+  # Recommendation: 2.0 for standard exponential backoff
+  backoff_multiplier: 2.0
+
+# Quarantine System Configuration
+# Isolates persistently failing jobs for manual investigation
+quarantine:
+  # Enable quarantine system
+  # When true, jobs exceeding retry limits are quarantined instead of permanently failed
+  # Default: true
+  # Recommendation: Keep enabled for production visibility into failures
+  enabled: true
+
+  # Days to retain quarantined jobs
+  # Range: 1-365
+  # Default: 30
+  # Recommendation: 30-90 days for forensic analysis
+  retention_days: 30
+
+  # Automatically purge old quarantined jobs
+  # When true, jobs older than retention_days are deleted automatically
+  # Default: false
+  # Recommendation: Keep disabled for safety; use manual purge after review
+  auto_purge: false
+
+# Telemetry Configuration
+# Performance metrics and operational insights
+telemetry:
+  # Enable telemetry collection
+  # Tracks job performance, throughput, and system metrics
+  # Default: true
+  # Recommendation: Keep enabled for operational visibility
+  enabled: true
+
+  # Telemetry output directory
+  # Default: ~/.futurnal/telemetry
+  # Recommendation: Use fast storage; rotates automatically
+  output_dir: ~/.futurnal/telemetry
+
+  # Days to retain telemetry data
+  # Range: 1-365
+  # Default: 90
+  # Recommendation: 90 days for trend analysis and capacity planning
+  retention_days: 90
+
+# Security Configuration
+# Privacy-first controls and audit requirements
+security:
+  # Enable comprehensive audit logging
+  # Logs all configuration changes and operator actions
+  # Default: true
+  # Recommendation: Keep enabled for compliance and debugging
+  audit_logging: true
+
+  # Redact file paths in logs and telemetry
+  # When true, paths are hashed to protect privacy
+  # Default: true
+  # Recommendation: Keep enabled for privacy-first operations
+  path_redaction: true
+
+  # Require explicit consent for data processing
+  # When true, blocks processing until user grants consent per source
+  # Default: true
+  # Recommendation: Keep enabled to comply with privacy regulations
+  consent_required: true
+
+# Environment Variable Overrides
+# You can override any setting via environment variables with the FUTURNAL_ prefix:
+#
+# Workers:
+#   FUTURNAL_MAX_WORKERS=16
+#   FUTURNAL_HARDWARE_CAP_ENABLED=false
+#
+# Retry:
+#   FUTURNAL_RETRY_MAX_ATTEMPTS=5
+#   FUTURNAL_RETRY_BASE_DELAY_SECONDS=120
+#
+# Security:
+#   FUTURNAL_AUDIT_LOGGING=true
+#   FUTURNAL_PATH_REDACTION=true
+#   FUTURNAL_CONSENT_REQUIRED=true
+#
+# Note: Environment variables take precedence over configuration file values
+
+# Configuration Management Commands
+# Initialize configuration:
+#   futurnal orchestrator config init
+#
+# Validate configuration:
+#   futurnal orchestrator config validate --verbose
+#
+# Show current configuration:
+#   futurnal orchestrator config show
+#   futurnal orchestrator config show --section workers
+#   futurnal orchestrator config show --format json
+#
+# Update a specific value:
+#   futurnal orchestrator config set workers.max_workers 16
+#   futurnal orchestrator config set retry.max_attempts 5
+#
+# Migrate to latest schema:
+#   futurnal orchestrator config migrate --dry-run
+#   futurnal orchestrator config migrate
+
+# Security Best Practices
+# 1. Never store secrets in this configuration file
+# 2. Use keyring or environment variables for sensitive data
+# 3. Keep audit_logging enabled for compliance
+# 4. Enable path_redaction for privacy protection
+# 5. Regularly review quarantined jobs
+# 6. Monitor telemetry for anomalies
+# 7. Use WAL mode for data durability
+# 8. Set appropriate retention policies
+
+# Performance Tuning
+# For high-throughput ingestion:
+#   - Increase max_workers (up to CPU core count * 2)
+#   - Increase checkpoint_interval for better write performance
+#   - Use SSD storage for queue database
+#   - Monitor system resources via telemetry
+#
+# For resource-constrained systems:
+#   - Reduce max_workers (4-8 workers)
+#   - Enable hardware_cap_enabled
+#   - Reduce telemetry retention_days
+#   - Consider disabling telemetry if not needed
+#
+# For reliability-critical deployments:
+#   - Keep wal_mode enabled
+#   - Reduce checkpoint_interval for faster recovery
+#   - Enable quarantine system
+#   - Increase audit and telemetry retention

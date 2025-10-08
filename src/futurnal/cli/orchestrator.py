@@ -23,6 +23,7 @@ from futurnal.orchestrator.scheduler import IngestionOrchestrator
 from futurnal.orchestrator.queue import JobQueue, JobStatus
 from futurnal.orchestrator.models import IngestionJob, JobPriority, JobType
 from futurnal.orchestrator.quarantine_cli import quarantine_app
+from futurnal.orchestrator.config_cli import orchestrator_config_app
 from futurnal.orchestrator.status import collect_status_report
 from futurnal.orchestrator.source_control import PausedSourcesRegistry
 from futurnal.orchestrator.health import collect_health_report
@@ -33,6 +34,9 @@ orchestrator_app = typer.Typer(help="Orchestrator management commands")
 
 # Add quarantine management as a sub-command
 orchestrator_app.add_typer(quarantine_app, name="quarantine")
+
+# Add orchestrator configuration management
+orchestrator_app.add_typer(orchestrator_config_app, name="config")
 
 
 def _get_workspace_path(workspace: Optional[Path] = None) -> Path:
@@ -660,47 +664,9 @@ def telemetry_summary(
         console.print(table)
 
 
-@orchestrator_app.command("config")
-def config_command(
-    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    section: Optional[str] = typer.Option(None, "--section", help="Show specific section: workers, retry, resources"),
-    format_output: str = typer.Option("yaml", "--format", help="Output format: table, json, or yaml"),
-) -> None:
-    """Display orchestrator configuration."""
-    try:
-        settings = load_settings()
-
-        config_data = {
-            "workspace": str(settings.workspace.workspace_path),
-            "storage": {
-                "neo4j_uri": settings.workspace.storage.neo4j_uri,
-                "neo4j_username": settings.workspace.storage.neo4j_username,
-                "chroma_path": str(settings.workspace.storage.chroma_path),
-            },
-            "security": {
-                "telemetry_retention_days": settings.workspace.security.telemetry_retention_days,
-            },
-        }
-
-        if section:
-            if section in config_data:
-                config_data = {section: config_data[section]}
-            else:
-                console.print(f"[red]Unknown section: {section}[/red]")
-                console.print(f"Available: {', '.join(config_data.keys())}")
-                raise typer.Exit(1)
-
-        if format_output == "json":
-            console.print(json.dumps(config_data, indent=2))
-        elif format_output == "yaml":
-            console.print(yaml.dump(config_data, default_flow_style=False))
-        else:
-            # Pretty print format
-            console.print(yaml.dump(config_data, default_flow_style=False))
-
-    except Exception as e:
-        console.print(f"[red]Failed to load configuration: {e}[/red]")
-        raise typer.Exit(1)
+# NOTE: Orchestrator config commands have been moved to orchestrator_config_app
+# See orchestrator_app.add_typer(orchestrator_config_app, name="config") above
+# This provides: validate, show, migrate, init, and set commands
 
 
 def _parse_since(since_str: str) -> Optional[datetime]:
