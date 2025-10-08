@@ -1,0 +1,150 @@
+# Retry Policy Configuration for Futurnal Ingestion Connectors
+#
+# This file defines retry behavior for each connector type, including
+# backoff strategies, maximum attempts, delays, and failure-type-specific overrides.
+#
+# Place this file at: ~/.futurnal/config/retry_policies.yaml
+#
+# For more information, see: docs/phase-1/orchestrator-production-plan/02-per-connector-retry-policies.md
+
+retry_policies:
+  # Local Files Connector
+  # Fast retry for local filesystem operations
+  local_files:
+    strategy: exponential_backoff
+    max_attempts: 3
+    base_delay_seconds: 30  # Start with 30 seconds
+    max_delay_seconds: 300  # Cap at 5 minutes
+    jitter_factor: 0.2  # ±20% randomness to avoid thundering herd
+    backoff_multiplier: 2.0  # Double delay each retry
+    permanent_failures_no_retry: true
+
+  # Obsidian Vault Connector
+  # Fast retry for local vault access
+  obsidian_vault:
+    strategy: exponential_backoff
+    max_attempts: 3
+    base_delay_seconds: 30
+    max_delay_seconds: 300
+    jitter_factor: 0.2
+    backoff_multiplier: 2.0
+    permanent_failures_no_retry: true
+
+  # IMAP Mailbox Connector
+  # Conservative retry for network operations
+  imap_mailbox:
+    strategy: exponential_backoff
+    max_attempts: 5  # More attempts for email sync
+    base_delay_seconds: 120  # Start with 2 minutes
+    max_delay_seconds: 1800  # Cap at 30 minutes
+    jitter_factor: 0.3  # ±30% randomness
+    backoff_multiplier: 2.0
+    transient_max_attempts: 7  # Extra attempts for transient failures (network hiccups)
+    rate_limit_delay_seconds: 600  # 10 minutes for rate limits
+    permanent_failures_no_retry: true
+
+  # GitHub Repository Connector
+  # Rate-limit aware retry for API operations
+  github_repository:
+    strategy: exponential_backoff
+    max_attempts: 5
+    base_delay_seconds: 300  # Start with 5 minutes for API limits
+    max_delay_seconds: 3600  # Cap at 1 hour
+    jitter_factor: 0.25  # ±25% randomness
+    backoff_multiplier: 2.0
+    rate_limit_delay_seconds: 900  # 15 minutes for rate limits
+    permanent_failures_no_retry: true
+
+# =============================================================================
+# Configuration Reference
+# =============================================================================
+
+# Available Retry Strategies:
+# ---------------------------
+# exponential_backoff: delay = base_delay * (backoff_multiplier ** attempt)
+#   Example with base=60s, multiplier=2.0:
+#     Attempt 0: 60s, Attempt 1: 120s, Attempt 2: 240s, Attempt 3: 480s
+#
+# linear_backoff: delay = base_delay * (attempt + 1)
+#   Example with base=60s:
+#     Attempt 0: 60s, Attempt 1: 120s, Attempt 2: 180s, Attempt 3: 240s
+#
+# fixed_delay: constant delay = base_delay
+#   Example with base=60s:
+#     Attempt 0: 60s, Attempt 1: 60s, Attempt 2: 60s, Attempt 3: 60s
+#
+# immediate: no delay (testing only)
+# no_retry: fail immediately, no retries
+
+# Parameter Constraints:
+# ----------------------
+# max_attempts: 1-10 (default: 3)
+# transient_max_attempts: 1-20 (optional override for transient failures)
+# base_delay_seconds: 1-3600 (1 second to 1 hour)
+# max_delay_seconds: 1-86400 (1 second to 24 hours)
+# jitter_factor: 0.0-1.0 (0% to 100%, default: 0.2)
+# backoff_multiplier: 1.0-10.0 (default: 2.0)
+# rate_limit_delay_seconds: 1-7200 (1 second to 2 hours, optional)
+# permanent_failures_no_retry: true/false (default: true)
+
+# Failure Type Auto-Detection:
+# -----------------------------
+# The system automatically classifies failures into types for appropriate retry strategies:
+#
+# TRANSIENT: Temporary issues that may resolve with retry
+#   - Network timeouts, connection refused, temporary unavailable
+#   - HTTP 502, 503, 504 errors
+#   - Examples: "timeout", "connection refused", "unavailable"
+#
+# RATE_LIMITED: API rate limits that need extended backoff
+#   - HTTP 429 Too Many Requests
+#   - "rate limit exceeded", "quota exceeded", "throttle"
+#   - Uses rate_limit_delay_seconds if configured
+#
+# PERMANENT: Non-recoverable errors that should not retry
+#   - Permission denied, authentication failed, invalid credentials
+#   - HTTP 401, 403, 404 errors
+#   - Skips retry if permanent_failures_no_retry is true
+#
+# UNKNOWN: Unclassified errors
+#   - Uses standard retry policy without special handling
+
+# Jitter Benefits:
+# ----------------
+# Jitter adds randomness to retry delays to prevent "thundering herd" problems
+# where multiple jobs retry simultaneously and overwhelm resources.
+#
+# Example with base=60s, jitter=0.2 (±20%):
+#   Actual delays range from 48s to 72s (60s ± 12s)
+#
+# Recommended jitter factors:
+#   - Local operations: 0.1-0.2 (10-20%)
+#   - Network operations: 0.2-0.3 (20-30%)
+#   - API operations: 0.25-0.4 (25-40%)
+
+# Tuning Recommendations:
+# -----------------------
+# Local Files / Obsidian:
+#   - Fast retry (30s base) since failures are rare
+#   - Low max attempts (3) since local issues don't benefit from many retries
+#
+# IMAP Email:
+#   - Conservative retry (120s base) for network reliability
+#   - Higher max attempts (5-7) since network issues are transient
+#   - Extended rate limit delay (10 min) for server limits
+#
+# GitHub API:
+#   - Long base delay (5 min) to respect API rate limits
+#   - Extended rate limit delay (15 min) for explicit rate limiting
+#   - High max delay (1 hour) for severe rate limiting scenarios
+
+# Validation:
+# -----------
+# Test your configuration before deployment:
+#
+#   futurnal retry validate ~/.futurnal/config/retry_policies.yaml
+#
+# View current policies:
+#
+#   futurnal retry show
+#   futurnal retry show --format json

@@ -24,6 +24,7 @@ class TelemetryRecorder:
             "failed": {"count": 0, "duration": 0.0, "files": 0, "bytes": 0.0},
         }
     )
+    _retry_stats: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -74,6 +75,31 @@ class TelemetryRecorder:
         if bytes_processed is not None:
             status_stats["bytes"] += bytes_processed
 
+        # Track retry-specific metrics
+        if status == "retry_scheduled" and metadata_payload:
+            connector_type = metadata_payload.get("connector_type", "unknown")
+            failure_type = metadata_payload.get("failure_type", "unknown")
+
+            if connector_type not in self._retry_stats:
+                self._retry_stats[connector_type] = {
+                    "total_retries": 0,
+                    "by_failure_type": {},
+                    "total_delay_seconds": 0,
+                    "attempts": [],
+                }
+
+            connector_stats = self._retry_stats[connector_type]
+            connector_stats["total_retries"] += 1
+            connector_stats["total_delay_seconds"] += metadata_payload.get(
+                "delay_seconds", 0
+            )
+            connector_stats["attempts"].append(metadata_payload.get("attempt", 0))
+
+            # Track by failure type
+            if failure_type not in connector_stats["by_failure_type"]:
+                connector_stats["by_failure_type"][failure_type] = 0
+            connector_stats["by_failure_type"][failure_type] += 1
+
         path = self.output_dir / self.metrics_file
         with path.open("a", encoding="utf-8") as fp:
             fp.write(json.dumps(entry) + "\n")
@@ -118,6 +144,29 @@ class TelemetryRecorder:
             },
             "statuses": statuses,
         }
+
+        # Add retry metrics if available
+        if self._retry_stats:
+            retry_metrics = {}
+            for connector_type, stats in self._retry_stats.items():
+                total_retries = stats["total_retries"]
+                attempts = stats["attempts"]
+                avg_attempts = sum(attempts) / len(attempts) if attempts else 0.0
+
+                retry_metrics[connector_type] = {
+                    "total_retries": total_retries,
+                    "avg_attempts_per_retry": round(avg_attempts, 2),
+                    "total_delay_seconds": stats["total_delay_seconds"],
+                    "avg_delay_seconds": (
+                        round(stats["total_delay_seconds"] / total_retries, 2)
+                        if total_retries
+                        else 0.0
+                    ),
+                    "by_failure_type": stats["by_failure_type"],
+                }
+
+            summary["retry_metrics"] = retry_metrics
+
         return summary
 
 

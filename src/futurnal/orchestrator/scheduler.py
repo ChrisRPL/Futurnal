@@ -39,7 +39,8 @@ from .models import IngestionJob, JobPriority, JobType
 from .audit import AuditEvent, AuditLogger
 from .metrics import TelemetryRecorder
 from .queue import JobQueue
-from .quarantine import QuarantineStore, classify_failure
+from .quarantine import QuarantineStore, classify_failure, quarantine_reason_to_failure_type
+from .retry_policy import RetryBudget, RetryPolicyRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,7 @@ class IngestionOrchestrator:
         element_sink: ElementSink | None = None,
         telemetry: TelemetryRecorder | None = None,
         quarantine_store: QuarantineStore | None = None,
+        retry_policy_registry: Optional[RetryPolicyRegistry] = None,
     ) -> None:
         self._workspace_dir = Path(workspace_dir)
         self._workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -81,6 +83,10 @@ class IngestionOrchestrator:
         self._quarantine = quarantine_store or QuarantineStore(
             self._workspace_dir / "quarantine" / "quarantine.db"
         )
+
+        # Retry policy system
+        self._retry_policies = retry_policy_registry or RetryPolicyRegistry()
+        self._retry_budgets: Dict[str, RetryBudget] = {}
         self._local_connector = LocalFilesConnector(
             workspace_dir=self._workspace_dir,
             state_store=state_store,
@@ -405,6 +411,11 @@ class IngestionOrchestrator:
                         "quarantine_job_id": quarantine_job_id,
                     },
                 )
+
+            # Clean up retry budget on success
+            if job.job_id in self._retry_budgets:
+                del self._retry_budgets[job.job_id]
+
             self._record_audit_event(job, "succeeded")
 
     async def _execute_job(self, job: IngestionJob) -> None:
@@ -553,26 +564,95 @@ class IngestionOrchestrator:
         self._audit_logger.record(event)
 
     async def _maybe_retry(self, job: IngestionJob) -> None:
-        record = DataRetryRecord(job_id=job.job_id, attempts=job.payload.get("attempts", 0))
-        if record.attempts >= self._max_retries:
-            # Quarantine job instead of abandoning it
+        """Enhanced retry with per-connector policies and failure classification.
+
+        Args:
+            job: Failed ingestion job to potentially retry
+        """
+        # Get or create retry budget
+        budget = self._retry_budgets.get(job.job_id)
+        if not budget:
+            budget = RetryBudget(
+                job_id=job.job_id,
+                job_type=job.job_type,
+                first_attempt_at=datetime.utcnow(),
+            )
+            self._retry_budgets[job.job_id] = budget
+
+        # Classify failure type for retry strategy selection
+        error_message = job.payload.get("error", "")
+        error_exception = job.payload.get("error_exception")  # Optional exception instance
+
+        # Use enhanced classification
+        quarantine_reason = classify_failure(
+            error_message,
+            exception=error_exception if error_exception else None,
+        )
+        budget.failure_type = quarantine_reason_to_failure_type(quarantine_reason)
+
+        # Get connector-specific policy
+        policy = self._retry_policies.get_policy(job.job_type)
+
+        # Check if retry allowed
+        if not budget.can_retry(policy):
+            logger.info(
+                "Retry budget exhausted, quarantining job",
+                extra={
+                    "ingestion_job_id": job.job_id,
+                    "job_type": job.job_type.value,
+                    "attempts": budget.attempts,
+                    "max_attempts": policy.max_attempts,
+                    "failure_type": budget.failure_type.value,
+                },
+            )
             await self._quarantine_job(job)
+            # Clean up budget after quarantine
+            del self._retry_budgets[job.job_id]
             return
 
-        record.attempts += 1
-        job.payload["attempts"] = record.attempts
+        # Calculate delay with jitter
+        delay_seconds = budget.next_delay(policy)
+        budget.attempts += 1
+        budget.last_attempt_at = datetime.utcnow()
+        budget.total_delay_seconds += delay_seconds
+
         logger.info(
-            "Rescheduling job",
+            "Scheduling retry with policy",
             extra={
                 "ingestion_job_id": job.job_id,
-                "ingestion_source": job.payload.get("source_name"),
-                "ingestion_attempt": record.attempts,
-                "ingestion_max_retries": self._max_retries,
+                "job_type": job.job_type.value,
+                "attempt": budget.attempts,
+                "max_attempts": policy.max_attempts,
+                "delay_seconds": delay_seconds,
+                "failure_type": budget.failure_type.value,
+                "retry_strategy": policy.strategy.value,
             },
         )
+
+        # Update job payload with retry metadata
+        job.payload["attempts"] = budget.attempts
+        job.payload["failure_type"] = budget.failure_type.value
         job.payload["trigger"] = "retry"
-        self._job_queue.reschedule(job.job_id, self._retry_backoff_seconds)
-        await asyncio.sleep(self._retry_backoff_seconds)
+        job.payload["retry_delay_seconds"] = delay_seconds
+
+        # Reschedule with calculated delay
+        self._job_queue.reschedule(job.job_id, delay_seconds)
+
+        # Record telemetry
+        if self._telemetry:
+            self._telemetry.record(
+                job_id=job.job_id,
+                duration=0.0,
+                status="retry_scheduled",
+                metadata={
+                    "job_type": job.job_type.value,
+                    "attempt": budget.attempts,
+                    "delay_seconds": delay_seconds,
+                    "failure_type": budget.failure_type.value,
+                    "retry_strategy": policy.strategy.value,
+                    "connector_type": job.job_type.value,
+                },
+            )
 
     async def _quarantine_job(self, job: IngestionJob) -> None:
         """Move failed job to quarantine with classification.

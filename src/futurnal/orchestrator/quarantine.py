@@ -31,6 +31,7 @@ class QuarantineReason(str, Enum):
     TIMEOUT = "timeout"  # Job exceeded time limit
     INVALID_STATE = "invalid_state"  # State store corruption
     DEPENDENCY_FAILURE = "dependency_failure"  # Neo4j/ChromaDB unavailable
+    RATE_LIMITED = "rate_limited"  # API rate limits exceeded
     UNKNOWN = "unknown"  # Uncategorized failure
 
 
@@ -460,16 +461,19 @@ class QuarantineStore:
 def classify_failure(
     error_message: str,
     exception_type: Optional[Type[Exception]] = None,
+    exception: Optional[Exception] = None,
 ) -> QuarantineReason:
     """Classify failure reason from error message and exception type.
 
-    Uses a two-tier approach:
+    Uses a multi-tier approach:
     1. First checks exception type if available
-    2. Falls back to pattern matching on error message
+    2. Checks exception instance for status codes (HTTP errors)
+    3. Falls back to pattern matching on error message
 
     Args:
         error_message: The exception message
         exception_type: Optional exception class
+        exception: Optional exception instance for detailed inspection
 
     Returns:
         QuarantineReason classification
@@ -483,22 +487,141 @@ def classify_failure(
         elif issubclass(exception_type, TimeoutError):
             return QuarantineReason.TIMEOUT
 
-    # Secondary classification: message pattern matching
+    # Secondary classification: exception instance with status code
+    if exception is not None and hasattr(exception, "status_code"):
+        status_code = getattr(exception, "status_code")
+        if status_code == 429:
+            return QuarantineReason.RATE_LIMITED
+        elif status_code in [502, 503, 504]:
+            return QuarantineReason.TIMEOUT  # Transient server errors
+        elif status_code in [401, 403, 404]:
+            return QuarantineReason.PERMISSION_DENIED  # Access/auth errors
+
+    # Tertiary classification: message pattern matching
     error_lower = error_message.lower()
 
-    if "permission denied" in error_lower or "access denied" in error_lower:
+    # Rate limiting patterns (check first as they're most specific)
+    if any(
+        pattern in error_lower
+        for pattern in [
+            "rate limit",
+            "too many requests",
+            "quota exceeded",
+            "429",
+            "throttle",
+            "rate-limit",
+        ]
+    ):
+        return QuarantineReason.RATE_LIMITED
+
+    # Permission/access patterns
+    if any(
+        pattern in error_lower
+        for pattern in [
+            "permission denied",
+            "access denied",
+            "authentication failed",
+            "invalid credentials",
+            "unauthorized",
+            "forbidden",
+            "401",
+            "403",
+        ]
+    ):
         return QuarantineReason.PERMISSION_DENIED
-    elif "parse" in error_lower or "parsing" in error_lower:
+
+    # Parse errors
+    if any(
+        pattern in error_lower
+        for pattern in [
+            "parse",
+            "parsing",
+            "malformed",
+            "invalid format",
+            "decode error",
+        ]
+    ):
         return QuarantineReason.PARSE_ERROR
-    elif "memory" in error_lower or "disk" in error_lower:
+
+    # Resource exhaustion
+    if any(
+        pattern in error_lower
+        for pattern in [
+            "memory",
+            "disk",
+            "out of space",
+            "resource limit",
+            "too large",
+        ]
+    ):
         return QuarantineReason.RESOURCE_EXHAUSTED
-    elif "timeout" in error_lower or "timed out" in error_lower:
-        return QuarantineReason.TIMEOUT
-    elif "neo4j" in error_lower or "chroma" in error_lower:
-        return QuarantineReason.DEPENDENCY_FAILURE
-    elif "connector" in error_lower:
-        return QuarantineReason.CONNECTOR_ERROR
-    elif "state" in error_lower or "corrupt" in error_lower:
+
+    # State corruption (check before dependency to catch "corrupt database")
+    if any(pattern in error_lower for pattern in ["corrupt", "inconsistent"]):
         return QuarantineReason.INVALID_STATE
-    else:
-        return QuarantineReason.UNKNOWN
+
+    # Dependency failures (check before timeout to catch specific services)
+    if any(
+        pattern in error_lower
+        for pattern in [
+            "neo4j",
+            "chroma",
+            "database",
+        ]
+    ):
+        return QuarantineReason.DEPENDENCY_FAILURE
+
+    # Timeout patterns (check after dependency to avoid false matches)
+    if any(
+        pattern in error_lower
+        for pattern in [
+            "timeout",
+            "timed out",
+            "deadline exceeded",
+            "connection refused",
+            "temporary",
+            "unavailable",
+            "503",
+            "502",
+            "504",
+        ]
+    ):
+        return QuarantineReason.TIMEOUT
+
+    # Connector errors
+    if "connector" in error_lower:
+        return QuarantineReason.CONNECTOR_ERROR
+
+    # State-related (broader check for "state")
+    if "state" in error_lower:
+        return QuarantineReason.INVALID_STATE
+
+    return QuarantineReason.UNKNOWN
+
+
+def quarantine_reason_to_failure_type(reason: QuarantineReason) -> str:
+    """Map QuarantineReason to retry FailureType.
+
+    Args:
+        reason: Quarantine reason classification
+
+    Returns:
+        FailureType string for retry policy selection
+    """
+    # Import here to avoid circular dependency
+    from .retry_policy import FailureType
+
+    # Map quarantine reasons to failure types for retry logic
+    mapping = {
+        QuarantineReason.RATE_LIMITED: FailureType.RATE_LIMITED,
+        QuarantineReason.TIMEOUT: FailureType.TRANSIENT,
+        QuarantineReason.DEPENDENCY_FAILURE: FailureType.TRANSIENT,
+        QuarantineReason.CONNECTOR_ERROR: FailureType.TRANSIENT,
+        QuarantineReason.PERMISSION_DENIED: FailureType.PERMANENT,
+        QuarantineReason.INVALID_STATE: FailureType.PERMANENT,
+        QuarantineReason.PARSE_ERROR: FailureType.UNKNOWN,
+        QuarantineReason.RESOURCE_EXHAUSTED: FailureType.UNKNOWN,
+        QuarantineReason.UNKNOWN: FailureType.UNKNOWN,
+    }
+
+    return mapping.get(reason, FailureType.UNKNOWN)
