@@ -24,6 +24,15 @@ markers = [
     "security: Security and privacy validation tests",
     "accuracy: Thread reconstruction and extraction accuracy tests",
     "integration: End-to-end workflow integration tests",
+    # GitHub connector specific markers
+    "github_integration: GitHub end-to-end sync and workflow tests",
+    "github_security: GitHub security validation and credential safety tests",
+    "github_performance: GitHub performance benchmarks with defined targets",
+    "github_load: GitHub load and stress tests for rate limits and concurrency",
+    "github_provider_com: GitHub.com specific tests (public cloud)",
+    "github_provider_enterprise: GitHub Enterprise Server specific tests",
+    "github_regression: GitHub critical path regression tests",
+    "github_manual: GitHub manual verification tests requiring user interaction",
 ]
 
 

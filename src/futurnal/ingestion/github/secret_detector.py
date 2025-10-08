@@ -59,19 +59,21 @@ class SecretDetector:
             r"-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----",
             r"-----BEGIN\s+ENCRYPTED\s+PRIVATE\s+KEY-----",
             r"-----BEGIN\s+OPENSSH\s+PRIVATE\s+KEY-----",
-            # GitHub tokens
-            r"ghp_[a-zA-Z0-9]{36}",  # Personal Access Token
-            r"gho_[a-zA-Z0-9]{36}",  # OAuth Access Token
-            r"ghu_[a-zA-Z0-9]{36}",  # User-to-server token
-            r"ghs_[a-zA-Z0-9]{36}",  # Server-to-server token
-            r"ghr_[a-zA-Z0-9]{36}",  # Refresh token
+            # GitHub tokens (flexible length for various formats)
+            r"ghp_[a-zA-Z0-9]{30,}",  # Personal Access Token
+            r"gho_[a-zA-Z0-9]{30,}",  # OAuth Access Token
+            r"ghu_[a-zA-Z0-9]{30,}",  # User-to-server token
+            r"ghs_[a-zA-Z0-9]{30,}",  # Server-to-server token
+            r"ghr_[a-zA-Z0-9]{30,}",  # Refresh token
+            r"github_pat_[a-zA-Z0-9_]{25,}",  # Fine-grained PAT (flexible)
             # AWS credentials
             r"AKIA[0-9A-Z]{16}",  # AWS Access Key ID
             r"(?i)aws[_-]?secret[_-]?access[_-]?key[\s]*[=:]+[\s]*['\"]?([a-zA-Z0-9/+=]{40})",
             # Google Cloud
             r"(?i)google[_-]?api[_-]?key[\s]*[=:]+[\s]*['\"]?([a-zA-Z0-9_\-]{39})",
-            # Slack tokens
-            r"xox[baprs]-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24,32}",
+            # Slack tokens (various formats)
+            r"xox[baprs]-[0-9]{8,}-[0-9]{8,}-[a-zA-Z0-9]{20,}",
+            r"xox[baprs]-[a-zA-Z0-9-]{20,}",  # Alternative format
             # Stripe keys
             r"sk_live_[0-9a-zA-Z]{24,}",
             r"rk_live_[0-9a-zA-Z]{24,}",
