@@ -137,8 +137,18 @@ class IngestionOrchestrator:
         self._configured_workers = self._hardware_worker_cap
         self._semaphore: Optional[asyncio.Semaphore] = None
         self._active_jobs = 0
+        self._active_jobs_map: Dict[str, Dict] = {}  # Track active job IDs for invariant checking
         self._debounce_windows: Dict[str, float] = {}
         self._observer: Optional[Observer] = None
+
+        # Deadlock detection and invariant checking
+        from .deadlock import DeadlockDetector
+        self._deadlock_detector = DeadlockDetector(
+            queue=self._job_queue,
+            timeout_seconds=600,  # 10 minutes default
+        )
+        self._deadlock_detection_task: Optional[asyncio.Task] = None
+        self._invariant_check_task: Optional[asyncio.Task] = None
 
     def register_source(self, registration: SourceRegistration) -> None:
         if registration.schedule not in {"@manual", "@interval"} and not is_valid(
@@ -204,6 +214,10 @@ class IngestionOrchestrator:
         self._start_observer()
         # Start periodic resource sampling
         self._sampling_task = self._loop.create_task(self._resource_sampling_loop())
+        # Start periodic deadlock detection
+        self._deadlock_detection_task = self._loop.create_task(self._deadlock_detection_loop())
+        # Start periodic invariant checking
+        self._invariant_check_task = self._loop.create_task(self._invariant_check_loop())
         self._running = True
         logger.info("Ingestion orchestrator started")
 
@@ -223,6 +237,22 @@ class IngestionOrchestrator:
             except asyncio.CancelledError:
                 pass
             self._sampling_task = None
+        # Cancel deadlock detection task
+        if self._deadlock_detection_task:
+            self._deadlock_detection_task.cancel()
+            try:
+                await self._deadlock_detection_task
+            except asyncio.CancelledError:
+                pass
+            self._deadlock_detection_task = None
+        # Cancel invariant check task
+        if self._invariant_check_task:
+            self._invariant_check_task.cancel()
+            try:
+                await self._invariant_check_task
+            except asyncio.CancelledError:
+                pass
+            self._invariant_check_task = None
         self._running = False
         logger.info("Ingestion orchestrator stopped")
 
@@ -301,6 +331,12 @@ class IngestionOrchestrator:
             yield job
 
     async def _run_job(self, job: IngestionJob) -> None:
+        # Track active job for invariant checking
+        self._active_jobs_map[job.job_id] = {
+            "job_type": job.job_type.value,
+            "started_at": datetime.utcnow(),
+        }
+
         # Acquire connector-specific semaphore
         connector_semaphore = self._per_connector_semaphores.get(job.job_type)
         if connector_semaphore:
@@ -326,6 +362,10 @@ class IngestionOrchestrator:
             # Adaptive concurrency adjustment
             if metrics and self._should_adjust_concurrency():
                 await self._adjust_concurrency(job.job_type, metrics)
+
+            # Remove from active jobs map
+            if job.job_id in self._active_jobs_map:
+                del self._active_jobs_map[job.job_id]
 
             # Also release global semaphore for backward compatibility
             self._active_jobs -= 1
@@ -784,7 +824,10 @@ class IngestionOrchestrator:
         # Classify the failure
         reason = classify_failure(error_message)
 
-        # Quarantine the job
+        # Mark job as QUARANTINED in the main queue
+        self._job_queue.mark_quarantined(job.job_id)
+
+        # Also add to quarantine store for detailed tracking
         quarantined = self._quarantine.quarantine(
             job=job,
             reason=reason,
@@ -947,6 +990,74 @@ class IngestionOrchestrator:
         except asyncio.CancelledError:
             logger.debug("Resource sampling loop cancelled")
             raise
+
+    async def _deadlock_detection_loop(self) -> None:
+        """Periodically detect and recover stalled jobs.
+
+        Runs in the background while the orchestrator is active,
+        checking for jobs stuck in RUNNING state beyond the timeout.
+        """
+        try:
+            while self._running:
+                # Check for stalled jobs
+                stalled_jobs = self._deadlock_detector.detect_stalled_jobs()
+
+                # Recover each stalled job
+                for job_id in stalled_jobs:
+                    try:
+                        self._deadlock_detector.recover_stalled_job(job_id)
+                        logger.info(
+                            "Recovered stalled job",
+                            extra={"job_id": job_id},
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            "Failed to recover stalled job",
+                            extra={"job_id": job_id, "error": str(exc)},
+                        )
+
+                # Check every 60 seconds
+                await asyncio.sleep(60.0)
+        except asyncio.CancelledError:
+            logger.debug("Deadlock detection loop cancelled")
+            raise
+
+    async def _invariant_check_loop(self) -> None:
+        """Periodically check state machine invariants.
+
+        Runs in the background while the orchestrator is active,
+        verifying that state machine consistency is maintained.
+        """
+        try:
+            while self._running:
+                # Check invariants via the job queue's validator
+                violations = self._job_queue._validator.check_invariants(self)
+
+                # Log any violations
+                if violations:
+                    logger.error(
+                        "State machine invariant violations detected",
+                        extra={
+                            "violation_count": len(violations),
+                            "violations": violations,
+                        },
+                    )
+                else:
+                    logger.debug("State machine invariants check passed")
+
+                # Check every 5 minutes
+                await asyncio.sleep(300.0)
+        except asyncio.CancelledError:
+            logger.debug("Invariant check loop cancelled")
+            raise
+
+    def check_invariants(self) -> List[str]:
+        """Manually trigger state machine invariant checks.
+
+        Returns:
+            List of invariant violation descriptions (empty if all pass)
+        """
+        return self._job_queue._validator.check_invariants(self)
 
 
 class _SourceEventHandler(FileSystemEventHandler):

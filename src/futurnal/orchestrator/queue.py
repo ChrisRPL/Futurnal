@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterator, List, Optional
 
 from .models import IngestionJob, JobPriority, JobType
+from .exceptions import InvalidStateTransitionError, StateTransitionRaceError, JobNotFoundError
 
 
 class JobStatus(str, Enum):
@@ -18,6 +19,7 @@ class JobStatus(str, Enum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    QUARANTINED = "quarantined"
 
 
 SCHEMA = """
@@ -45,13 +47,19 @@ class JobQueue:
     metadata and retry counters remain consistent.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, validator: Optional["StateMachineValidator"] = None) -> None:
         self._path = path
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self._path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute(SCHEMA)
         self._lock = threading.Lock()
+
+        # State machine validator (lazy import to avoid circular dependencies)
+        if validator is None:
+            from .state_machine import StateMachineValidator
+            validator = StateMachineValidator()
+        self._validator = validator
 
     def enqueue(self, job: IngestionJob) -> None:
         payload_json = json.dumps(job.payload)
@@ -100,27 +108,223 @@ class JobQueue:
                 scheduled_for=datetime.fromisoformat(scheduled_for) if scheduled_for else None,
             )
 
-    def mark_running(self, job_id: str) -> None:
+    def _get_status(self, job_id: str) -> JobStatus:
+        """Get current status of a job.
+
+        Args:
+            job_id: Job identifier
+
+        Returns:
+            Current JobStatus of the job
+
+        Raises:
+            JobNotFoundError: If job doesn't exist
+        """
+        cur = self._conn.cursor()
+        cur.execute("SELECT status FROM jobs WHERE job_id = ?", (job_id,))
+        row = cur.fetchone()
+        if not row:
+            raise JobNotFoundError(f"Job {job_id} not found")
+        return JobStatus(row[0])
+
+    def mark_running(self, job_id: str, *, idempotent: bool = True) -> None:
+        """Idempotently mark job as running.
+
+        Args:
+            job_id: Job identifier
+            idempotent: If True, allow same-state transitions (default: True)
+
+        Raises:
+            InvalidStateTransitionError: If transition is invalid and not idempotent
+            StateTransitionRaceError: If job state changed during transition
+            JobNotFoundError: If job doesn't exist
+        """
         with self._lock:
+            # Get current status
+            current_status = self._get_status(job_id)
+
+            # Validate transition
+            try:
+                self._validator.validate_transition(
+                    job_id=job_id,
+                    from_status=current_status,
+                    to_status=JobStatus.RUNNING,
+                )
+            except InvalidStateTransitionError:
+                if not idempotent:
+                    raise
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Skipping invalid transition (idempotent mode)",
+                    extra={"job_id": job_id},
+                )
+                return
+
+            # Already running - idempotent
+            if current_status == JobStatus.RUNNING and idempotent:
+                return
+
+            # Execute state transition atomically
             with self._conn:
                 self._conn.execute(
-                    "UPDATE jobs SET status = 'running', attempts = attempts + 1, updated_at = ? WHERE job_id = ?",
+                    """
+                    UPDATE jobs
+                    SET status = 'running',
+                        attempts = attempts + 1,
+                        updated_at = ?
+                    WHERE job_id = ? AND status = ?
+                    """,
+                    (datetime.utcnow().isoformat(), job_id, current_status.value),
+                )
+
+                # Verify transition succeeded
+                if self._conn.total_changes == 0:
+                    raise StateTransitionRaceError(
+                        f"Job {job_id} changed state during transition"
+                    )
+
+    def mark_completed(self, job_id: str, *, idempotent: bool = True) -> None:
+        """Idempotently mark job as completed.
+
+        Args:
+            job_id: Job identifier
+            idempotent: If True, allow same-state transitions (default: True)
+
+        Raises:
+            InvalidStateTransitionError: If transition is invalid and not idempotent
+            StateTransitionRaceError: If job state changed during transition
+            JobNotFoundError: If job doesn't exist
+        """
+        with self._lock:
+            current_status = self._get_status(job_id)
+
+            # Validate transition
+            try:
+                self._validator.validate_transition(
+                    job_id=job_id,
+                    from_status=current_status,
+                    to_status=JobStatus.SUCCEEDED,
+                )
+            except InvalidStateTransitionError:
+                if not idempotent:
+                    raise
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Skipping invalid transition (idempotent mode)",
+                    extra={"job_id": job_id},
+                )
+                return
+
+            # Already succeeded - idempotent
+            if current_status == JobStatus.SUCCEEDED and idempotent:
+                return
+
+            # Only succeed from RUNNING state
+            with self._conn:
+                self._conn.execute(
+                    """
+                    UPDATE jobs
+                    SET status = 'succeeded',
+                        updated_at = ?
+                    WHERE job_id = ? AND status = 'running'
+                    """,
                     (datetime.utcnow().isoformat(), job_id),
                 )
 
-    def mark_completed(self, job_id: str) -> None:
+                if self._conn.total_changes == 0 and not idempotent:
+                    raise StateTransitionRaceError(
+                        f"Job {job_id} not in RUNNING state"
+                    )
+
+    def mark_failed(self, job_id: str, *, idempotent: bool = True) -> None:
+        """Idempotently mark job as failed.
+
+        Args:
+            job_id: Job identifier
+            idempotent: If True, allow same-state transitions (default: True)
+
+        Raises:
+            InvalidStateTransitionError: If transition is invalid and not idempotent
+            JobNotFoundError: If job doesn't exist
+        """
         with self._lock:
+            current_status = self._get_status(job_id)
+
+            # Validate transition
+            try:
+                self._validator.validate_transition(
+                    job_id=job_id,
+                    from_status=current_status,
+                    to_status=JobStatus.FAILED,
+                )
+            except InvalidStateTransitionError:
+                if not idempotent:
+                    raise
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Skipping invalid transition (idempotent mode)",
+                    extra={"job_id": job_id},
+                )
+                return
+
+            # Already failed - idempotent
+            if current_status == JobStatus.FAILED and idempotent:
+                return
+
             with self._conn:
                 self._conn.execute(
-                    "UPDATE jobs SET status = 'succeeded', updated_at = ? WHERE job_id = ?",
+                    """
+                    UPDATE jobs
+                    SET status = 'failed',
+                        updated_at = ?
+                    WHERE job_id = ? AND status = 'running'
+                    """,
                     (datetime.utcnow().isoformat(), job_id),
                 )
 
-    def mark_failed(self, job_id: str) -> None:
+    def mark_quarantined(self, job_id: str, *, idempotent: bool = True) -> None:
+        """Idempotently mark job as quarantined.
+
+        Args:
+            job_id: Job identifier
+            idempotent: If True, allow same-state transitions (default: True)
+
+        Raises:
+            InvalidStateTransitionError: If transition is invalid and not idempotent
+            JobNotFoundError: If job doesn't exist
+        """
         with self._lock:
+            current_status = self._get_status(job_id)
+
+            # Validate transition
+            try:
+                self._validator.validate_transition(
+                    job_id=job_id,
+                    from_status=current_status,
+                    to_status=JobStatus.QUARANTINED,
+                )
+            except InvalidStateTransitionError:
+                if not idempotent:
+                    raise
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Skipping invalid transition (idempotent mode)",
+                    extra={"job_id": job_id},
+                )
+                return
+
+            # Already quarantined - idempotent
+            if current_status == JobStatus.QUARANTINED and idempotent:
+                return
+
             with self._conn:
                 self._conn.execute(
-                    "UPDATE jobs SET status = 'failed', updated_at = ? WHERE job_id = ?",
+                    """
+                    UPDATE jobs
+                    SET status = 'quarantined',
+                        updated_at = ?
+                    WHERE job_id = ?
+                    """,
                     (datetime.utcnow().isoformat(), job_id),
                 )
 

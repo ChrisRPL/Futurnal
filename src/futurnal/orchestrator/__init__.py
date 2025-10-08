@@ -15,6 +15,19 @@ from .resource_monitor import ResourceMonitor
 from .resource_registry import ResourceProfileRegistry
 from .status import collect_status_report
 from .source_control import PausedSourcesRegistry
+from .exceptions import (
+    InvalidStateTransitionError,
+    StateTransitionRaceError,
+    JobNotFoundError,
+)
+from .state_machine import (
+    StateTransition,
+    StateMachineValidator,
+    StateMachineInvariants,
+    VALID_TRANSITIONS,
+)
+from .deadlock import DeadlockDetector
+from .integrity import validate_database_integrity
 
 __all__ = [
     "JobStatus",
@@ -33,6 +46,15 @@ __all__ = [
     "ResourceMonitor",
     "ResourceProfileRegistry",
     "PausedSourcesRegistry",
+    "InvalidStateTransitionError",
+    "StateTransitionRaceError",
+    "JobNotFoundError",
+    "StateTransition",
+    "StateMachineValidator",
+    "StateMachineInvariants",
+    "VALID_TRANSITIONS",
+    "DeadlockDetector",
+    "validate_database_integrity",
 ]
 
 
