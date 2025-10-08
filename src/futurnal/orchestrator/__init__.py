@@ -28,6 +28,11 @@ from .state_machine import (
 )
 from .deadlock import DeadlockDetector
 from .integrity import validate_database_integrity
+from .crash_recovery import (
+    CrashRecoveryReport,
+    RecoveryStateTracker,
+    CrashRecoveryManager,
+)
 
 __all__ = [
     "JobStatus",
@@ -55,6 +60,9 @@ __all__ = [
     "VALID_TRANSITIONS",
     "DeadlockDetector",
     "validate_database_integrity",
+    "CrashRecoveryReport",
+    "RecoveryStateTracker",
+    "CrashRecoveryManager",
 ]
 
 

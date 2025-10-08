@@ -44,6 +44,7 @@ from .retry_policy import RetryBudget, RetryPolicyRegistry
 from .resource_monitor import ResourceMonitor
 from .resource_registry import ResourceProfileRegistry
 from .source_control import PausedSourcesRegistry
+from .crash_recovery import CrashRecoveryManager
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ class IngestionOrchestrator:
         retry_policy_registry: Optional[RetryPolicyRegistry] = None,
         resource_monitor: Optional[ResourceMonitor] = None,
         resource_profiles: Optional[ResourceProfileRegistry] = None,
+        crash_recovery: Optional[CrashRecoveryManager] = None,
     ) -> None:
         self._workspace_dir = Path(workspace_dir)
         self._workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -85,6 +87,32 @@ class IngestionOrchestrator:
         self._audit_logger = AuditLogger(self._workspace_dir / "audit")
         consent_dir = self._workspace_dir / "privacy"
         self._consent_registry = ConsentRegistry(consent_dir)
+
+        # Crash recovery system
+        self._crash_recovery = crash_recovery or CrashRecoveryManager(
+            job_queue=job_queue,
+            workspace_dir=self._workspace_dir,
+            audit_logger=self._audit_logger,
+        )
+
+        # Check if recovering from crash on startup
+        if self._crash_recovery._recovery_tracker.is_recovering_from_crash():
+            logger.warning("Crash detected - initiating recovery")
+            recovery_report = self._crash_recovery.recover_from_crash()
+
+            if not recovery_report.was_successful():
+                logger.error(
+                    "Crash recovery completed with errors",
+                    extra={"errors": recovery_report.errors},
+                )
+            else:
+                logger.info(
+                    "Crash recovery completed successfully",
+                    extra={
+                        "jobs_reset": recovery_report.jobs_reset_to_pending,
+                        "duration_seconds": recovery_report.recovery_duration_seconds,
+                    },
+                )
         self._quarantine = quarantine_store or QuarantineStore(
             self._workspace_dir / "quarantine" / "quarantine.db"
         )
@@ -207,6 +235,10 @@ class IngestionOrchestrator:
     def start(self) -> None:
         if self._running:
             return
+
+        # Set recovery marker (cleared on graceful shutdown)
+        self._crash_recovery._recovery_tracker.mark_crash()
+
         # Initialize per-connector semaphores based on resource profiles
         self._initialize_connector_semaphores()
         self._scheduler.start()
@@ -253,6 +285,10 @@ class IngestionOrchestrator:
             except asyncio.CancelledError:
                 pass
             self._invariant_check_task = None
+
+        # Clear recovery marker (graceful shutdown)
+        self._crash_recovery._recovery_tracker.clear_recovery_marker()
+
         self._running = False
         logger.info("Ingestion orchestrator stopped")
 
