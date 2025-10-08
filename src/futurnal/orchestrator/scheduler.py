@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import time
+import traceback
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -38,6 +39,7 @@ from .models import IngestionJob, JobPriority, JobType
 from .audit import AuditEvent, AuditLogger
 from .metrics import TelemetryRecorder
 from .queue import JobQueue
+from .quarantine import QuarantineStore, classify_failure
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,7 @@ class IngestionOrchestrator:
         loop: Optional[asyncio.AbstractEventLoop] = None,
         element_sink: ElementSink | None = None,
         telemetry: TelemetryRecorder | None = None,
+        quarantine_store: QuarantineStore | None = None,
     ) -> None:
         self._workspace_dir = Path(workspace_dir)
         self._workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -75,6 +78,9 @@ class IngestionOrchestrator:
         self._audit_logger = AuditLogger(self._workspace_dir / "audit")
         consent_dir = self._workspace_dir / "privacy"
         self._consent_registry = ConsentRegistry(consent_dir)
+        self._quarantine = quarantine_store or QuarantineStore(
+            self._workspace_dir / "quarantine" / "quarantine.db"
+        )
         self._local_connector = LocalFilesConnector(
             workspace_dir=self._workspace_dir,
             state_store=state_store,
@@ -334,13 +340,24 @@ class IngestionOrchestrator:
                     queue_depth=self._job_queue.pending_count(),
                     effective_throughput=(bytes_processed / duration) if duration else None,
                 )
+            # Capture full traceback for debugging
+            error_traceback = traceback.format_exc()
             job.payload.update(
                 {
                     "files_processed": files_processed,
                     "bytes_processed": bytes_processed,
                     "error": str(exc),
+                    "error_traceback": error_traceback,
                 }
             )
+            # Check if this is a quarantine retry that failed
+            if "from_quarantine" in job.payload:
+                quarantine_job_id = job.payload["from_quarantine"]
+                self._quarantine.mark_retry_attempted(
+                    quarantine_job_id,
+                    success=False,
+                    error_message=str(exc),
+                )
             self._record_audit_event(job, "failed")
             await self._maybe_retry(job)
         else:
@@ -374,6 +391,20 @@ class IngestionOrchestrator:
                     "bytes_processed": bytes_processed,
                 }
             )
+            # Check if this is a quarantine retry that succeeded
+            if "from_quarantine" in job.payload:
+                quarantine_job_id = job.payload["from_quarantine"]
+                self._quarantine.mark_retry_attempted(
+                    quarantine_job_id,
+                    success=True,
+                )
+                logger.info(
+                    "Quarantine retry succeeded",
+                    extra={
+                        "ingestion_job_id": job.job_id,
+                        "quarantine_job_id": quarantine_job_id,
+                    },
+                )
             self._record_audit_event(job, "succeeded")
 
     async def _execute_job(self, job: IngestionJob) -> None:
@@ -524,13 +555,8 @@ class IngestionOrchestrator:
     async def _maybe_retry(self, job: IngestionJob) -> None:
         record = DataRetryRecord(job_id=job.job_id, attempts=job.payload.get("attempts", 0))
         if record.attempts >= self._max_retries:
-            logger.error(
-                "Job exceeded retry limit",
-                extra={
-                    "ingestion_job_id": job.job_id,
-                    "ingestion_source": job.payload.get("source_name"),
-                },
-            )
+            # Quarantine job instead of abandoning it
+            await self._quarantine_job(job)
             return
 
         record.attempts += 1
@@ -547,6 +573,64 @@ class IngestionOrchestrator:
         job.payload["trigger"] = "retry"
         self._job_queue.reschedule(job.job_id, self._retry_backoff_seconds)
         await asyncio.sleep(self._retry_backoff_seconds)
+
+    async def _quarantine_job(self, job: IngestionJob) -> None:
+        """Move failed job to quarantine with classification.
+
+        Args:
+            job: The failed ingestion job
+        """
+        error_message = job.payload.get("error", "Unknown error")
+        error_traceback = job.payload.get("error_traceback")
+
+        # Classify the failure
+        reason = classify_failure(error_message)
+
+        # Quarantine the job
+        quarantined = self._quarantine.quarantine(
+            job=job,
+            reason=reason,
+            error_message=error_message,
+            error_traceback=error_traceback,
+            metadata={
+                "source_name": job.payload.get("source_name"),
+                "attempts": job.payload.get("attempts", 0),
+                "job_type": job.job_type.value,
+            },
+        )
+
+        logger.error(
+            "Job quarantined",
+            extra={
+                "ingestion_job_id": job.job_id,
+                "quarantine_reason": reason.value,
+                "ingestion_attempts": job.payload.get("attempts", 0),
+            },
+        )
+
+        # Record audit event
+        self._audit_logger.record(
+            AuditEvent(
+                job_id=job.job_id,
+                source=job.payload.get("source_name", "unknown"),
+                action="quarantine",
+                status="quarantined",
+                timestamp=datetime.utcnow(),
+                metadata={
+                    "reason": reason.value,
+                    "attempts": job.payload.get("attempts", 0),
+                },
+            )
+        )
+
+        # Record telemetry
+        if self._telemetry:
+            self._telemetry.record(
+                job_id=job.job_id,
+                duration=0.0,
+                status="quarantined",
+                metadata={"reason": reason.value},
+            )
 
     def _start_observer(self) -> None:
         if self._observer is not None:

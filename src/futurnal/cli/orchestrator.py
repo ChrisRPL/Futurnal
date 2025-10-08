@@ -15,9 +15,13 @@ from futurnal.orchestrator.scheduler import IngestionOrchestrator
 from futurnal.ingestion.imap.descriptor import MailboxRegistry
 from futurnal.ingestion.imap.orchestrator_integration import ImapSourceRegistration
 from futurnal.orchestrator.models import JobPriority
+from futurnal.orchestrator.quarantine_cli import quarantine_app
 
 console = Console()
 orchestrator_app = typer.Typer(help="Orchestrator management commands")
+
+# Add quarantine management as a sub-command
+orchestrator_app.add_typer(quarantine_app, name="quarantine")
 
 
 @orchestrator_app.command("start")
@@ -139,7 +143,7 @@ def start_orchestrator(
         except KeyboardInterrupt:
             pass
         finally:
-            orchestrator.stop()
+            loop.run_until_complete(orchestrator.shutdown())
             console.print("[bold green]Orchestrator stopped[/bold green]")
 
     except Exception as e:
