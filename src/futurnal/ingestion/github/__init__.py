@@ -113,6 +113,19 @@ from .issue_pr_triples import (
     extract_issue_triples,
     extract_pr_triples,
 )
+from .privacy_integration import (
+    GitHubAuditEvent,
+    GitHubAuditLogger,
+    GitHubConsentScope,
+    create_github_redaction_policy,
+    register_repository_consent,
+    require_consent,
+    revoke_repository_consent,
+)
+from .secret_scanner import (
+    SecretScanner,
+    create_secret_scanner,
+)
 
 __all__ = [
     # Descriptor and registry
@@ -217,4 +230,15 @@ __all__ = [
     # Issue and PR triples
     "extract_issue_triples",
     "extract_pr_triples",
+    # Privacy integration
+    "GitHubAuditEvent",
+    "GitHubAuditLogger",
+    "GitHubConsentScope",
+    "create_github_redaction_policy",
+    "register_repository_consent",
+    "require_consent",
+    "revoke_repository_consent",
+    # Secret scanning
+    "SecretScanner",
+    "create_secret_scanner",
 ]
