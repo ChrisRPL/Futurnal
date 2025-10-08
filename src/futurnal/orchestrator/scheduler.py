@@ -41,6 +41,8 @@ from .metrics import TelemetryRecorder
 from .queue import JobQueue
 from .quarantine import QuarantineStore, classify_failure, quarantine_reason_to_failure_type
 from .retry_policy import RetryBudget, RetryPolicyRegistry
+from .resource_monitor import ResourceMonitor
+from .resource_registry import ResourceProfileRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +70,8 @@ class IngestionOrchestrator:
         telemetry: TelemetryRecorder | None = None,
         quarantine_store: QuarantineStore | None = None,
         retry_policy_registry: Optional[RetryPolicyRegistry] = None,
+        resource_monitor: Optional[ResourceMonitor] = None,
+        resource_profiles: Optional[ResourceProfileRegistry] = None,
     ) -> None:
         self._workspace_dir = Path(workspace_dir)
         self._workspace_dir.mkdir(parents=True, exist_ok=True)
@@ -87,6 +91,18 @@ class IngestionOrchestrator:
         # Retry policy system
         self._retry_policies = retry_policy_registry or RetryPolicyRegistry()
         self._retry_budgets: Dict[str, RetryBudget] = {}
+
+        # Resource profiling system
+        self._resource_monitor = resource_monitor or ResourceMonitor(telemetry=self._telemetry)
+        self._resource_profiles = resource_profiles or ResourceProfileRegistry()
+        self._per_connector_semaphores: Dict[JobType, asyncio.Semaphore] = {}
+        self._sampling_task: Optional[asyncio.Task] = None
+
+        # Store element sink and state store for lazy connector initialization
+        self._element_sink = element_sink
+        self._state_store = state_store
+
+        # Initialize LOCAL_FILES connector eagerly (always available)
         self._local_connector = LocalFilesConnector(
             workspace_dir=self._workspace_dir,
             state_store=state_store,
@@ -94,61 +110,20 @@ class IngestionOrchestrator:
             audit_logger=self._audit_logger,
             consent_registry=self._consent_registry,
         )
-        
-        # Initialize Obsidian connector
-        from ..ingestion.obsidian.connector import ObsidianVaultConnector
-        from ..ingestion.obsidian.descriptor import VaultRegistry
 
-        self._vault_registry = VaultRegistry()
-        self._obsidian_connector = ObsidianVaultConnector(
-            workspace_dir=self._workspace_dir,
-            state_store=state_store,
-            vault_registry=self._vault_registry,
-            element_sink=element_sink,
-            audit_logger=self._audit_logger,
-            consent_registry=self._consent_registry,
-        )
+        # Lazy-initialized connectors (only created when needed)
+        self._obsidian_connector = None
+        self._vault_registry = None
+        self._imap_connector = None
+        self._mailbox_registry = None
+        self._imap_state_store = None
+        self._github_connector = None
+        self._github_credential_manager = None
+        self._github_api_client_manager = None
 
-        # Initialize IMAP connector
-        from ..ingestion.imap.connector import ImapEmailConnector
-        from ..ingestion.imap.descriptor import MailboxRegistry
-        from ..ingestion.imap.sync_state import ImapSyncStateStore
+        # Temporary storage for resource metrics (populated in _run_job, consumed in _process_job)
+        self._job_resource_metrics: Dict[str, any] = {}
 
-        self._mailbox_registry = MailboxRegistry(
-            registry_root=self._workspace_dir / "sources" / "imap",
-            audit_logger=self._audit_logger,
-        )
-        imap_state_db = self._workspace_dir / "imap" / "sync_state.db"
-        self._imap_state_store = ImapSyncStateStore(path=imap_state_db)
-        self._imap_connector = ImapEmailConnector(
-            workspace_dir=self._workspace_dir,
-            state_store=self._imap_state_store,
-            mailbox_registry=self._mailbox_registry,
-            element_sink=element_sink,
-            audit_logger=self._audit_logger,
-            consent_registry=self._consent_registry,
-        )
-
-        # Initialize GitHub connector
-        from ..ingestion.github.api_client_manager import GitHubAPIClientManager
-        from ..ingestion.github.credential_manager import GitHubCredentialManager
-        from ..ingestion.github.orchestrator_integration import GitHubConnectorManager
-
-        github_workspace = self._workspace_dir / "github"
-        github_workspace.mkdir(parents=True, exist_ok=True)
-
-        self._github_credential_manager = GitHubCredentialManager()
-        self._github_api_client_manager = GitHubAPIClientManager(
-            credential_manager=self._github_credential_manager
-        )
-        self._github_connector = GitHubConnectorManager(
-            workspace_dir=self._workspace_dir,
-            credential_manager=self._github_credential_manager,
-            api_client_manager=self._github_api_client_manager,
-            element_sink=element_sink,
-            audit_logger=self._audit_logger,
-            consent_registry=self._consent_registry,
-        )
         self._max_retries = 3
         self._retry_backoff_seconds = 60
         hardware_cpu_count = os.cpu_count() or 4
@@ -216,9 +191,13 @@ class IngestionOrchestrator:
     def start(self) -> None:
         if self._running:
             return
+        # Initialize per-connector semaphores based on resource profiles
+        self._initialize_connector_semaphores()
         self._scheduler.start()
         self._loop.create_task(self._worker_loop())
         self._start_observer()
+        # Start periodic resource sampling
+        self._sampling_task = self._loop.create_task(self._resource_sampling_loop())
         self._running = True
         logger.info("Ingestion orchestrator started")
 
@@ -230,6 +209,14 @@ class IngestionOrchestrator:
             self._observer.stop()
             self._observer.join(timeout=5)
             self._observer = None
+        # Cancel resource sampling task
+        if self._sampling_task:
+            self._sampling_task.cancel()
+            try:
+                await self._sampling_task
+            except asyncio.CancelledError:
+                pass
+            self._sampling_task = None
         self._running = False
         logger.info("Ingestion orchestrator stopped")
 
@@ -303,9 +290,33 @@ class IngestionOrchestrator:
             yield job
 
     async def _run_job(self, job: IngestionJob) -> None:
+        # Acquire connector-specific semaphore
+        connector_semaphore = self._per_connector_semaphores.get(job.job_type)
+        if connector_semaphore:
+            await connector_semaphore.acquire()
+
         try:
+            # Start resource monitoring
+            self._resource_monitor.start_monitoring(job.job_id, job.job_type)
+
+            # Execute job
             await self._process_job(job)
+
         finally:
+            # Stop resource monitoring and store metrics for telemetry
+            metrics = self._resource_monitor.stop_monitoring(job.job_id)
+            if metrics:
+                self._job_resource_metrics[job.job_id] = metrics
+
+            # Release connector-specific semaphore
+            if connector_semaphore:
+                connector_semaphore.release()
+
+            # Adaptive concurrency adjustment
+            if metrics and self._should_adjust_concurrency():
+                await self._adjust_concurrency(job.job_type, metrics)
+
+            # Also release global semaphore for backward compatibility
             self._active_jobs -= 1
             if self._semaphore:
                 self._semaphore.release()
@@ -380,6 +391,22 @@ class IngestionOrchestrator:
             if self._telemetry:
                 queue_depth = self._job_queue.pending_count()
                 throughput = bytes_processed / duration if duration else None
+
+                # Include resource metrics if available
+                metadata = {}
+                resource_metrics = self._job_resource_metrics.get(job.job_id)
+                if resource_metrics:
+                    metadata.update({
+                        "cpu_percent_avg": resource_metrics.cpu_percent_avg,
+                        "cpu_percent_peak": resource_metrics.cpu_percent_peak,
+                        "memory_mb_avg": resource_metrics.memory_mb_avg,
+                        "memory_mb_peak": resource_metrics.memory_mb_peak,
+                        "bytes_read": resource_metrics.bytes_read,
+                        "bytes_written": resource_metrics.bytes_written,
+                    })
+                    # Clean up metrics after use
+                    del self._job_resource_metrics[job.job_id]
+
                 self._telemetry.record(
                     job.job_id,
                     duration,
@@ -390,6 +417,7 @@ class IngestionOrchestrator:
                     configured_workers=self._configured_workers,
                     queue_depth=queue_depth,
                     effective_throughput=throughput,
+                    metadata=metadata if metadata else None,
                 )
             job.payload.update(
                 {
@@ -430,6 +458,82 @@ class IngestionOrchestrator:
         else:
             raise ValueError(f"Unsupported job type {job.job_type}")
 
+    def _ensure_obsidian_connector(self):
+        """Lazy-initialize Obsidian connector if needed."""
+        if self._obsidian_connector is None:
+            try:
+                from ..ingestion.obsidian.connector import ObsidianVaultConnector
+                from ..ingestion.obsidian.descriptor import VaultRegistry
+
+                self._vault_registry = VaultRegistry()
+                self._obsidian_connector = ObsidianVaultConnector(
+                    workspace_dir=self._workspace_dir,
+                    state_store=self._state_store,
+                    vault_registry=self._vault_registry,
+                    element_sink=self._element_sink,
+                    audit_logger=self._audit_logger,
+                    consent_registry=self._consent_registry,
+                )
+                logger.info("Initialized Obsidian connector")
+            except (ImportError, AttributeError) as exc:
+                logger.error(f"Failed to initialize Obsidian connector: {exc}")
+                raise RuntimeError("Obsidian connector not available") from exc
+
+    def _ensure_imap_connector(self):
+        """Lazy-initialize IMAP connector if needed."""
+        if self._imap_connector is None:
+            try:
+                from ..ingestion.imap.connector import ImapEmailConnector
+                from ..ingestion.imap.descriptor import MailboxRegistry
+                from ..ingestion.imap.sync_state import ImapSyncStateStore
+
+                self._mailbox_registry = MailboxRegistry(
+                    registry_root=self._workspace_dir / "sources" / "imap",
+                    audit_logger=self._audit_logger,
+                )
+                imap_state_db = self._workspace_dir / "imap" / "sync_state.db"
+                self._imap_state_store = ImapSyncStateStore(path=imap_state_db)
+                self._imap_connector = ImapEmailConnector(
+                    workspace_dir=self._workspace_dir,
+                    state_store=self._imap_state_store,
+                    mailbox_registry=self._mailbox_registry,
+                    element_sink=self._element_sink,
+                    audit_logger=self._audit_logger,
+                    consent_registry=self._consent_registry,
+                )
+                logger.info("Initialized IMAP connector")
+            except (ImportError, AttributeError) as exc:
+                logger.error(f"Failed to initialize IMAP connector: {exc}")
+                raise RuntimeError("IMAP connector not available") from exc
+
+    def _ensure_github_connector(self):
+        """Lazy-initialize GitHub connector if needed."""
+        if self._github_connector is None:
+            try:
+                from ..ingestion.github.api_client_manager import GitHubAPIClientManager
+                from ..ingestion.github.credential_manager import GitHubCredentialManager
+                from ..ingestion.github.orchestrator_integration import GitHubConnectorManager
+
+                github_workspace = self._workspace_dir / "github"
+                github_workspace.mkdir(parents=True, exist_ok=True)
+
+                self._github_credential_manager = GitHubCredentialManager()
+                self._github_api_client_manager = GitHubAPIClientManager(
+                    credential_manager=self._github_credential_manager
+                )
+                self._github_connector = GitHubConnectorManager(
+                    workspace_dir=self._workspace_dir,
+                    credential_manager=self._github_credential_manager,
+                    api_client_manager=self._github_api_client_manager,
+                    element_sink=self._element_sink,
+                    audit_logger=self._audit_logger,
+                    consent_registry=self._consent_registry,
+                )
+                logger.info("Initialized GitHub connector")
+            except (ImportError, AttributeError) as exc:
+                logger.error(f"Failed to initialize GitHub connector: {exc}")
+                raise RuntimeError("GitHub connector not available") from exc
+
     async def _ingest_local(self, job: IngestionJob) -> None:
         source_name = job.payload["source_name"]
         registration = self._sources[source_name]
@@ -442,6 +546,7 @@ class IngestionOrchestrator:
         return files_processed, bytes_processed
 
     async def _ingest_obsidian(self, job: IngestionJob) -> tuple[int, int]:
+        self._ensure_obsidian_connector()
         source_name = job.payload["source_name"]
         registration = self._sources[source_name]
         files_processed = 0
@@ -461,6 +566,7 @@ class IngestionOrchestrator:
         Returns:
             Tuple of (messages_processed, bytes_processed)
         """
+        self._ensure_imap_connector()
         mailbox_id = job.payload["mailbox_id"]
         messages_processed = 0
         bytes_processed = 0
@@ -483,6 +589,7 @@ class IngestionOrchestrator:
         Returns:
             Tuple of (files_processed, bytes_processed)
         """
+        self._ensure_github_connector()
         repo_id = job.payload["repo_id"]
         trigger = job.payload.get("trigger", "schedule")
 
@@ -727,6 +834,108 @@ class IngestionOrchestrator:
             return
         handler = _SourceEventHandler(self, source)
         self._observer.schedule(handler, str(source.root_path), recursive=True)
+
+    def _initialize_connector_semaphores(self) -> None:
+        """Create per-connector semaphores based on resource profiles."""
+        system_resources = self._resource_monitor.get_system_resources()
+        available_cpu = system_resources["available_cpu_cores"]
+        available_memory_mb = system_resources["available_memory_mb"]
+        current_system_load = system_resources["cpu_percent"] / 100.0
+
+        for job_type in JobType:
+            optimal = self._resource_profiles.calculate_optimal_concurrency(
+                job_type=job_type,
+                available_cpu_cores=available_cpu,
+                available_memory_mb=available_memory_mb,
+                current_system_load=current_system_load,
+            )
+            self._per_connector_semaphores[job_type] = asyncio.Semaphore(optimal)
+
+            logger.info(
+                "Initialized connector semaphore",
+                extra={
+                    "job_type": job_type.value,
+                    "concurrency": optimal,
+                },
+            )
+
+    def _should_adjust_concurrency(self) -> bool:
+        """Check if concurrency should be adjusted.
+
+        Adjusts periodically to avoid thrashing. Currently adjusts every 10th job.
+
+        Returns:
+            True if concurrency should be adjusted
+        """
+        # Simple heuristic: adjust every 10 jobs
+        return (self._active_jobs % 10) == 0
+
+    async def _adjust_concurrency(
+        self,
+        job_type: JobType,
+        metrics,
+    ) -> None:
+        """Dynamically adjust concurrency based on observed resource usage.
+
+        Args:
+            job_type: Type of connector job
+            metrics: Job resource metrics
+        """
+        system_resources = self._resource_monitor.get_system_resources()
+
+        # Check if system is under pressure
+        system_overloaded = (
+            system_resources["cpu_percent"] > 80
+            or system_resources["memory_percent"] > 85
+        )
+
+        connector_semaphore = self._per_connector_semaphores.get(job_type)
+        if not connector_semaphore:
+            return
+
+        # Get current limit (approximation - semaphores don't expose this cleanly)
+        # We track it indirectly through the profile
+        profile = self._resource_profiles.get_profile(job_type)
+        current_limit = profile.max_concurrent_jobs or 2
+
+        if system_overloaded and current_limit > 1:
+            # Log that we detected overload (actual adjustment requires semaphore recreation)
+            logger.info(
+                "System overloaded, would reduce connector concurrency",
+                extra={
+                    "job_type": job_type.value,
+                    "cpu_percent": system_resources["cpu_percent"],
+                    "memory_percent": system_resources["memory_percent"],
+                    "current_limit": current_limit,
+                },
+            )
+            # Note: Actual semaphore limit adjustment requires recreation
+            # This is logged for monitoring purposes
+        elif not system_overloaded and current_limit < 8:
+            # Could increase concurrency
+            if profile.adaptive_concurrency:
+                logger.info(
+                    "System resources available, could increase connector concurrency",
+                    extra={
+                        "job_type": job_type.value,
+                        "cpu_percent": system_resources["cpu_percent"],
+                        "memory_percent": system_resources["memory_percent"],
+                        "current_limit": current_limit,
+                    },
+                )
+
+    async def _resource_sampling_loop(self) -> None:
+        """Periodically sample resource usage for active jobs.
+
+        Runs in the background while the orchestrator is active.
+        """
+        try:
+            while self._running:
+                self._resource_monitor.sample_active_jobs()
+                await asyncio.sleep(1.0)  # Sample every second
+        except asyncio.CancelledError:
+            logger.debug("Resource sampling loop cancelled")
+            raise
 
 
 class _SourceEventHandler(FileSystemEventHandler):
