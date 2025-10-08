@@ -27,6 +27,9 @@ from futurnal.orchestrator.config_cli import orchestrator_config_app
 from futurnal.orchestrator.status import collect_status_report
 from futurnal.orchestrator.source_control import PausedSourcesRegistry
 from futurnal.orchestrator.health import collect_health_report
+from futurnal.orchestrator.daemon import OrchestratorDaemon, AlreadyRunningError, NotRunningError, DaemonError
+from futurnal.orchestrator.telemetry_analysis import TelemetryAnalyzer
+from futurnal.orchestrator.db_utils import DatabaseManager, BackupError, RestoreError, IntegrityError, DatabaseError
 from futurnal.privacy.audit import AuditEvent, AuditLogger
 
 console = Console()
@@ -664,6 +667,535 @@ def telemetry_summary(
         console.print(table)
 
 
+@telemetry_app.command("failures")
+def telemetry_failures(
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    since: Optional[str] = typer.Option(None, "--since", help="Show failures since date (e.g., '24h', '7d')"),
+    format_output: str = typer.Option("table", "--format", help="Output format: table, json, or yaml"),
+) -> None:
+    """View failure statistics with breakdown by reason and connector."""
+    workspace_path = _get_workspace_path(workspace)
+    telemetry_dir = workspace_path / "telemetry"
+
+    if not telemetry_dir.exists():
+        console.print("[yellow]No telemetry data available[/yellow]")
+        return
+
+    analyzer = TelemetryAnalyzer(telemetry_dir)
+
+    # Parse since filter
+    since_dt = _parse_since(since) if since else None
+
+    # Analyze failures
+    stats = analyzer.analyze_failures(since=since_dt)
+
+    if format_output == "json":
+        output = {
+            "total_failures": stats.total_failures,
+            "recent_failures_24h": stats.recent_failures_24h,
+            "failure_rate": stats.failure_rate,
+            "by_reason": stats.failures_by_reason,
+            "by_connector": stats.failures_by_connector,
+        }
+        console.print(json.dumps(output, indent=2))
+    elif format_output == "yaml":
+        output = {
+            "total_failures": stats.total_failures,
+            "recent_failures_24h": stats.recent_failures_24h,
+            "failure_rate": stats.failure_rate,
+            "by_reason": stats.failures_by_reason,
+            "by_connector": stats.failures_by_connector,
+        }
+        console.print(yaml.dump(output, default_flow_style=False))
+    else:
+        # Table format
+        console.print("\n[bold cyan]Failure Statistics[/bold cyan]")
+        console.print(f"  Total Failures:    {stats.total_failures}")
+        console.print(f"  Recent (24h):      {stats.recent_failures_24h}")
+        console.print(f"  Failure Rate:      {stats.failure_rate:.1f}%")
+
+        if stats.failures_by_reason:
+            console.print("\n[bold cyan]Failures by Reason:[/bold cyan]")
+            table = Table()
+            table.add_column("Reason", style="cyan")
+            table.add_column("Count", justify="right", style="yellow")
+            table.add_column("Percentage", justify="right", style="green")
+
+            for reason, count in sorted(stats.failures_by_reason.items(), key=lambda x: -x[1]):
+                percentage = (count / stats.total_failures * 100.0) if stats.total_failures > 0 else 0.0
+                table.add_row(reason, str(count), f"{percentage:.1f}%")
+
+            console.print(table)
+
+        if stats.failures_by_connector:
+            console.print("\n[bold cyan]Failures by Connector:[/bold cyan]")
+            table = Table()
+            table.add_column("Connector", style="cyan")
+            table.add_column("Count", justify="right", style="yellow")
+            table.add_column("Percentage", justify="right", style="green")
+
+            for connector, count in sorted(stats.failures_by_connector.items(), key=lambda x: -x[1]):
+                percentage = (count / stats.total_failures * 100.0) if stats.total_failures > 0 else 0.0
+                table.add_row(connector, str(count), f"{percentage:.1f}%")
+
+            console.print(table)
+
+
+@telemetry_app.command("throughput")
+def telemetry_throughput(
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    since: Optional[str] = typer.Option(None, "--since", help="Calculate throughput since date (e.g., '1h', '24h')"),
+    format_output: str = typer.Option("table", "--format", help="Output format: table, json, or yaml"),
+) -> None:
+    """View throughput metrics over time window."""
+    workspace_path = _get_workspace_path(workspace)
+    telemetry_dir = workspace_path / "telemetry"
+
+    if not telemetry_dir.exists():
+        console.print("[yellow]No telemetry data available[/yellow]")
+        return
+
+    analyzer = TelemetryAnalyzer(telemetry_dir)
+
+    # Parse since filter
+    since_dt = _parse_since(since) if since else None
+
+    # Calculate throughput
+    metrics = analyzer.calculate_throughput(since=since_dt)
+
+    if format_output == "json":
+        output = {
+            "files_processed": metrics.files_processed,
+            "bytes_processed": metrics.bytes_processed,
+            "duration_seconds": metrics.duration_seconds,
+            "throughput_bytes_per_second": metrics.throughput_bytes_per_second,
+            "throughput_files_per_second": metrics.throughput_files_per_second,
+            "throughput_mbps": metrics.throughput_mbps,
+        }
+        console.print(json.dumps(output, indent=2))
+    elif format_output == "yaml":
+        output = {
+            "files_processed": metrics.files_processed,
+            "bytes_processed": metrics.bytes_processed,
+            "duration_seconds": metrics.duration_seconds,
+            "throughput_bytes_per_second": metrics.throughput_bytes_per_second,
+            "throughput_files_per_second": metrics.throughput_files_per_second,
+            "throughput_mbps": metrics.throughput_mbps,
+        }
+        console.print(yaml.dump(output, default_flow_style=False))
+    else:
+        # Table format
+        time_window = f"since {since}" if since else "all time"
+        console.print(f"\n[bold cyan]Throughput Metrics ({time_window})[/bold cyan]")
+        console.print(f"  Files Processed:   {metrics.files_processed:,}")
+        console.print(f"  Data Processed:    {_format_bytes(metrics.bytes_processed)}")
+        console.print(f"  Total Duration:    {_format_duration(metrics.duration_seconds)}")
+        console.print(f"  Throughput:        {metrics.throughput_mbps:.2f} MB/s")
+        console.print(f"  Files/Second:      {metrics.throughput_files_per_second:.2f}")
+
+
+@telemetry_app.command("by-connector")
+def telemetry_by_connector(
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    since: Optional[str] = typer.Option(None, "--since", help="Show metrics since date (e.g., '24h', '7d')"),
+    format_output: str = typer.Option("table", "--format", help="Output format: table, json, or yaml"),
+) -> None:
+    """View metrics broken down by connector type."""
+    workspace_path = _get_workspace_path(workspace)
+    telemetry_dir = workspace_path / "telemetry"
+
+    if not telemetry_dir.exists():
+        console.print("[yellow]No telemetry data available[/yellow]")
+        return
+
+    analyzer = TelemetryAnalyzer(telemetry_dir)
+
+    # Parse since filter
+    since_dt = _parse_since(since) if since else None
+
+    # Get connector metrics
+    metrics = analyzer.metrics_by_connector(since=since_dt)
+
+    if format_output == "json":
+        output = []
+        for m in metrics:
+            output.append({
+                "connector_type": m.connector_type,
+                "total_jobs": m.total_jobs,
+                "succeeded": m.succeeded_jobs,
+                "failed": m.failed_jobs,
+                "files": m.total_files,
+                "bytes": m.total_bytes,
+                "duration": m.total_duration,
+                "throughput_bps": m.avg_throughput_bps,
+                "success_rate": m.success_rate,
+            })
+        console.print(json.dumps(output, indent=2))
+    elif format_output == "yaml":
+        output = []
+        for m in metrics:
+            output.append({
+                "connector_type": m.connector_type,
+                "total_jobs": m.total_jobs,
+                "succeeded": m.succeeded_jobs,
+                "failed": m.failed_jobs,
+                "files": m.total_files,
+                "bytes": m.total_bytes,
+                "duration": m.total_duration,
+                "throughput_bps": m.avg_throughput_bps,
+                "success_rate": m.success_rate,
+            })
+        console.print(yaml.dump(output, default_flow_style=False))
+    else:
+        # Table format
+        if not metrics:
+            console.print("[yellow]No connector metrics available[/yellow]")
+            return
+
+        time_window = f"since {since}" if since else "all time"
+        console.print(f"\n[bold cyan]Metrics by Connector ({time_window})[/bold cyan]\n")
+
+        table = Table()
+        table.add_column("Connector", style="cyan")
+        table.add_column("Jobs", justify="right", style="yellow")
+        table.add_column("Success", justify="right", style="green")
+        table.add_column("Failed", justify="right", style="red")
+        table.add_column("Files", justify="right", style="blue")
+        table.add_column("Data", justify="right", style="magenta")
+        table.add_column("Throughput", justify="right", style="green")
+        table.add_column("Rate", justify="right", style="yellow")
+
+        for m in metrics:
+            table.add_row(
+                m.connector_type,
+                str(m.total_jobs),
+                str(m.succeeded_jobs),
+                str(m.failed_jobs),
+                str(m.total_files),
+                _format_bytes(m.total_bytes),
+                f"{m.avg_throughput_bps / (1024 * 1024):.2f} MB/s",
+                f"{m.success_rate:.1f}%",
+            )
+
+        console.print(table)
+
+
+@telemetry_app.command("clean")
+def telemetry_clean(
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    older_than_days: int = typer.Option(..., "--older-than-days", help="Remove entries older than N days"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be removed without deleting"),
+) -> None:
+    """Clean up old telemetry data to save disk space."""
+    workspace_path = _get_workspace_path(workspace)
+    telemetry_dir = workspace_path / "telemetry"
+
+    if not telemetry_dir.exists():
+        console.print("[yellow]No telemetry data to clean[/yellow]")
+        return
+
+    analyzer = TelemetryAnalyzer(telemetry_dir)
+
+    console.print(f"[yellow]Cleaning telemetry entries older than {older_than_days} days...[/yellow]")
+
+    if dry_run:
+        console.print("[cyan](Dry run - no data will be deleted)[/cyan]")
+
+    # Clean telemetry
+    lines_removed = analyzer.clean_old_telemetry(
+        older_than_days=older_than_days,
+        dry_run=dry_run,
+    )
+
+    if lines_removed == 0:
+        console.print("[green]No old telemetry entries found[/green]")
+    elif dry_run:
+        console.print(f"[yellow]Would remove {lines_removed} telemetry entries[/yellow]")
+    else:
+        console.print(f"[green]✓ Removed {lines_removed} telemetry entries[/green]")
+        console.print(f"[cyan]Backup created at: {telemetry_dir / 'telemetry.log.backup'}[/cyan]")
+
+        # Log audit event
+        _log_cli_action(
+            workspace_path,
+            "telemetry_clean",
+            {
+                "older_than_days": older_than_days,
+                "lines_removed": lines_removed,
+            },
+        )
+
+
+# Database management commands
+db_app = typer.Typer(help="Database management commands")
+orchestrator_app.add_typer(db_app, name="db")
+
+
+@db_app.command("backup")
+def db_backup(
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    comment: Optional[str] = typer.Option(None, "--comment", help="Optional comment for backup filename"),
+) -> None:
+    """Create a backup of the orchestrator queue database."""
+    workspace_path = _get_workspace_path(workspace)
+    db_path = workspace_path / "queue" / "jobs.db"
+
+    if not db_path.exists():
+        console.print(f"[red]Database not found: {db_path}[/red]")
+        raise typer.Exit(1)
+
+    db_manager = DatabaseManager(db_path)
+
+    try:
+        console.print("[yellow]Creating database backup...[/yellow]")
+        backup_path = db_manager.backup(comment=comment)
+        console.print(f"[green]✓ Backup created: {backup_path}[/green]")
+
+        # Show backup size
+        size_mb = backup_path.stat().st_size / (1024 * 1024)
+        console.print(f"  Size: {size_mb:.2f} MB")
+
+        # Log audit event
+        _log_cli_action(
+            workspace_path,
+            "db_backup",
+            {
+                "backup_path": str(backup_path),
+                "comment": comment,
+                "size_bytes": backup_path.stat().st_size,
+            },
+        )
+
+    except BackupError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@db_app.command("restore")
+def db_restore(
+    backup_path: Path = typer.Argument(..., help="Path to backup file"),
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing database without confirmation"),
+) -> None:
+    """Restore orchestrator queue database from a backup."""
+    workspace_path = _get_workspace_path(workspace)
+    db_path = workspace_path / "queue" / "jobs.db"
+
+    db_manager = DatabaseManager(db_path)
+
+    # Confirm restoration
+    if db_path.exists() and not force:
+        console.print("[yellow]Warning: This will replace the current database![/yellow]")
+        console.print(f"Current database: {db_path}")
+        console.print(f"Backup to restore: {backup_path}")
+
+        if not typer.confirm("\nProceed with restore?"):
+            console.print("Restore cancelled")
+            return
+
+    try:
+        console.print("[yellow]Restoring database from backup...[/yellow]")
+        db_manager.restore(backup_path, force=True)
+        console.print(f"[green]✓ Database restored from: {backup_path}[/green]")
+        console.print(f"[cyan]Previous database backed up to: {db_path}.before-restore[/cyan]")
+
+        # Log audit event
+        _log_cli_action(
+            workspace_path,
+            "db_restore",
+            {
+                "backup_path": str(backup_path),
+                "database_path": str(db_path),
+            },
+        )
+
+    except RestoreError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@db_app.command("check")
+def db_check(
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+) -> None:
+    """Check orchestrator queue database integrity."""
+    workspace_path = _get_workspace_path(workspace)
+    db_path = workspace_path / "queue" / "jobs.db"
+
+    if not db_path.exists():
+        console.print(f"[red]Database not found: {db_path}[/red]")
+        raise typer.Exit(1)
+
+    db_manager = DatabaseManager(db_path)
+
+    try:
+        console.print("[yellow]Checking database integrity...[/yellow]")
+        is_valid, detail = db_manager.check_integrity()
+
+        if is_valid:
+            console.print(f"[green]✓ {detail}[/green]")
+        else:
+            console.print(f"[red]✗ {detail}[/red]")
+            console.print("\n[yellow]Recommendation:[/yellow]")
+            console.print("  1. Create a backup: futurnal orchestrator db backup")
+            console.print("  2. Restore from a known good backup")
+            raise typer.Exit(1)
+
+        # Show database stats
+        stats = db_manager.get_stats()
+        console.print(f"\n[bold cyan]Database Statistics:[/bold cyan]")
+        console.print(f"  Size:      {stats['size_mb']:.2f} MB")
+        console.print(f"  Jobs:      {stats['job_count']:,}")
+        console.print(f"  Pages:     {stats['page_count']:,}")
+
+    except IntegrityError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@db_app.command("list-backups")
+def db_list_backups(
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    format_output: str = typer.Option("table", "--format", help="Output format: table or json"),
+) -> None:
+    """List available database backups."""
+    workspace_path = _get_workspace_path(workspace)
+    db_path = workspace_path / "queue" / "jobs.db"
+
+    db_manager = DatabaseManager(db_path)
+    backups = db_manager.list_backups()
+
+    if not backups:
+        console.print("[yellow]No backups found[/yellow]")
+        return
+
+    if format_output == "json":
+        output = []
+        for backup_path, created, size in backups:
+            output.append({
+                "path": str(backup_path),
+                "created": created.isoformat(),
+                "size_bytes": size,
+                "size_mb": size / (1024 * 1024),
+            })
+        console.print(json.dumps(output, indent=2))
+    else:
+        # Table format
+        table = Table(title=f"Database Backups ({len(backups)} total)")
+        table.add_column("Filename", style="cyan")
+        table.add_column("Created", style="yellow")
+        table.add_column("Age", style="magenta")
+        table.add_column("Size", style="green", justify="right")
+
+        now = datetime.utcnow()
+        for backup_path, created, size in backups:
+            age_delta = now - created
+            age_str = _format_timestamp(created.isoformat())
+            size_mb = size / (1024 * 1024)
+
+            table.add_row(
+                backup_path.name,
+                created.strftime("%Y-%m-%d %H:%M:%S"),
+                age_str,
+                f"{size_mb:.2f} MB",
+            )
+
+        console.print(table)
+
+
+@db_app.command("purge-backups")
+def db_purge_backups(
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    keep_count: int = typer.Option(10, "--keep-count", help="Keep this many recent backups"),
+    older_than_days: Optional[int] = typer.Option(None, "--older-than-days", help="Remove backups older than N days"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be removed without deleting"),
+) -> None:
+    """Remove old database backups."""
+    workspace_path = _get_workspace_path(workspace)
+    db_path = workspace_path / "queue" / "jobs.db"
+
+    db_manager = DatabaseManager(db_path)
+
+    console.print(f"[yellow]Purging old backups (keep: {keep_count} recent)...[/yellow]")
+    if older_than_days:
+        console.print(f"[yellow]Also removing backups older than {older_than_days} days...[/yellow]")
+
+    if dry_run:
+        console.print("[cyan](Dry run - no backups will be deleted)[/cyan]")
+
+    removed_count = db_manager.purge_old_backups(
+        keep_count=keep_count,
+        older_than_days=older_than_days,
+        dry_run=dry_run,
+    )
+
+    if removed_count == 0:
+        console.print("[green]No backups need to be removed[/green]")
+    elif dry_run:
+        console.print(f"[yellow]Would remove {removed_count} backup(s)[/yellow]")
+    else:
+        console.print(f"[green]✓ Removed {removed_count} backup(s)[/green]")
+
+        # Log audit event
+        _log_cli_action(
+            workspace_path,
+            "db_purge_backups",
+            {
+                "keep_count": keep_count,
+                "older_than_days": older_than_days,
+                "removed_count": removed_count,
+            },
+        )
+
+
+@db_app.command("vacuum")
+def db_vacuum(
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+) -> None:
+    """Vacuum the database to reclaim space and optimize performance."""
+    workspace_path = _get_workspace_path(workspace)
+    db_path = workspace_path / "queue" / "jobs.db"
+
+    if not db_path.exists():
+        console.print(f"[red]Database not found: {db_path}[/red]")
+        raise typer.Exit(1)
+
+    db_manager = DatabaseManager(db_path)
+
+    # Get size before
+    stats_before = db_manager.get_stats()
+    size_before_mb = stats_before['size_mb']
+
+    try:
+        console.print("[yellow]Vacuuming database...[/yellow]")
+        db_manager.vacuum()
+
+        # Get size after
+        stats_after = db_manager.get_stats()
+        size_after_mb = stats_after['size_mb']
+        reclaimed_mb = size_before_mb - size_after_mb
+
+        console.print(f"[green]✓ Database vacuumed[/green]")
+        console.print(f"  Before: {size_before_mb:.2f} MB")
+        console.print(f"  After:  {size_after_mb:.2f} MB")
+        console.print(f"  Reclaimed: {reclaimed_mb:.2f} MB")
+
+        # Log audit event
+        _log_cli_action(
+            workspace_path,
+            "db_vacuum",
+            {
+                "size_before_mb": size_before_mb,
+                "size_after_mb": size_after_mb,
+                "reclaimed_mb": reclaimed_mb,
+            },
+        )
+
+    except DatabaseError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
 # NOTE: Orchestrator config commands have been moved to orchestrator_config_app
 # See orchestrator_app.add_typer(orchestrator_config_app, name="config") above
 # This provides: validate, show, migrate, init, and set commands
@@ -698,6 +1230,62 @@ def _parse_since(since_str: str) -> Optional[datetime]:
     return None
 
 
+@orchestrator_app.command("stop")
+def stop_orchestrator(
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    force: bool = typer.Option(False, "--force", help="Force stop (send SIGKILL immediately)"),
+    timeout: float = typer.Option(30.0, "--timeout", help="Graceful shutdown timeout in seconds"),
+) -> None:
+    """Stop the running orchestrator daemon.
+
+    By default, sends SIGTERM for graceful shutdown and waits up to 30 seconds.
+    Use --force to send SIGKILL immediately for unresponsive daemons.
+    """
+    workspace_path = _get_workspace_path(workspace)
+    daemon = OrchestratorDaemon(workspace_path)
+
+    # Check status first
+    status = daemon.status()
+
+    if not status.running:
+        if status.stale_pid_file:
+            console.print("[yellow]Orchestrator is not running (cleaned up stale PID file)[/yellow]")
+            daemon.register_stop()  # Clean up
+        else:
+            console.print("[yellow]Orchestrator is not running[/yellow]")
+        return
+
+    # Stop the daemon
+    console.print(f"[yellow]Stopping orchestrator (PID: {status.pid})...[/yellow]")
+
+    if force:
+        console.print("[red]Force stopping (SIGKILL)...[/red]")
+    else:
+        console.print(f"[yellow]Graceful shutdown (timeout: {timeout}s)...[/yellow]")
+
+    try:
+        daemon.stop(force=force, timeout=timeout)
+        console.print("[green]✓ Orchestrator stopped[/green]")
+
+        # Log audit event
+        _log_cli_action(
+            workspace_path,
+            "orchestrator_stop",
+            {
+                "pid": status.pid,
+                "forced": force,
+                "timeout": timeout,
+            },
+        )
+
+    except NotRunningError as e:
+        console.print(f"[yellow]{e}[/yellow]")
+    except DaemonError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        console.print("[yellow]Process was forcefully terminated[/yellow]")
+        raise typer.Exit(1)
+
+
 # Keep original start command for orchestrator daemon
 @orchestrator_app.command("start")
 def start_orchestrator(
@@ -716,12 +1304,29 @@ def start_orchestrator(
         "--imap-priority",
         help="IMAP job priority: low, normal, high"
     ),
+    foreground: bool = typer.Option(
+        False,
+        "--foreground",
+        help="Run in foreground (for debugging)"
+    ),
 ) -> None:
     """Start the ingestion orchestrator daemon with all configured sources."""
     console.print("[bold blue]Starting Futurnal Ingestion Orchestrator[/bold blue]")
 
     workspace_path = Path(workspace).expanduser()
     workspace_path.mkdir(parents=True, exist_ok=True)
+
+    # Check if already running and register start
+    daemon = OrchestratorDaemon(workspace_path)
+    try:
+        daemon.register_start()
+    except AlreadyRunningError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        console.print("Use 'futurnal orchestrator stop' to stop the running instance")
+        raise typer.Exit(1)
+
+    if foreground:
+        console.print("[yellow]Running in foreground mode (debugging)[/yellow]")
 
     # Parse priority
     priority_map = {
@@ -805,10 +1410,13 @@ def start_orchestrator(
             pass
         finally:
             loop.run_until_complete(orchestrator.shutdown())
+            daemon.register_stop()
             console.print("[bold green]Orchestrator stopped[/bold green]")
 
     except Exception as e:
         console.print(f"[bold red]Failed to start orchestrator: {e}[/bold red]")
+        # Clean up PID file on failure
+        daemon.register_stop()
         raise typer.Exit(1)
 
 

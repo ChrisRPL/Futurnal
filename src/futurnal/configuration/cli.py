@@ -79,6 +79,23 @@ def set_config(
     typer.echo(f"Updated {key}")
 
 
+@config_app.command("validate")
+def validate_config(
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to config file"),
+) -> None:
+    """Validate configuration file for correctness."""
+
+    try:
+        settings = load_settings(config_path)
+        typer.echo(f"✅ Configuration valid at {config_path}")
+        typer.echo(f"   Workspace: {settings.workspace.workspace_path}")
+        typer.echo(f"   Neo4j URI: {settings.workspace.storage.neo4j_uri}")
+        typer.echo(f"   Chroma path: {settings.workspace.storage.chroma_path}")
+    except Exception as e:
+        typer.echo(f"❌ Configuration invalid: {e}", err=True)
+        raise typer.Exit(code=1)
+
+
 @config_app.command("rotate-secret")
 def rotate_secret_command(
     backend: str = typer.Argument(..., help="Backend identifier, e.g. neo4j"),
@@ -110,6 +127,43 @@ def run_health(
         for entry in report["checks"]:
             status_icon = "✅" if entry["status"] == "ok" else "⚠️"
             typer.echo(f"- {status_icon} {entry['name']}: {entry['detail']}")
+
+
+@health_app.command("check")
+def check_subsystem(
+    subsystem: str = typer.Argument(..., help="Subsystem to check (neo4j, chroma, queue)"),
+    workspace_path: Optional[Path] = typer.Option(None, help="Workspace directory"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Config file"),
+) -> None:
+    """Check health of a specific subsystem."""
+
+    settings = bootstrap_settings(path=config_path)
+    report = collect_health_report(settings=settings, workspace_path=workspace_path)
+
+    # Map subsystem names to check names
+    subsystem_map = {
+        "neo4j": "neo4j_connection",
+        "chroma": "chroma_connection",
+        "queue": "queue_database",
+    }
+
+    check_name = subsystem_map.get(subsystem.lower())
+    if not check_name:
+        typer.echo(f"❌ Unknown subsystem: {subsystem}", err=True)
+        typer.echo(f"Available subsystems: {', '.join(subsystem_map.keys())}")
+        raise typer.Exit(code=1)
+
+    # Find the specific check
+    for entry in report["checks"]:
+        if entry["name"] == check_name:
+            status_icon = "✅" if entry["status"] == "ok" else "⚠️"
+            typer.echo(f"{status_icon} {subsystem.upper()}: {entry['detail']}")
+            if entry["status"] != "ok":
+                raise typer.Exit(code=1)
+            return
+
+    typer.echo(f"⚠️ No health check found for {subsystem}", err=True)
+    raise typer.Exit(code=1)
 
 
 def _summarize_settings(settings: Settings) -> str:
