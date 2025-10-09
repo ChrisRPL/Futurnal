@@ -530,7 +530,7 @@ def classify_failure(
     ):
         return QuarantineReason.PERMISSION_DENIED
 
-    # Parse errors
+    # Parse errors (including normalization-specific patterns)
     if any(
         pattern in error_lower
         for pattern in [
@@ -539,6 +539,11 @@ def classify_failure(
             "malformed",
             "invalid format",
             "decode error",
+            "unstructured",
+            "partition",
+            "element extraction",
+            "chunking",
+            "enrichment",
         ]
     ):
         return QuarantineReason.PARSE_ERROR
@@ -557,7 +562,14 @@ def classify_failure(
         return QuarantineReason.RESOURCE_EXHAUSTED
 
     # State corruption (check before dependency to catch "corrupt database")
-    if any(pattern in error_lower for pattern in ["corrupt", "inconsistent"]):
+    if any(pattern in error_lower for pattern in [
+        "corrupt",
+        "inconsistent",
+        "corrupted",
+        "damaged",
+        "truncated",
+        "incomplete file",
+    ]):
         return QuarantineReason.INVALID_STATE
 
     # Dependency failures (check before timeout to catch specific services)

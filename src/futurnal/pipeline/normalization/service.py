@@ -31,6 +31,7 @@ from .chunking import ChunkingConfig, ChunkingEngine
 from .enrichment import MetadataEnrichmentPipeline
 from .unstructured_bridge import UnstructuredBridge
 from .streaming import StreamingProcessor
+from .error_handler import NormalizationErrorHandler
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,7 @@ class NormalizationService:
         audit_logger: Optional[AuditLogger] = None,
         quarantine_manager: Optional[QuarantineStore] = None,
         streaming_processor: Optional[StreamingProcessor] = None,
+        error_handler: Optional[NormalizationErrorHandler] = None,
     ):
         self.config = config
         self.adapter_registry = adapter_registry
@@ -135,6 +137,7 @@ class NormalizationService:
         self.audit_logger = audit_logger
         self.quarantine_manager = quarantine_manager
         self.streaming_processor = streaming_processor
+        self.error_handler = error_handler
 
         # Metrics
         self.documents_processed = 0
@@ -269,7 +272,11 @@ class NormalizationService:
             self._log_normalization_failure(file_path, source_id, e)
 
             # Quarantine if enabled
-            if self.config.quarantine_on_failure and self.quarantine_manager:
+            # Note: error_handler internally requires quarantine_manager,
+            # so checking for either is sufficient
+            if self.config.quarantine_on_failure and (
+                self.error_handler or self.quarantine_manager
+            ):
                 await self._quarantine_document(file_path, source_id, source_type, e)
 
             # Update metrics
@@ -387,22 +394,33 @@ class NormalizationService:
     ) -> None:
         """Quarantine failed document for manual review.
 
+        Uses NormalizationErrorHandler for detailed error classification,
+        retry policy selection, and persistence to quarantine store.
+
         Args:
             file_path: Path to failed document
             source_id: Source identifier
             source_type: Source type
             error: Exception that caused failure
         """
-        if not self.quarantine_manager:
+        if not self.error_handler:
+            # Fallback: log warning if no error_handler configured
+            logger.warning(
+                f"Document quarantine requested for {file_path.name}: "
+                f"{type(error).__name__} - {str(error)[:100]}"
+            )
             return
 
-        # Log quarantine action (actual quarantine integration would go here)
-        # Note: QuarantineStore has a different interface designed for IngestionJob
-        # For now, we just log the failure - full integration would require
-        # adapting the job-based interface
-        logger.warning(
-            f"Document quarantine requested for {file_path.name}: "
-            f"{type(error).__name__} - {str(error)[:100]}"
+        # Use error handler for full classification and quarantine
+        await self.error_handler.handle_error(
+            file_path=file_path,
+            source_id=source_id,
+            source_type=source_type,
+            error=error,
+            metadata={
+                "processing_stage": "normalization",
+                "service": "NormalizationService",
+            },
         )
 
     async def _process_with_streaming(

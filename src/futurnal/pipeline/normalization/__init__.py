@@ -10,6 +10,7 @@ Main Components:
 - ChunkingEngine: Multi-strategy document segmentation
 - MetadataEnrichmentPipeline: Language detection, classification, hashing
 - UnstructuredBridge: Interface to Unstructured.io library
+- NormalizationErrorHandler: Error classification and quarantine integration
 
 Quick Start:
     >>> from futurnal.pipeline.normalization import create_normalization_service
@@ -49,6 +50,10 @@ from .streaming import (
     StreamingConfig,
     StreamingProcessor,
 )
+from .error_handler import (
+    NormalizationErrorHandler,
+    NormalizationErrorType,
+)
 
 __all__ = [
     # Service
@@ -80,4 +85,7 @@ __all__ = [
     "StreamingConfig",
     "MemoryMonitor",
     "ProgressCallback",
+    # Error Handling
+    "NormalizationErrorHandler",
+    "NormalizationErrorType",
 ]
