@@ -196,3 +196,4 @@ xlsxwriter==3.2.9
 yarl==1.20.1
 zipp==3.23.0
 zstandard==0.25.0
+ftlangdetect==1.0.4  # Fast language detection (80x faster than langdetect)
