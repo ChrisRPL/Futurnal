@@ -43,6 +43,12 @@ from .unstructured_bridge import (
     UnstructuredBridge,
     UnstructuredProcessingError,
 )
+from .streaming import (
+    MemoryMonitor,
+    ProgressCallback,
+    StreamingConfig,
+    StreamingProcessor,
+)
 
 __all__ = [
     # Service
@@ -69,4 +75,9 @@ __all__ = [
     "UnstructuredBridge",
     "PartitionStrategy",
     "UnstructuredProcessingError",
+    # Streaming
+    "StreamingProcessor",
+    "StreamingConfig",
+    "MemoryMonitor",
+    "ProgressCallback",
 ]

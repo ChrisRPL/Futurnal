@@ -30,6 +30,7 @@ from .registry import FormatAdapterRegistry
 from .chunking import ChunkingConfig, ChunkingEngine
 from .enrichment import MetadataEnrichmentPipeline
 from .unstructured_bridge import UnstructuredBridge
+from .streaming import StreamingProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,7 @@ class NormalizationService:
         sink: Optional[NormalizationSink] = None,
         audit_logger: Optional[AuditLogger] = None,
         quarantine_manager: Optional[QuarantineStore] = None,
+        streaming_processor: Optional[StreamingProcessor] = None,
     ):
         self.config = config
         self.adapter_registry = adapter_registry
@@ -132,6 +134,7 @@ class NormalizationService:
         self.sink = sink
         self.audit_logger = audit_logger
         self.quarantine_manager = quarantine_manager
+        self.streaming_processor = streaming_processor
 
         # Metrics
         self.documents_processed = 0
@@ -175,6 +178,21 @@ class NormalizationService:
                 f"Processing {file_path.name} as {format_type.value} "
                 f"via {adapter.name}"
             )
+
+            # Check if streaming should be used for large files
+            if (
+                self.config.enable_streaming
+                and self.streaming_processor
+                and await self.streaming_processor.should_stream(file_path)
+            ):
+                # Use streaming path for large files
+                return await self._process_with_streaming(
+                    file_path=file_path,
+                    source_id=source_id,
+                    source_type=source_type,
+                    format_type=format_type,
+                    source_metadata=source_metadata,
+                )
 
             # Step 2: Format-specific normalization
             preliminary_normalized = await adapter.normalize(
@@ -386,6 +404,142 @@ class NormalizationService:
             f"Document quarantine requested for {file_path.name}: "
             f"{type(error).__name__} - {str(error)[:100]}"
         )
+
+    async def _process_with_streaming(
+        self,
+        *,
+        file_path: Path,
+        source_id: str,
+        source_type: str,
+        format_type: DocumentFormat,
+        source_metadata: Optional[dict],
+    ) -> NormalizedDocument:
+        """Process large document using streaming processor.
+
+        Args:
+            file_path: Path to document
+            source_id: Source identifier
+            source_type: Source type
+            format_type: Detected format
+            source_metadata: Additional metadata
+
+        Returns:
+            NormalizedDocument with chunks
+
+        Raises:
+            NormalizationError: If streaming fails
+        """
+        import hashlib
+
+        logger.info(f"Using streaming processor for large file: {file_path.name}")
+
+        try:
+            # Read a small sample for metadata extraction
+            with open(file_path, "r", encoding="utf-8") as f:
+                sample_content = f.read(10000)  # Read first 10KB for metadata
+
+            # Compute content hash from full file (streaming)
+            content_hash = hashlib.sha256()
+            with open(file_path, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    content_hash.update(chunk)
+            sha256 = content_hash.hexdigest()
+
+            # Get file stats
+            file_stats = file_path.stat()
+            file_size_bytes = file_stats.st_size
+
+            # Generate chunking config for this file
+            chunking_config = self._get_chunking_config(format_type, source_type)
+
+            # Stream chunks
+            chunks = await self.streaming_processor.stream_chunks(
+                file_path=file_path,
+                chunking_config=chunking_config,
+                parent_document_id=sha256,
+            )
+
+            # Create preliminary metadata
+            from ..models import NormalizedMetadata
+            from datetime import timezone
+
+            created_at = datetime.fromtimestamp(file_stats.st_birthtime, tz=timezone.utc) if hasattr(file_stats, 'st_birthtime') else None
+            modified_at = datetime.fromtimestamp(file_stats.st_mtime, tz=timezone.utc)
+
+            metadata = NormalizedMetadata(
+                source_path=str(file_path),
+                source_id=source_id,
+                source_type=source_type,
+                format=format_type,
+                content_type=self._get_content_type_for_format(format_type),
+                created_at=created_at,
+                modified_at=modified_at,
+                ingested_at=datetime.now(timezone.utc),
+                file_size_bytes=file_size_bytes,
+                character_count=sum(chunk.character_count for chunk in chunks),
+                word_count=sum(chunk.word_count for chunk in chunks),
+                line_count=sum(chunk.content.count("\n") + 1 for chunk in chunks),
+                content_hash=sha256,
+                is_chunked=True,
+                chunk_strategy=chunking_config.strategy,
+                total_chunks=len(chunks),
+            )
+
+            # Create normalized document
+            normalized_doc = NormalizedDocument(
+                document_id=sha256,
+                sha256=sha256,
+                content=None,  # Content is in chunks
+                chunks=chunks,
+                metadata=metadata,
+                normalized_at=datetime.now(timezone.utc),
+            )
+
+            # Enrich metadata
+            enriched_metadata = await self.enrichment_pipeline.enrich(
+                document=normalized_doc,
+                enable_language_detection=self.config.enable_language_detection,
+                enable_classification=self.config.enable_content_classification,
+                compute_hash=False,  # Already computed
+                file_path=file_path,
+            )
+            normalized_doc.metadata = enriched_metadata
+
+            # Deliver to sink
+            if self.sink:
+                sink_payload = normalized_doc.to_sink_format()
+                self.sink.handle(sink_payload)
+
+            logger.info(
+                f"Streaming processing complete: {file_path.name}, "
+                f"{len(chunks)} chunks, {file_size_bytes / (1024 * 1024):.1f}MB"
+            )
+
+            return normalized_doc
+
+        except Exception as e:
+            logger.error(f"Streaming processing failed for {file_path}: {e}")
+            raise NormalizationError(
+                f"Failed to process large file via streaming: {str(e)}"
+            ) from e
+
+    def _get_content_type_for_format(self, format_type: DocumentFormat) -> str:
+        """Get MIME type for document format.
+
+        Args:
+            format_type: Document format
+
+        Returns:
+            MIME type string
+        """
+        mime_map = {
+            DocumentFormat.MARKDOWN: "text/markdown",
+            DocumentFormat.PDF: "application/pdf",
+            DocumentFormat.HTML: "text/html",
+            DocumentFormat.TEXT: "text/plain",
+            DocumentFormat.CODE: "text/plain",
+        }
+        return mime_map.get(format_type, "application/octet-stream")
 
     def _log_normalization_start(
         self, file_path: Path, source_id: str, source_type: str

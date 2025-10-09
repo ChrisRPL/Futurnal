@@ -1,34 +1,46 @@
-Summary: Implement streaming processor for efficient handling of large documents with minimal memory footprint.
+"""Streaming processor for efficient handling of large documents.
 
-# 06 · Streaming Processor
+This module provides a streaming document processor that handles large files (>100MB)
+efficiently with minimal memory footprint. The processor uses iterative parsing and
+chunked processing to avoid loading entire documents into memory, enabling normalization
+of arbitrarily large files on consumer hardware.
 
-## Purpose
-Design and implement a streaming document processor that handles large files (>100MB) efficiently with minimal memory footprint. The processor uses iterative parsing and chunked processing to avoid loading entire documents into memory, enabling normalization of arbitrarily large files on consumer hardware with <2GB peak memory usage.
-
-## Scope
+Key Features:
 - Streaming file reader with configurable buffer size
-- Iterative chunking without full file load
-- Memory monitoring with psutil integration
-- Progress tracking with callback protocol
+- Iterative element processing
+- Chunked normalization pipeline
+- Memory monitoring and limits
+- Progress tracking for long-running operations
 - Graceful degradation when memory pressure detected
-- Multiple streaming strategies (by_title, semantic, basic)
-- Async/await non-blocking I/O
-- Comprehensive metrics for telemetry
 
-## Requirements Alignment
-- **Feature Requirement**: "Handles large documents efficiently with streaming chunkers"
-- **Non-Functional Guarantee**: "Minimal memory footprint via streaming processing"
-- **Performance**: Peak memory usage <2 GB for large files
-- **Offline Operation**: All processing on-device with no network dependencies
+Design Philosophy:
+- Peak memory usage <2GB for large files
+- Process files incrementally without full load
+- Monitor and respond to memory pressure
+- Support cancellation and progress tracking
+"""
 
-## Component Design
-
-### StreamingConfig
-
-```python
 from __future__ import annotations
 
+import asyncio
+import gc
+import logging
+import re
 from dataclasses import dataclass
+from pathlib import Path
+from typing import AsyncIterator, Optional, Protocol, List
+
+import psutil
+
+from ..models import DocumentChunk, ChunkingStrategy, compute_chunk_hash, generate_chunk_id
+from .chunking import ChunkingConfig, IntermediateChunk
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -58,12 +70,11 @@ class StreamingConfig:
     memory_warning_threshold_pct: float = 0.75  # Warn at 75%
     memory_gc_threshold_pct: float = 0.80  # GC at 80%
     memory_pause_threshold_pct: float = 0.95  # Pause at 95%
-```
 
-### ProgressCallback Protocol
 
-```python
-from typing import Protocol
+# ---------------------------------------------------------------------------
+# Progress Tracking
+# ---------------------------------------------------------------------------
 
 
 class ProgressCallback(Protocol):
@@ -136,16 +147,11 @@ class LoggingProgressCallback:
             f"Streaming complete: {total_chunks} chunks, {total_bytes} bytes in "
             f"{duration_seconds:.2f}s ({throughput_mbps:.2f} MB/s)"
         )
-```
 
-### MemoryMonitor
 
-```python
-import gc
-import logging
-import psutil
-
-logger = logging.getLogger(__name__)
+# ---------------------------------------------------------------------------
+# Memory Monitoring
+# ---------------------------------------------------------------------------
 
 
 class MemoryMonitor:
@@ -226,18 +232,11 @@ class MemoryMonitor:
             "system_memory_available_mb": self.get_system_memory_available_mb(),
             "gc_triggered_count": self._gc_triggered_count,
         }
-```
 
-### StreamingProcessor
 
-```python
-import asyncio
-import logging
-import re
-from pathlib import Path
-from typing import AsyncIterator, List, Optional
-
-logger = logging.getLogger(__name__)
+# ---------------------------------------------------------------------------
+# Streaming Processor
+# ---------------------------------------------------------------------------
 
 
 class StreamingProcessor:
@@ -248,9 +247,8 @@ class StreamingProcessor:
 
     Example:
         >>> processor = StreamingProcessor(config=StreamingConfig())
-        >>> chunks = await processor.stream_chunks(
-        ...     large_file, chunking_config, "doc-123"
-        ... )
+        >>> async for chunk in processor.stream_chunks(large_file, chunking_config, "doc-123"):
+        ...     await process_chunk(chunk)
     """
 
     def __init__(
@@ -359,9 +357,6 @@ class StreamingProcessor:
     ) -> AsyncIterator[DocumentChunk]:
         """Iteratively read and chunk file.
 
-        Selects chunking strategy and streams chunks without loading
-        full file into memory.
-
         Args:
             file_path: Path to file
             chunking_config: Chunking configuration
@@ -375,30 +370,63 @@ class StreamingProcessor:
         bytes_processed = 0
         chunk_index = 0
 
-        # Select chunking strategy based on configuration
+        # Select chunking strategy
         if chunking_config.strategy == ChunkingStrategy.BY_TITLE.value:
-            strategy_iterator = self._stream_by_title(file_path, chunking_config, parent_document_id)
-        elif chunking_config.strategy == ChunkingStrategy.SEMANTIC.value:
-            strategy_iterator = self._stream_semantic(file_path, chunking_config, parent_document_id)
-        else:  # BASIC or default
-            strategy_iterator = self._stream_basic(file_path, chunking_config, parent_document_id)
-
-        # Stream chunks with memory monitoring
-        async for chunk in strategy_iterator:
-            # Check memory periodically
-            if chunk_index % self.config.memory_check_interval_chunks == 0:
-                await self._check_memory_pressure()
-
-            # Report progress
-            if progress_callback and self.config.enable_progress_tracking:
-                current_memory_mb = self.memory_monitor.get_process_memory_mb()
-                progress_callback.on_progress(
-                    bytes_processed, file_size_bytes, chunk_index + 1, current_memory_mb
+            async for chunk in self._stream_by_title(file_path, chunking_config, parent_document_id):
+                chunk_index = await self._yield_chunk_with_monitoring(
+                    chunk, chunk_index, bytes_processed, file_size_bytes, progress_callback
                 )
+                bytes_processed += len(chunk.content)
+                yield chunk
 
-            bytes_processed += len(chunk.content)
-            chunk_index += 1
-            yield chunk
+        elif chunking_config.strategy == ChunkingStrategy.SEMANTIC.value:
+            async for chunk in self._stream_semantic(file_path, chunking_config, parent_document_id):
+                chunk_index = await self._yield_chunk_with_monitoring(
+                    chunk, chunk_index, bytes_processed, file_size_bytes, progress_callback
+                )
+                bytes_processed += len(chunk.content)
+                yield chunk
+
+        else:  # BASIC or default
+            async for chunk in self._stream_basic(file_path, chunking_config, parent_document_id):
+                chunk_index = await self._yield_chunk_with_monitoring(
+                    chunk, chunk_index, bytes_processed, file_size_bytes, progress_callback
+                )
+                bytes_processed += len(chunk.content)
+                yield chunk
+
+    async def _yield_chunk_with_monitoring(
+        self,
+        chunk: DocumentChunk,
+        chunk_index: int,
+        bytes_processed: int,
+        file_size_bytes: int,
+        progress_callback: Optional[ProgressCallback],
+    ) -> int:
+        """Yield chunk with memory monitoring and progress tracking.
+
+        Args:
+            chunk: Chunk to yield
+            chunk_index: Current chunk index
+            bytes_processed: Bytes processed so far
+            file_size_bytes: Total file size
+            progress_callback: Optional progress callback
+
+        Returns:
+            Updated chunk index
+        """
+        # Check memory periodically
+        if chunk_index % self.config.memory_check_interval_chunks == 0:
+            await self._check_memory_pressure()
+
+        # Report progress
+        if progress_callback and self.config.enable_progress_tracking:
+            current_memory_mb = self.memory_monitor.get_process_memory_mb()
+            progress_callback.on_progress(
+                bytes_processed, file_size_bytes, chunk_index + 1, current_memory_mb
+            )
+
+        return chunk_index + 1
 
     async def _check_memory_pressure(self) -> None:
         """Check memory pressure and take appropriate action.
@@ -423,7 +451,7 @@ class StreamingProcessor:
             logger.info(f"Triggering garbage collection due to memory pressure ({usage_pct * 100:.1f}%)")
             self.memory_monitor.trigger_gc_if_needed(current_mb, limit_mb, self.config.memory_gc_threshold_pct)
 
-        # Pause threshold - critical memory pressure
+        # Pause threshold
         if usage_pct >= self.config.memory_pause_threshold_pct:
             logger.warning(
                 f"Memory usage critical ({usage_pct * 100:.1f}%), pausing briefly to allow memory to free"
@@ -438,9 +466,6 @@ class StreamingProcessor:
         parent_document_id: str,
     ) -> AsyncIterator[DocumentChunk]:
         """Stream chunks by title/heading boundaries.
-
-        Detects markdown headings and creates chunks at section boundaries
-        while tracking heading hierarchy.
 
         Args:
             file_path: Path to file
@@ -458,7 +483,6 @@ class StreamingProcessor:
         chunk_index = 0
         start_char = 0
 
-        # Stream file content in buffers
         async for buffer in self._stream_file_content(file_path):
             lines = buffer.split("\n")
 
@@ -466,7 +490,7 @@ class StreamingProcessor:
                 match = heading_pattern.match(line)
 
                 if match:
-                    # Found heading - finalize current chunk if large enough
+                    # Found heading - finalize current chunk if exists
                     if current_chunk_lines and len("\n".join(current_chunk_lines)) >= chunking_config.min_chunk_size:
                         chunk_content = "\n".join(current_chunk_lines)
                         yield self._create_document_chunk(
@@ -481,7 +505,7 @@ class StreamingProcessor:
                         start_char += len(chunk_content) + 1
                         current_chunk_lines = []
 
-                    # Update hierarchy tracking
+                    # Update hierarchy
                     heading_level = len(match.group(1))
                     heading_text = match.group(2).strip()
 
@@ -493,7 +517,7 @@ class StreamingProcessor:
 
                 current_chunk_lines.append(line)
 
-                # Split if chunk exceeds max size
+                # Check if chunk exceeds max size
                 if len("\n".join(current_chunk_lines)) > chunking_config.max_chunk_size:
                     chunk_content = "\n".join(current_chunk_lines)
                     yield self._create_document_chunk(
@@ -528,8 +552,6 @@ class StreamingProcessor:
     ) -> AsyncIterator[DocumentChunk]:
         """Stream chunks by semantic boundaries (paragraphs).
 
-        Splits on paragraph boundaries to maintain semantic coherence.
-
         Args:
             file_path: Path to file
             chunking_config: Chunking configuration
@@ -544,7 +566,7 @@ class StreamingProcessor:
         start_char = 0
 
         async for buffer in self._stream_file_content(file_path):
-            # Split by paragraph boundaries (double newline)
+            # Split by paragraph boundaries
             paragraphs = re.split(r"\n\s*\n", buffer)
 
             for para in paragraphs:
@@ -580,8 +602,6 @@ class StreamingProcessor:
     ) -> AsyncIterator[DocumentChunk]:
         """Stream chunks with fixed-size chunking.
 
-        Simple size-based chunking with configurable overlap.
-
         Args:
             file_path: Path to file
             chunking_config: Chunking configuration
@@ -611,16 +631,14 @@ class StreamingProcessor:
                 chunk_index += 1
                 start_char += chunk_size - overlap_size
 
-        # Yield final chunk if meets minimum size
+        # Yield final chunk
         if current_chunk and len(current_chunk) >= chunking_config.min_chunk_size:
             yield self._create_document_chunk(
                 current_chunk, chunk_index, parent_document_id, start_char
             )
 
     async def _stream_file_content(self, file_path: Path) -> AsyncIterator[str]:
-        """Stream file content in buffers to avoid loading entire file.
-
-        Uses aiofiles for async file I/O with fallback to sync reading.
+        """Stream file content in buffers.
 
         Args:
             file_path: Path to file
@@ -670,8 +688,6 @@ class StreamingProcessor:
         Returns:
             DocumentChunk instance
         """
-        from .models import generate_chunk_id, compute_chunk_hash
-
         chunk_id = generate_chunk_id(parent_document_id, chunk_index)
         chunk_hash = compute_chunk_hash(content, parent_document_id, chunk_index)
         word_count = len(re.findall(r"\b\w+\b", content))
@@ -691,7 +707,7 @@ class StreamingProcessor:
         )
 
     def get_metrics(self) -> dict:
-        """Get streaming metrics for telemetry.
+        """Get streaming metrics.
 
         Returns:
             Dictionary with streaming statistics
@@ -714,228 +730,3 @@ class StreamingProcessor:
             "average_chunks_per_file": avg_chunks_per_file,
             **self.memory_monitor.get_metrics(),
         }
-```
-
-## Acceptance Criteria
-
-- ✅ Files >100MB processed via streaming (tested with 1GB+ files)
-- ✅ Memory usage stays under configured limit (<2GB)
-- ✅ Progress tracking for long operations via callback protocol
-- ✅ Graceful handling of memory pressure (warning/GC/pause thresholds)
-- ✅ Chunked processing without full file in memory
-- ✅ Multiple streaming strategies (by_title, semantic, basic)
-- ✅ Async/await for non-blocking I/O
-- ✅ Buffered file reading with aiofiles
-- ✅ Comprehensive metrics tracking
-- ✅ Integration with existing ChunkingConfig
-- ✅ Production-ready error handling
-
-## Test Plan
-
-### Unit Tests (625 lines implemented)
-
-**MemoryMonitor Tests** (`tests/pipeline/normalization/test_streaming.py`):
-- Memory measurement accuracy
-- System memory availability tracking
-- GC triggering at thresholds
-- Metrics collection
-
-**StreamingProcessor Tests**:
-- File size threshold detection (`should_stream()`)
-- Strategy selection per chunking config
-- Buffer management and boundary detection
-- Chunk creation with proper IDs and hashes
-- Progress callback invocation
-- Error handling for file access failures
-
-**Progress Callback Tests**:
-- `on_progress()` called with correct values
-- `on_memory_warning()` triggered at threshold
-- `on_complete()` reports accurate stats
-
-### Integration Tests (625 lines)
-
-**End-to-End Streaming**:
-- Large file processing (1GB+) without OOM
-- Memory profiling during streaming
-- Correct chunk count and content
-- Heading hierarchy tracking (by_title strategy)
-- Paragraph boundary detection (semantic strategy)
-- Overlap handling (basic strategy)
-
-**Memory Pressure Tests**:
-- Warning threshold triggers log
-- GC threshold triggers garbage collection
-- Pause threshold causes brief delay
-- Memory recovers after GC
-
-**Multi-Strategy Tests**:
-- `_stream_by_title()` with markdown headings
-- `_stream_semantic()` with paragraphs
-- `_stream_basic()` with fixed sizes
-- Correct chunk boundaries for each
-
-### Performance Tests (431 lines implemented)
-
-**Throughput Benchmarks** (`tests/pipeline/normalization/test_streaming_performance.py`):
-- Processing speed (MB/s) for large files
-- Comparison: streaming vs batch processing
-- Memory usage: streaming vs batch
-- Throughput meets ≥5 MB/s target
-
-**Memory Profiling**:
-- Peak memory usage measurement
-- Memory stays under limit during 1GB+ file processing
-- GC effectiveness verification
-- Memory leak detection (repeated processing)
-
-**Scalability Tests**:
-- Multiple large files processed sequentially
-- Concurrent streaming (if supported)
-- Resource cleanup verification
-
-### Edge Case Tests
-
-**File Handling**:
-- Empty files
-- Very large files (>1GB)
-- Files with unusual encodings
-- Files with very long lines
-- Binary files (should reject or handle gracefully)
-
-**Memory Scenarios**:
-- Low available system memory
-- Approaching memory limit during processing
-- Recovery after memory pressure
-- Multiple GC cycles during single file
-
-## Implementation Notes
-
-### Installing Dependencies
-
-**Required**:
-```bash
-pip install psutil  # Memory monitoring
-```
-
-**Optional (recommended)**:
-```bash
-pip install aiofiles  # Async file I/O (faster)
-```
-
-If `aiofiles` is not available, the processor automatically falls back to synchronous file reading (still functional but slightly slower).
-
-### Memory Threshold Configuration
-
-The graceful degradation strategy uses three thresholds:
-
-1. **Warning Threshold (75%)**:
-   - Logs warning message
-   - No action taken, just awareness
-   - Helps operators understand memory usage patterns
-
-2. **GC Threshold (80%)**:
-   - Triggers Python garbage collection
-   - Attempts to free unused memory
-   - Logged for debugging
-
-3. **Pause Threshold (95%)**:
-   - Critical memory pressure
-   - Brief pause (500ms) to allow memory to free
-   - Forced garbage collection
-   - Last resort before potential OOM
-
-These thresholds are configurable via `StreamingConfig`.
-
-### Buffered File Reading
-
-The processor reads files in configurable buffers (default 1MB) using async I/O:
-
-```python
-async for buffer in self._stream_file_content(file_path):
-    # Process buffer without loading full file
-    ...
-```
-
-This ensures memory footprint remains constant regardless of file size.
-
-### Integration with NormalizationService
-
-The `NormalizationService` automatically uses streaming for large files:
-
-```python
-# In NormalizationService
-if await streaming_processor.should_stream(file_path):
-    chunks = await streaming_processor.stream_chunks(
-        file_path, chunking_config, document_id
-    )
-else:
-    # Use regular chunking engine for small files
-    chunks = await chunking_engine.chunk_document(content, config)
-```
-
-### Performance Characteristics
-
-Based on testing with Apple Silicon (M2 Pro):
-
-- **Throughput**: 8-12 MB/s for large files
-- **Memory**: Peak <500MB for 1GB file (well under 2GB limit)
-- **Overhead**: ~5% slower than batch for small files (<10MB)
-- **Benefit**: Enables processing of arbitrarily large files without OOM
-
-### When to Use Streaming
-
-**Use streaming for**:
-- Files >100MB
-- Memory-constrained environments
-- Processing very large documents (PDFs, logs, datasets)
-
-**Use batch processing for**:
-- Files <100MB (faster, simpler)
-- When memory is not a constraint
-- When you need full document context
-
-## Open Questions
-
-- Should we support pause/resume for very long operations?
-- How to handle files that are too large even for streaming (>10GB)?
-- Should we add support for streaming from network sources?
-- How to optimize buffer size dynamically based on file type?
-- Should we support parallel chunk processing while streaming?
-- How to handle corrupted or incomplete files during streaming?
-- Should we add support for streaming compression (gzip, etc.)?
-
-## Dependencies
-
-- **psutil** - Process and system memory monitoring (required)
-- **aiofiles** - Async file I/O (optional, with fallback)
-- NormalizedDocument schema (Task 01)
-- DocumentChunk schema (Task 01)
-- ChunkingConfig (Task 04)
-- ChunkingStrategy enum (Task 04)
-- NormalizationService integration (Task 02)
-
-## Production Status
-
-**Implementation**: ✅ **FULLY IMPLEMENTED**
-- Production code: `src/futurnal/pipeline/normalization/streaming.py` (732 lines)
-- Unit tests: `tests/pipeline/normalization/test_streaming.py` (625 lines)
-- Performance tests: `tests/pipeline/normalization/test_streaming_performance.py` (431 lines)
-- **Total**: 1,788 lines of production-ready, tested code
-
-**Test Coverage**: ✅ **COMPREHENSIVE**
-- Memory monitoring tested
-- All streaming strategies tested
-- Progress callbacks tested
-- Memory pressure handling tested
-- Performance benchmarks passing
-
-**Production Ready**: ✅ **YES**
-- Handles files >1GB without OOM
-- Memory stays under 2GB limit
-- Throughput exceeds 5 MB/s target
-- Comprehensive error handling
-- Metrics for telemetry
-- Fully async/await
-
-
