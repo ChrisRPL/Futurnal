@@ -37,20 +37,27 @@ class NormalizationSink:
     vector_writer: VectorWriter
 
     def handle(self, element: dict) -> None:
-        with open(element["element_path"], "r", encoding="utf-8") as fh:
-            payload = json.load(fh)
+        # Support both old format (element_path) and new format (direct payload)
+        if "element_path" in element:
+            # Old format: read from file
+            with open(element["element_path"], "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        else:
+            # New format: payload included directly
+            payload = element
+
         document_payload = {
-            "sha256": element["sha256"],
-            "path": element["path"],
-            "source": element["source"],
+            "sha256": element.get("sha256") or payload.get("sha256"),
+            "path": element.get("path") or payload.get("path"),
+            "source": element.get("source") or payload.get("source"),
             "metadata": payload.get("metadata", {}),
             "text": payload.get("text"),
         }
         self.pkg_writer.write_document(document_payload)
         embedding_payload = {
-            "sha256": element["sha256"],
-            "path": element["path"],
-            "source": element["source"],
+            "sha256": element.get("sha256") or payload.get("sha256"),
+            "path": element.get("path") or payload.get("path"),
+            "source": element.get("source") or payload.get("source"),
             "text": payload.get("text"),
         }
         if "embedding" in payload:
