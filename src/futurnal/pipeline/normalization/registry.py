@@ -223,18 +223,33 @@ class FormatAdapterRegistry:
     def register_default_adapters(self) -> None:
         """Register default adapters for common formats.
 
-        This method imports and registers the built-in adapters for
-        Markdown, PDF, and Text formats. Called by factory function.
+        This method imports and registers all built-in adapters:
+        - Text-based: Markdown, Email, HTML, Code
+        - Binary: PDF (also handles DOCX, PPTX)
+        - Fallback: Generic
+
+        Called by factory function to set up standard adapter registry.
         """
+        from .adapters.code import CodeAdapter
+        from .adapters.email import EmailAdapter
+        from .adapters.generic import GenericAdapter
+        from .adapters.html import HTMLAdapter
         from .adapters.markdown import MarkdownAdapter
         from .adapters.pdf import PDFAdapter
-        from .adapters.text import TextAdapter
 
-        # Register specific adapters
+        # Register text-based format adapters
         self.register(MarkdownAdapter())
+        self.register(EmailAdapter())
+        self.register(HTMLAdapter())
+        self.register(CodeAdapter())
+
+        # Register binary format adapters
         self.register(PDFAdapter())
 
-        # Register fallback
-        self.register_fallback(TextAdapter())
+        # Register fallback adapter for unknown formats
+        self.register_fallback(GenericAdapter())
 
-        logger.info("Registered default adapters for common formats")
+        logger.info(
+            f"Registered {len(self._adapters)} default adapters "
+            f"with GenericAdapter as fallback"
+        )

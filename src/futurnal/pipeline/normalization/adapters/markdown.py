@@ -69,18 +69,13 @@ class MarkdownAdapter(BaseAdapter):
             with open(file_path, "r", encoding="utf-8") as f:
                 markdown_content = f.read()
 
-            # Parse markdown using ObsidianNormalizer
-            parse_result = self._normalizer.parse(markdown_content)
+            # Use existing MarkdownNormalizer which returns NormalizedDocument
+            obsidian_doc = self._normalizer.normalize(markdown_content, file_path)
 
-            # Extract frontmatter
-            frontmatter = None
-            if parse_result.frontmatter:
-                frontmatter = parse_result.frontmatter
-
-            # Extract tags
-            tags = []
-            if parse_result.tags:
-                tags = [tag.name for tag in parse_result.tags]
+            # Convert Obsidian NormalizedDocument to pipeline NormalizedDocument
+            # Extract metadata from Obsidian format
+            frontmatter = obsidian_doc.metadata.frontmatter
+            tags = [tag.name for tag in obsidian_doc.metadata.tags]
 
             # Extract aliases from frontmatter
             aliases = []
@@ -91,12 +86,9 @@ class MarkdownAdapter(BaseAdapter):
                 elif isinstance(alias_value, str):
                     aliases = [alias_value]
 
-            # Get clean content (without frontmatter)
-            content = parse_result.content
-
-            # Create normalized document
+            # Create normalized document using pipeline schema
             document = self.create_normalized_document(
-                content=content,
+                content=obsidian_doc.content,
                 file_path=file_path,
                 source_id=source_id,
                 source_type=source_type,
@@ -107,15 +99,18 @@ class MarkdownAdapter(BaseAdapter):
                 aliases=aliases,
             )
 
-            # Add markdown-specific metadata
+            # Add markdown-specific metadata from Obsidian normalizer
             document.metadata.extra["markdown"] = {
-                "has_frontmatter": parse_result.frontmatter is not None,
-                "has_links": len(parse_result.wikilinks) > 0,
-                "has_tags": len(parse_result.tags) > 0,
-                "link_count": len(parse_result.wikilinks),
-                "tag_count": len(parse_result.tags),
-                "has_tables": len(parse_result.tables) > 0,
-                "has_code_blocks": len(parse_result.code_blocks) > 0,
+                "has_frontmatter": frontmatter is not None,
+                "has_links": len(obsidian_doc.metadata.links) > 0,
+                "has_tags": len(obsidian_doc.metadata.tags) > 0,
+                "link_count": len(obsidian_doc.metadata.links),
+                "tag_count": len(obsidian_doc.metadata.tags),
+                "has_tables": len(obsidian_doc.metadata.tables) > 0,
+                "has_code_blocks": False,  # Not exposed in Obsidian schema
+                "heading_count": len(obsidian_doc.metadata.headings),
+                "callout_count": len(obsidian_doc.metadata.callouts),
+                "word_count": obsidian_doc.metadata.word_count,
             }
 
             logger.debug(f"Normalized markdown document: {file_path.name}")
