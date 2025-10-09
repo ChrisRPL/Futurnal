@@ -217,6 +217,7 @@ class NormalizationService:
                 enable_language_detection=self.config.enable_language_detection,
                 enable_classification=self.config.enable_content_classification,
                 compute_hash=self.config.compute_content_hash,
+                file_path=file_path,  # Pass file_path for temporal metadata extraction
             )
             preliminary_normalized.metadata = enriched_metadata
 
