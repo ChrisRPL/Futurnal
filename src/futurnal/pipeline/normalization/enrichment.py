@@ -5,7 +5,7 @@ language detection, content classification, hashing, and statistical analysis.
 All processing is privacy-preserving with no external API calls.
 
 Key Features:
-- Fast language detection using fasttext-langdetect (80x faster)
+- Language detection using langdetect (offline-capable, deterministic)
 - Content type classification with format-specific detection
 - SHA-256 content hashing for provenance
 - Word/character/line count statistics

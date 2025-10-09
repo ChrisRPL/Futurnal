@@ -32,6 +32,7 @@ from .enrichment import MetadataEnrichmentPipeline
 from .unstructured_bridge import UnstructuredBridge
 from .streaming import StreamingProcessor
 from .error_handler import NormalizationErrorHandler
+from .performance import PerformanceMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +128,7 @@ class NormalizationService:
         quarantine_manager: Optional[QuarantineStore] = None,
         streaming_processor: Optional[StreamingProcessor] = None,
         error_handler: Optional[NormalizationErrorHandler] = None,
+        performance_monitor: Optional[PerformanceMonitor] = None,
     ):
         self.config = config
         self.adapter_registry = adapter_registry
@@ -138,6 +140,7 @@ class NormalizationService:
         self.quarantine_manager = quarantine_manager
         self.streaming_processor = streaming_processor
         self.error_handler = error_handler
+        self.performance_monitor = performance_monitor
 
         # Metrics
         self.documents_processed = 0
@@ -264,6 +267,15 @@ class NormalizationService:
             # Update metrics
             self.documents_processed += 1
             self.total_processing_time_ms += duration_ms
+
+            # Record performance metrics
+            if self.performance_monitor:
+                size_bytes = normalized_doc.metadata.file_size_bytes or 0
+                self.performance_monitor.record_document(
+                    size_bytes=size_bytes,
+                    format=normalized_doc.metadata.format,
+                    duration_ms=duration_ms,
+                )
 
             return normalized_doc
 
@@ -653,7 +665,7 @@ class NormalizationService:
         Returns:
             Dictionary with processing statistics
         """
-        return {
+        metrics = {
             "documents_processed": self.documents_processed,
             "documents_failed": self.documents_failed,
             "total_processing_time_ms": self.total_processing_time_ms,
@@ -669,3 +681,9 @@ class NormalizationService:
                 else 0
             ),
         }
+
+        # Include performance metrics if monitor is available
+        if self.performance_monitor:
+            metrics["performance"] = self.performance_monitor.get_metrics()
+
+        return metrics

@@ -19,6 +19,7 @@ from .enrichment import MetadataEnrichmentPipeline
 from .service import NormalizationConfig, NormalizationService
 from .unstructured_bridge import UnstructuredBridge
 from .orchestrator_integration import NormalizationProcessor
+from .performance import PerformanceMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,11 @@ def create_normalization_service(
     unstructured_bridge = UnstructuredBridge()
     logger.debug("Initialized Unstructured.io bridge")
 
+    # Create performance monitor
+    performance_monitor = PerformanceMonitor()
+    performance_monitor.start()
+    logger.debug("Initialized performance monitor")
+
     # Create service
     service = NormalizationService(
         config=config,
@@ -86,6 +92,7 @@ def create_normalization_service(
         sink=sink,
         audit_logger=audit_logger,
         quarantine_manager=quarantine_manager,
+        performance_monitor=performance_monitor,
     )
 
     logger.info("Normalization service initialized successfully")
