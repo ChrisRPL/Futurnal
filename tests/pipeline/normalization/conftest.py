@@ -206,3 +206,92 @@ def mock_quarantine_manager(tmp_path):
     quarantine_db.parent.mkdir(exist_ok=True)
 
     return QuarantineStore(path=quarantine_db)
+
+
+# ---------------------------------------------------------------------------
+# Import Quality Gates Fixtures
+# ---------------------------------------------------------------------------
+
+# Import all format sample fixtures
+from tests.pipeline.normalization.fixtures.format_samples import (
+    markdown_simple,
+    markdown_complex,
+    markdown_large,
+    text_simple,
+    text_large,
+    code_python,
+    code_javascript,
+    json_simple,
+    json_large,
+    yaml_simple,
+    csv_simple,
+    csv_large,
+    html_simple,
+    xml_simple,
+    email_simple,
+    jupyter_simple,
+    all_format_fixtures,
+)
+
+# Import all edge case fixtures
+from tests.pipeline.normalization.fixtures.edge_case_data import (
+    empty_file,
+    whitespace_only_file,
+    single_char_file,
+    single_line_file,
+    unicode_emoji_file,
+    unicode_bom_file,
+    mixed_encoding_file,
+    large_file_10mb,
+    large_file_100mb,
+    large_markdown_50mb,
+    truncated_json_file,
+    invalid_json_file,
+    malformed_xml_file,
+    malformed_yaml_file,
+    binary_as_text_file,
+    null_bytes_file,
+    deeply_nested_json,
+    very_long_lines_file,
+    many_small_lines_file,
+    special_filename_file,
+    very_long_filename_file,
+    markdown_no_headings,
+    markdown_only_headings,
+    csv_inconsistent_columns,
+    html_malformed,
+    all_edge_case_fixtures,
+)
+
+
+# ---------------------------------------------------------------------------
+# Pytest Hooks for Custom Markers
+# ---------------------------------------------------------------------------
+
+
+def pytest_configure(config):
+    """Register custom markers for quality gates testing."""
+    config.addinivalue_line(
+        "markers",
+        "determinism: Tests for deterministic outputs (byte-identical)"
+    )
+    config.addinivalue_line(
+        "markers",
+        "format_coverage: Tests for all 16+ DocumentFormat types"
+    )
+    config.addinivalue_line(
+        "markers",
+        "edge_case: Tests for edge cases (empty, large, corrupted files)"
+    )
+    config.addinivalue_line(
+        "markers",
+        "privacy_audit: Tests for privacy compliance (no content leakage)"
+    )
+    config.addinivalue_line(
+        "markers",
+        "production_readiness: Tests for production readiness validation"
+    )
+    config.addinivalue_line(
+        "markers",
+        "slow: Slow-running tests (use --run-slow to include)"
+    )
