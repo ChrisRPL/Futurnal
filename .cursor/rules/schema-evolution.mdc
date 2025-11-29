@@ -1,0 +1,273 @@
+---
+globs: src/futurnal/extraction/**,src/futurnal/graph/**
+description: Autonomous schema evolution rules - NO hardcoded entity types
+---
+# Schema Evolution Rules
+
+**CRITICAL**: Schema must evolve autonomously. Hardcoded entity types violate Option B architecture.
+
+## Core Principles
+
+### 1. NO Hardcoded Entity Types
+**REJECT**:
+```python
+# ❌ WRONG - Hardcoded entity types
+ENTITY_TYPES = ["Person", "Organization", "Concept"]  # Fixed schema
+```
+
+**ACCEPT**:
+```python
+# ✅ CORRECT - Seed schema that evolves
+class SeedSchema:
+    """Initial seed schema for bootstrapping."""
+    initial_entity_types = ["Person", "Organization", "Concept", "Event"]
+    # Schema evolves from here via AutoSchemaKG
+```
+
+### 2. Multi-Phase Extraction (AutoSchemaKG)
+**Three phases of schema evolution:**
+
+```python
+class SchemaEvolutionEngine:
+    """AutoSchemaKG multi-phase schema evolution."""
+
+    def induce_schema_multiphase(self, documents: List[Document]) -> Schema:
+        """
+        Multi-phase schema induction.
+
+        Phase 1: Entity-Entity relationships
+        Phase 2: Entity-Event relationships (temporal)
+        Phase 3: Event-Event relationships (causal candidates)
+        """
+        # Phase 1: Extract entity types and entity-entity relationships
+        ee_schema = self.extract_entity_entity_phase(documents)
+
+        # Phase 2: Extract event types and entity-event relationships
+        eer_schema = self.extract_entity_event_phase(documents, ee_schema)
+
+        # Phase 3: Extract event-event relationships (causal)
+        eee_schema = self.extract_event_event_phase(documents, eer_schema)
+
+        return eee_schema
+```
+
+### 3. Reflection Mechanism
+**Schema evolution triggered by quality assessment:**
+
+```python
+class ReflectionMechanism:
+    """Triggers schema evolution when quality degrades."""
+
+    def should_evolve_schema(
+        self,
+        extraction_quality: QualityMetrics,
+        documents_processed: int
+    ) -> bool:
+        """
+        Trigger schema evolution when:
+        - Every N documents (N=50 typical)
+        - Quality drops below threshold
+        - New entity/relationship patterns detected
+        """
+        if documents_processed % 50 == 0:
+            return True
+
+        if extraction_quality.precision < 0.7:
+            return True
+
+        if self.detect_new_patterns():
+            return True
+
+        return False
+
+    def evolve_schema(self, current_schema: Schema) -> Schema:
+        """
+        Evolve schema based on reflection.
+
+        1. Analyze recent extraction failures
+        2. Identify missing entity/relationship types
+        3. Propose schema extensions
+        4. Validate extensions
+        5. Update schema version
+        """
+        failures = self.analyze_extraction_failures()
+        missing_types = self.identify_missing_types(failures)
+        proposed_schema = self.extend_schema(current_schema, missing_types)
+        validated_schema = self.validate_schema(proposed_schema)
+
+        return validated_schema
+```
+
+### 4. Schema Versioning
+**Track schema evolution in PKG:**
+
+```cypher
+// Schema version nodes
+CREATE (sv:SchemaVersion {
+  id: "schema_v1",
+  version: 1,
+  created_at: datetime(),
+  changes: "Initial seed schema",
+  reflection_quality: 0.75,
+  entity_types: ["Person", "Organization", "Concept", "Event"],
+  relationship_types: ["WORKS_AT", "MENTIONS", "PARTICIPATES_IN"]
+})
+
+// Evolution to v2
+CREATE (sv2:SchemaVersion {
+  id: "schema_v2",
+  version: 2,
+  created_at: datetime(),
+  changes: "Added Meeting event type, ATTENDED relationship",
+  reflection_quality: 0.82,
+  entity_types: ["Person", "Organization", "Concept", "Event", "Meeting"],
+  relationship_types: ["WORKS_AT", "MENTIONS", "PARTICIPATES_IN", "ATTENDED"]
+})
+
+CREATE (sv)-[:EVOLVED_TO]->(sv2)
+```
+
+## Implementation Guidelines
+
+### Schema Discovery (Not Definition)
+**Let the data reveal schema structure:**
+
+```python
+class SchemaDiscovery:
+    """Discover schema from documents, don't impose it."""
+
+    def discover_entity_types(self, documents: List[Document]) -> List[str]:
+        """
+        Discover entity types from documents using LLM.
+
+        NOT: Use predefined list
+        BUT: Ask LLM what entity types appear
+        """
+        prompt = f"""Analyze these documents and identify entity types:
+
+Documents: {documents}
+
+What types of entities appear? (e.g., Person, Organization, Event, etc.)
+"""
+        entity_types = self.llm.generate(prompt)
+        return entity_types
+
+    def discover_relationship_types(
+        self,
+        documents: List[Document],
+        entity_types: List[str]
+    ) -> List[str]:
+        """Discover relationship types from documents."""
+        prompt = f"""Given entity types {entity_types}, what relationships exist?
+
+Documents: {documents}
+
+What relationships connect these entities?
+"""
+        relationship_types = self.llm.generate(prompt)
+        return relationship_types
+```
+
+### Semantic Alignment Validation
+**Measure schema quality against manual schema:**
+
+```python
+def compute_semantic_alignment(
+    evolved_schema: Schema,
+    manual_schema: Schema
+) -> float:
+    """
+    Compute semantic alignment between evolved and manual schema.
+
+    Target: >90% alignment
+    """
+    # Embed entity types from both schemas
+    evolved_embeddings = embed_entity_types(evolved_schema.entity_types)
+    manual_embeddings = embed_entity_types(manual_schema.entity_types)
+
+    # Compute similarity
+    similarity = cosine_similarity(evolved_embeddings, manual_embeddings)
+
+    return similarity.mean()
+```
+
+**Target**: >90% semantic alignment
+
+### Schema Merge Strategy
+**Handle concurrent schema evolution:**
+
+```python
+def merge_schemas(schema_v1: Schema, schema_v2: Schema) -> Schema:
+    """
+    Merge two schema versions.
+
+    Strategy:
+    - Union of entity types
+    - Union of relationship types
+    - Resolve naming conflicts via similarity
+    - Preserve backward compatibility
+    """
+    merged_entity_types = set(schema_v1.entity_types) | set(schema_v2.entity_types)
+    merged_rel_types = set(schema_v1.relationship_types) | set(schema_v2.relationship_types)
+
+    # Resolve conflicts (e.g., "Person" vs "Individual")
+    resolved_entities = resolve_naming_conflicts(merged_entity_types)
+
+    return Schema(
+        entity_types=list(resolved_entities),
+        relationship_types=list(merged_rel_types),
+        version=max(schema_v1.version, schema_v2.version) + 1
+    )
+```
+
+## Testing Requirements
+
+```python
+class TestSchemaEvolution:
+    def test_no_hardcoded_types(self):
+        """Ensure no hardcoded entity types in code."""
+        # Scan codebase for hardcoded ENTITY_TYPES lists
+        hardcoded = find_hardcoded_entity_types(codebase)
+        assert len(hardcoded) == 0, "Found hardcoded entity types"
+
+    def test_multi_phase_extraction(self):
+        """Validate all 3 extraction phases operational."""
+        schema_engine = SchemaEvolutionEngine()
+        schema = schema_engine.induce_schema_multiphase(test_docs)
+
+        assert schema.has_entity_entity_relationships()
+        assert schema.has_entity_event_relationships()
+        assert schema.has_event_event_relationships()
+
+    def test_schema_alignment(self):
+        """Validate >90% semantic alignment."""
+        evolved = evolve_schema_from_documents(test_corpus)
+        manual = load_manual_schema()
+
+        alignment = compute_semantic_alignment(evolved, manual)
+        assert alignment > 0.90
+
+    def test_reflection_triggers(self):
+        """Validate reflection mechanism triggers."""
+        reflection = ReflectionMechanism()
+
+        # Should trigger every 50 documents
+        assert reflection.should_evolve_schema(quality, documents_processed=50)
+
+        # Should trigger on quality drop
+        low_quality = QualityMetrics(precision=0.65)
+        assert reflection.should_evolve_schema(low_quality, documents_processed=10)
+```
+
+## Quality Gates
+
+- ✅ Schema alignment >90%
+- ✅ Reflection mechanism operational
+- ✅ All 3 extraction phases functional
+- ✅ Schema versioning tracked in PKG
+- ✅ No hardcoded entity types in codebase
+
+## References
+
+- **Schema Evolution Module**: [docs/phase-1/entity-relationship-extraction-production-plan/02-schema-evolution.md](mdc:docs/phase-1/entity-relationship-extraction-production-plan/02-schema-evolution.md)
+- **PKG Schema Design**: [docs/phase-1/pkg-graph-storage-production-plan/01-graph-schema-design.md](mdc:docs/phase-1/pkg-graph-storage-production-plan/01-graph-schema-design.md)

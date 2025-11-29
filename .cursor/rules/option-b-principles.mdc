@@ -1,0 +1,98 @@
+---
+alwaysApply: true
+description: Core Option B principles for Ghost→Animal evolution - CRITICAL anti-regression protection
+---
+# Option B Implementation Principles
+
+**CRITICAL**: These rules prevent regression to Option A (static, passive approach). Option B is the approved architecture for Futurnal's Ghost→Animal AI evolution.
+
+## Core Principles
+
+### 1. Ghost→Animal Evolution (Training-Free GRPO)
+- **Ghost model remains FROZEN** - Never update parameters
+- **Animal emerges through experiential knowledge** - Stored as token priors, not weights
+- **Learning is local-only** - No cloud model updates, no fine-tuning
+- **Semantic advantages via LLM introspection** - Not gradient descent
+
+### 2. Critical Implementation Trilogy
+All three frameworks are REQUIRED for Option B:
+
+**Training-Free GRPO**:
+- Experiential knowledge = natural language patterns
+- Rollout generation for multiple extraction attempts
+- Best rollout selection via reward model
+- Ghost + Experience = Animal behavior
+
+**TOTAL (Thought Templates)**:
+- Template database for extraction patterns
+- Textual gradients refine templates (KEEP/FIX/DISCARD)
+- Template composition for complex tasks
+- Templates evolve, model doesn't
+
+**AgentFlow Architecture**:
+- 4-module system: Planner, Executor, Verifier, Generator
+- Prepares for Phase 2 (Analyst) and Phase 3 (Guide)
+- Maintains architecture for future phases
+
+### 3. Temporal-First Design
+- **FATAL gap without temporal extraction** - Blocks Phase 3
+- Every entity/relationship extraction MUST capture temporal metadata
+- Events are distinct from static entities
+- 7 temporal relationship types required: BEFORE/AFTER/DURING/CAUSES/ENABLES/PREVENTS/TRIGGERS
+- Temporal accuracy target: **>85%**
+
+### 4. Autonomous Schema Evolution
+- **NO hardcoded entity types** (seed schema only)
+- AutoSchemaKG multi-phase extraction:
+  - Phase 1: Entity-Entity relationships
+  - Phase 2: Entity-Event relationships
+  - Phase 3: Event-Event relationships (causal candidates)
+- Reflection mechanism triggers every N documents
+- Schema alignment target: **>90%**
+
+### 5. Causal Structure Preparation
+- Event entities with temporal grounding
+- Event-event relationships as causal candidates
+- Bradford Hill criteria metadata prepared for Phase 3
+- Foundation for causal inference non-negotiable
+
+### 6. Quality Over Speed
+- Option B takes **5 months** (vs 3-4 for Option A)
+- Investment: +9-12 weeks upfront
+- Return: **6+ months technical debt avoided**
+- Net benefit: **3-4 months saved** + 2-3 year competitive moat
+
+## Anti-Regression Protection
+
+### ❌ REJECT These Suggestions (Option A patterns):
+- "Let's use static schema for now, evolve later"
+- "Skip temporal extraction, add it in Phase 2"
+- "Fine-tune the model instead of experiential learning"
+- "Hardcode entity types, it's simpler"
+- "Store parameters instead of token priors"
+- "We can add causal structure later"
+
+### ✅ ENFORCE These Requirements:
+- Temporal metadata from day 1
+- Schema evolution infrastructure from start
+- Experiential learning (not parameter updates)
+- Thought template database operational
+- Causal structure prepared for Phase 3
+- All quality gates validated before production
+
+## References
+
+- **Option B Roadmap**: [docs/phase-1/PHASE-1-OPTION-B-ROADMAP.md](mdc:docs/phase-1/PHASE-1-OPTION-B-ROADMAP.md)
+- **Critical Trilogy**: [docs/phase-1/CRITICAL_IMPLEMENTATION_TRILOGY.md](mdc:docs/phase-1/CRITICAL_IMPLEMENTATION_TRILOGY.md)
+- **Production Plans**: [docs/phase-1/entity-relationship-extraction-production-plan/](mdc:docs/phase-1/entity-relationship-extraction-production-plan/)
+
+## Success Criteria
+
+Implementation is Option B compliant when:
+- ✅ Ghost model frozen, Animal behavior emerges
+- ✅ Temporal extraction operational (>85% accuracy)
+- ✅ Schema evolves autonomously (>90% alignment)
+- ✅ Experiential learning improves quality over time
+- ✅ Thought templates refine via textual gradients
+- ✅ Causal structure prepared for Phase 3
+- ✅ All quality gates passing

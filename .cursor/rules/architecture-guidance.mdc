@@ -4,8 +4,39 @@ description: Architecture and requirements rules for Futurnal's technical implem
 ---
 # Architecture & Requirements Guidance
 
+## Core Architecture Principles
 - Maintain the layered approach defined in [system-architecture.md](mdc:architecture/system-architecture.md): on-device foundation, dynamic PKG, and proactive insight/causal exploration.
 - When modifying ingestion, ensure connectors feed Unstructured.io parsing and produce semantic triples as outlined in the architecture document.
 - Respect privacy-first principles: default to local processing, request explicit consent for cloud escalations, and keep audit logging intact.
 - Update both graph and vector stores in tandem; hybrid search depends on synchronized indices.
 - Align code changes with [system-requirements.md](mdc:requirements/system-requirements.md) functional/non-functional requirements and keep roadmap phase alignment in mind per [roadmap.md](mdc:requirements/roadmap.md).
+
+## Option B Architecture Extensions (CRITICAL)
+
+### Temporal-First Design
+- **All entity/relationship extraction must capture temporal metadata**
+- Events are distinct from static entities
+- 7 temporal relationship types required: BEFORE/AFTER/DURING/CAUSES/ENABLES/PREVENTS/TRIGGERS
+- Temporal query support in PKG mandatory for Phase 2/3
+
+### Schema Evolution Architecture
+- **NO hardcoded entity types** - seed schema evolves autonomously
+- AutoSchemaKG multi-phase extraction: Entity-Entity → Entity-Event → Event-Event
+- Reflection mechanism triggers schema evolution
+- Schema versioning tracked in PKG with SchemaVersion nodes
+
+### Experiential Learning Architecture
+- **Ghost model remains frozen** - no parameter updates
+- Experiential knowledge stored as token priors (natural language)
+- Learning through rollout evaluation, not gradient descent
+- Local-only learning - no cloud model updates
+
+### Causal Structure Architecture
+- Event entities with temporal grounding
+- Event-event relationships flagged as causal candidates
+- Bradford Hill criteria metadata prepared for Phase 3
+- Foundation for causal inference non-negotiable
+
+## References
+- **Option B Architecture**: [docs/phase-1/PHASE-1-OPTION-B-ROADMAP.md](mdc:docs/phase-1/PHASE-1-OPTION-B-ROADMAP.md)
+- **Critical Trilogy**: [docs/phase-1/CRITICAL_IMPLEMENTATION_TRILOGY.md](mdc:docs/phase-1/CRITICAL_IMPLEMENTATION_TRILOGY.md)
