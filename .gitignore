@@ -33,3 +33,7 @@ cursor/
 *.log
 workspace/
 
+# Papers
+*.pdf
+*.docx
+
