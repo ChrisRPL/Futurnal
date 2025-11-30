@@ -36,6 +36,7 @@ markers = [
     # Orchestrator load and fairness testing markers
     "load: Load and fairness tests for orchestrator",
     "slow: Slow-running tests (>10s)",
+    # Temporal extraction markers
+    "production_readiness: Production readiness gates for temporal extraction",
 ]
-
 
