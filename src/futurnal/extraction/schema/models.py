@@ -128,3 +128,25 @@ class SchemaDiscovery(BaseModel):
         default_factory=list,
         description="Document IDs where this pattern was observed"
     )
+
+
+class ExperientialKnowledge(BaseModel):
+    """Natural language patterns learned from experience."""
+    
+    pattern_id: str = Field(..., description="Unique identifier for this pattern")
+    description: str = Field(..., description="Description of the better approach")
+    context: str = Field(..., description="Context/reasoning for why this is better")
+    success_count: int = Field(default=0, description="Number of times this pattern succeeded")
+    failure_count: int = Field(default=0, description="Number of times this pattern failed")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence in this pattern")
+    examples: List[str] = Field(default_factory=list, description="Examples of this pattern")
+    created_at: datetime = Field(default_factory=datetime.utcnow, description="Creation timestamp")
+
+
+class SemanticAdvantage(BaseModel):
+    """Advantage signal from LLM introspection."""
+    
+    better_approach: str = Field(..., description="Description of the better approach")
+    worse_approach: str = Field(..., description="Description of the worse approach")
+    reasoning: str = Field(..., description="Reasoning for the advantage")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence in this advantage")
