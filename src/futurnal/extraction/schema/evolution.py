@@ -19,6 +19,7 @@ from futurnal.extraction.schema.models import (
 
 if TYPE_CHECKING:
     from futurnal.extraction.schema.models import SchemaDiscovery
+    from futurnal.extraction.schema.templates import TemplateDatabase
 
 
 class ExtractionResult:
@@ -65,19 +66,22 @@ class SchemaEvolutionEngine:
     def __init__(
         self,
         seed_schema: SchemaVersion,
+        template_database: Optional[TemplateDatabase] = None,
         reflection_interval: int = 100,
         min_confidence_threshold: float = 0.7,
     ):
         """
         Initialize schema evolution engine.
-        
+
         Args:
             seed_schema: Initial schema to evolve from
+            template_database: Optional template database for guided extraction
             reflection_interval: Number of documents between reflections
             min_confidence_threshold: Minimum confidence for accepting discoveries
         """
         self.current_schema = seed_schema
         self.schema_history: List[SchemaVersion] = [seed_schema]
+        self.template_database = template_database
         self.reflection_interval = reflection_interval
         self.min_confidence_threshold = min_confidence_threshold
         self.documents_processed = 0

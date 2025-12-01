@@ -14,6 +14,7 @@ from typing import List, Optional, Protocol, Any, Dict
 from futurnal.extraction.schema.models import (
     ExperientialKnowledge,
     SemanticAdvantage,
+    ThoughtTemplate,
 )
 
 
@@ -163,6 +164,54 @@ class TrainingFreeGRPO:
                 experience_context += "  Success rate: New\n\n"
 
         return f"{experience_context}\n\n{base_prompt}"
+
+    def _build_prompt_with_experience_and_template(
+        self,
+        base_prompt: str,
+        document: Any,
+        template: Optional[ThoughtTemplate] = None
+    ) -> str:
+        """
+        Inject experiential knowledge AND thought template.
+
+        This is how Ghost + Experience + Template = Animal
+
+        Args:
+            base_prompt: Base extraction prompt
+            document: Document to process
+            template: Optional thought template for reasoning scaffold
+
+        Returns:
+            Enhanced prompt with experience and template
+        """
+        prompt_parts = []
+
+        # 1. Experiential knowledge (learned patterns as token priors)
+        if self.experiential_knowledge:
+            experience_context = "## Learned Patterns\n\n"
+            sorted_knowledge = sorted(
+                self.experiential_knowledge,
+                key=lambda k: k.confidence,
+                reverse=True
+            )
+            for knowledge in sorted_knowledge[:5]:  # Top 5
+                experience_context += f"- {knowledge.description}\n"
+                experience_context += f"  Context: {knowledge.context}\n"
+                total_runs = knowledge.success_count + knowledge.failure_count
+                if total_runs > 0:
+                    experience_context += f"  Success rate: {knowledge.success_count}/{total_runs}\n\n"
+                else:
+                    experience_context += "  Success rate: New\n\n"
+            prompt_parts.append(experience_context)
+
+        # 2. Thought template (reasoning scaffold)
+        if template:
+            prompt_parts.append(f"## Reasoning Template\n\n{template.pattern}")
+
+        # 3. Base prompt (task)
+        prompt_parts.append(base_prompt)
+
+        return "\n\n".join(prompt_parts)
 
     def _rank_rollouts_by_quality(
         self, 
