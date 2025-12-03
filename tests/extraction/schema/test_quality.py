@@ -20,10 +20,10 @@ class TestSchemaQuality:
     def test_semantic_alignment_structure(self):
         """
         Test semantic alignment benchmark structure.
-        
+
         Full implementation would validate >90% semantic alignment
         with manually curated schema (AutoSchemaKG benchmark).
-        
+
         For now, we verify the structure is in place.
         """
         # Create seed schema
@@ -37,12 +37,9 @@ class TestSchemaQuality:
         assert len(seed.relationship_types) > 0
         assert len(manual_schema.entity_types) > 0
 
-        # In production, would compute semantic alignment
-        # alignment = compute_semantic_alignment(
-        #     seed.entity_types,
-        #     manual_schema.entity_types
-        # )
-        # assert alignment > 0.90
+        # Note: Real semantic alignment implementation
+        # now exists in test_schema_alignment_gate.py
+        # which uses real LLM-based similarity measurement
 
     def test_discovery_quality_metrics(self):
         """Test discovery quality metrics are computed correctly."""

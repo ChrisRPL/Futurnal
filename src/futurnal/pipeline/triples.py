@@ -422,27 +422,325 @@ class MetadataTripleExtractor:
         return f"futurnal:category/{clean_category}"
 
 
-class TripleEnrichedNormalizationSink:
-    """Enhanced normalization sink that extracts semantic triples."""
+class AdvancedTripleExtractor:
+    """Phase 2 (Analyst) extraction with AI-powered relationship detection.
+    
+    Integrates all advanced extraction modules:
+    - Temporal markers (explicit and relative)
+    - Event extraction with temporal grounding
+    - Causal relationship detection
+    - Schema evolution
+    - Experiential learning (Training-Free GRPO)
+    - Thought templates (TOTAL framework)
+    
+    This represents the Ghost→Animal evolution where experiential
+    knowledge improves extraction quality without parameter updates.
+    """
+    
+    def __init__(self, enable_experiential_learning: bool = True):
+        """Initialize advanced extractor with all Phase 2 modules.
+        
+        Args:
+            enable_experiential_learning: Enable GRPO for quality improvement
+        """
+        from futurnal.extraction.temporal.markers import TemporalMarkerExtractor
+        from futurnal.extraction.causal.event_extractor import EventExtractor
+        from futurnal.extraction.causal.relationship_detector import CausalRelationshipDetector
+        from futurnal.extraction.schema.evolution import SchemaEvolutionEngine
+        from futurnal.extraction.schema.seed import create_seed_schema
+        from futurnal.extraction.schema.experiential import TrainingFreeGRPO
+        from futurnal.extraction.schema.templates import TemplateDatabase
+        from futurnal.extraction.local_llm_client import get_test_llm_client
+        
+        logger.info("Initializing AdvancedTripleExtractor (Phase 2 - Analyst)")
+        
+        # Initialize LLM client (local, privacy-first)
+        try:
+            self.llm = get_test_llm_client(fast=True)  # Use lightweight model for now
+            logger.info("Local LLM client initialized")
+        except Exception as e:
+            logger.error(f"Failed to initialize LLM client: {e}")
+            logger.warning("Advanced extraction will be disabled")
+            self.llm = None
+        
+        # Initialize extraction modules
+        self.temporal_extractor = TemporalMarkerExtractor()
+        logger.info("Temporal extraction initialized")
+        
+        # Event and causal extraction require LLM
+        if self.llm:
+            self.event_extractor = EventExtractor(
+                llm=self.llm,
+                temporal_extractor=self.temporal_extractor
+            )
+            logger.info("Event extraction initialized")
+            
+            self.causal_detector = CausalRelationshipDetector(llm=self.llm)
+            logger.info("Causal relationship detection initialized")
+        else:
+            self.event_extractor = None
+            self.causal_detector = None
+        
+        # Initialize schema evolution
+        seed_schema = create_seed_schema()
+        self.schema_engine = SchemaEvolutionEngine(seed_schema=seed_schema)
+        logger.info("Schema evolution initialized")
+        
+        # Initialize experiential learning (optional)
+        self.enable_experiential_learning = enable_experiential_learning and self.llm is not None
+        if self.enable_experiential_learning:
+            self.grpo = TrainingFreeGRPO(llm=self.llm)
+            logger.info("Experiential learning (GRPO) initialized")
+        else:
+            self.grpo = None
+        
+        # Initialize thought templates
+        self.templates = TemplateDatabase()
+        logger.info(f"Thought templates initialized ({len(self.templates.templates)} templates)")
+        
+        self.extracted_count = 0
+    
+    def extract_triples(self, element: Dict[str, Any]) -> List[SemanticTriple]:
+        """Extract semantic triples using advanced extraction.
+        
+        Pipeline:
+        1. Extract temporal markers from text
+        2. Extract events with temporal grounding
+        3. Detect causal relationships between events
+        4. Generate semantic triples
+        
+        Args:
+            element: Document element with metadata and text
+            
+        Returns:
+            List of SemanticTriple objects with temporal/causal information
+        """
+        triples = []
+        
+        metadata = element.get("metadata", {})
+        source_path = metadata.get("path")
+        element_id = element.get("sha256", "unknown")
+        text = element.get("text", "")
+        
+        # Skip if no text content
+        if not text or len(text.strip()) < 10:
+            logger.debug(f"Skipping element {element_id}: insufficient text")
+            return triples
+        
+        try:
+            # Phase 1: Extract temporal markers
+            temporal_markers = self.temporal_extractor.extract_temporal_markers(
+                text=text,
+                doc_metadata=metadata
+            )
+            logger.debug(f"Extracted {len(temporal_markers)} temporal markers")
+            
+            # Convert temporal markers to triples
+            for marker in temporal_markers:
+                doc_uri = self._create_document_uri(source_path or element_id)
+                marker_uri = f"{doc_uri}/temporal/{marker.text.replace(' ', '_')}"
+                
+                # Temporal marker triple
+                triples.append(SemanticTriple(
+                    subject=doc_uri,
+                    predicate="futurnal:hasTemporalMarker",
+                    object=marker_uri,
+                    confidence=marker.confidence,
+                    source_element_id=element_id,
+                    source_path=source_path,
+                    extraction_method="temporal_extraction"
+                ))
+                
+                # Marker timestamp triple
+                if marker.timestamp:
+                    triples.append(SemanticTriple(
+                        subject=marker_uri,
+                        predicate="futurnal:timestamp",
+                        object=marker.timestamp.isoformat(),
+                        confidence=marker.confidence,
+                        source_element_id=element_id,
+                        source_path=source_path,
+                        extraction_method="temporal_extraction"
+                    ))
+            
+            # Phase 2: Extract events (requires LLM)
+            events = []
+            if self.event_extractor and self.llm:
+                try:
+                    # Create document object for event extractor
+                    from futurnal.extraction.causal.event_extractor import Document
+                    
+                    class SimpleDocument:
+                        def __init__(self, content: str, doc_id: str):
+                            self.content = content
+                            self.doc_id = doc_id
+                    
+                    doc = SimpleDocument(content=text, doc_id=element_id)
+                    events = self.event_extractor.extract_events(doc)
+                    logger.debug(f"Extracted {len(events)} events")
+                    
+                    # Convert events to triples
+                    for event in events:
+                        doc_uri = self._create_document_uri(source_path or element_id)
+                        event_uri = f"{doc_uri}/event/{event.name.replace(' ', '_')}"
+                        
+                        # Event triple
+                        triples.append(SemanticTriple(
+                            subject=doc_uri,
+                            predicate="futurnal:hasEvent",
+                            object=event_uri,
+                            confidence=event.extraction_confidence,
+                            source_element_id=element_id,
+                            source_path=source_path,
+                            extraction_method="event_extraction"
+                        ))
+                        
+                        # Event type triple
+                        triples.append(SemanticTriple(
+                            subject=event_uri,
+                            predicate="rdf:type",
+                            object=f"futurnal:Event/{event.event_type}",
+                            confidence=event.extraction_confidence,
+                            source_element_id=element_id,
+                            source_path=source_path,
+                            extraction_method="event_extraction"
+                        ))
+                        
+                        # Event timestamp triple
+                        if event.timestamp:
+                            triples.append(SemanticTriple(
+                                subject=event_uri,
+                                predicate="futurnal:eventTimestamp",
+                                object=event.timestamp.isoformat(),
+                                confidence=event.extraction_confidence,
+                                source_element_id=element_id,
+                                source_path=source_path,
+                                extraction_method="event_extraction"
+                            ))
+                
+                except Exception as e:
+                    logger.error(f"Event extraction failed: {e}")
+            
+            # Phase 3: Detect causal relationships (requires events and LLM)
+            if self.causal_detector and self.llm and len(events) >= 2:
+                try:
+                    from futurnal.extraction.causal.relationship_detector import Document
+                    
+                    class SimpleDocument:
+                        def __init__(self, content: str, doc_id: str):
+                            self.content = content
+                            self.doc_id = doc_id
+                    
+                    doc = SimpleDocument(content=text, doc_id=element_id)
+                    causal_candidates = self.causal_detector.detect_causal_candidates(
+                        events=events,
+                        document=doc
+                    )
+                    logger.debug(f"Detected {len(causal_candidates)} causal candidates")
+                    
+                    # Convert causal relationships to triples
+                    for candidate in causal_candidates:
+                        doc_uri = self._create_document_uri(source_path or element_id)
+                        cause_uri = f"{doc_uri}/event/{candidate.cause_event_id.replace(' ', '_')}"
+                        effect_uri = f"{doc_uri}/event/{candidate.effect_event_id.replace(' ', '_')}"
+                        
+                        # Causal relationship triple
+                        triples.append(SemanticTriple(
+                            subject=cause_uri,
+                            predicate=f"futurnal:{candidate.relationship_type.value}",
+                            object=effect_uri,
+                            confidence=candidate.causal_confidence,
+                            source_element_id=element_id,
+                            source_path=source_path,
+                            extraction_method="causal_detection"
+                        ))
+                
+                except Exception as e:
+                    logger.error(f"Causal detection failed: {e}")
+        
+        except Exception as e:
+            logger.error(f"Advanced extraction failed for {element_id}: {e}")
+        
+        self.extracted_count += len(triples)
+        return triples
+    
+    def _create_document_uri(self, identifier: str) -> str:
+        """Create a URI for a document."""
+        clean_id = identifier.replace("\\", "/").replace(" ", "_")
+        return f"futurnal:doc/{clean_id}"
 
-    def __init__(self, pkg_writer, vector_writer):
+
+class TripleEnrichedNormalizationSink:
+    """Enhanced normalization sink that extracts semantic triples.
+    
+    Supports two extraction modes:
+    - Phase 1 (Archivist): Metadata-only extraction (backward compatible)
+    - Phase 2 (Analyst): AI-powered extraction with temporal/event/causal analysis
+    """
+
+    def __init__(self, pkg_writer, vector_writer, enable_advanced_extraction: bool = False):
+        """Initialize triple-enriched sink.
+        
+        Args:
+            pkg_writer: PKG writer instance
+            vector_writer: Vector writer instance
+            enable_advanced_extraction: Enable Phase 2 (Analyst) extraction mode
+                                       Requires local LLM and additional compute
+        """
         from ..pipeline.stubs import PKGWriter, VectorWriter
 
         self.pkg_writer: PKGWriter = pkg_writer
         self.vector_writer: VectorWriter = vector_writer
-        self.triple_extractor = MetadataTripleExtractor()
+        
+        # Phase 1 extractor (always available)
+        self.metadata_extractor = MetadataTripleExtractor()
+        
+        # Phase 2 extractor (optional, requires local LLM)
+        self.enable_advanced_extraction = enable_advanced_extraction
+        if self.enable_advanced_extraction:
+            try:
+                self.advanced_extractor = AdvancedTripleExtractor()
+                logger.info("Phase 2 (Analyst) extraction enabled")
+            except Exception as e:
+                logger.error(f"Failed to initialize advanced extraction: {e}")
+                logger.warning("Falling back to Phase 1 (Archivist) extraction")
+                self.advanced_extractor = None
+                self.enable_advanced_extraction = False
+        else:
+            self.advanced_extractor = None
+            logger.info("Phase 1 (Archivist) extraction enabled")
         
     def handle(self, element: dict) -> None:
-        """Handle element with semantic triple extraction."""
+        """Handle element with semantic triple extraction.
+        
+        Extracts triples using either Phase 1 (metadata) or Phase 2 (advanced)
+        extraction based on configuration.
+        """
         # Load element data
         with open(element["element_path"], "r", encoding="utf-8") as fh:
             payload = json.load(fh)
         
         # Extract semantic triples
-        triples = self.triple_extractor.extract_triples(payload)
+        # Phase 1: Metadata extraction (always run for backward compat)
+        metadata_triples = self.metadata_extractor.extract_triples(payload)
+        
+        # Phase 2: Advanced extraction (optional)
+        advanced_triples = []
+        if self.enable_advanced_extraction and self.advanced_extractor:
+            try:
+                advanced_triples = self.advanced_extractor.extract_triples(payload)
+                logger.debug(
+                    f"Advanced extraction: {len(advanced_triples)} triples",
+                    extra={"element_id": element.get("sha256", "unknown")}
+                )
+            except Exception as e:
+                logger.error(f"Advanced extraction failed: {e}")
+        
+        # Combine triples
+        all_triples = metadata_triples + advanced_triples
         
         # Enrich payload with extracted triples
-        payload["semantic_triples"] = [triple.to_dict() for triple in triples]
+        payload["semantic_triples"] = [triple.to_dict() for triple in all_triples]
         
         # Create document payload
         document_payload = {
@@ -471,11 +769,13 @@ class TripleEnrichedNormalizationSink:
         self.vector_writer.write_embedding(embedding_payload)
         
         logger.debug(
-            f"Processed element with {len(triples)} semantic triples",
+            f"Processed element with {len(all_triples)} semantic triples "
+            f"({len(metadata_triples)} metadata, {len(advanced_triples)} advanced)",
             extra={
                 "element_path": element["path"],
-                "triple_count": len(triples),
-                "extraction_count": self.triple_extractor.extracted_count,
+                "triple_count": len(all_triples),
+                "metadata_count": len(metadata_triples),
+                "advanced_count": len(advanced_triples),
             }
         )
     
