@@ -164,7 +164,8 @@ def test_event_extraction_throughput(local_llm: LLMClient = None):
     logger.info(f"\nProcessing {len(corpus)} documents with LOCAL LLM...")
 
     def process_doc(doc: TestDocument):
-        event_extractor.extract_events(doc.content)
+        # EventExtractor expects a Document protocol object, not just content string
+        event_extractor.extract_events(doc)
 
     throughput, metrics = measure_throughput(corpus, process_doc)
 
@@ -216,7 +217,8 @@ def test_memory_usage_gate(local_llm: LLMClient = None):
     for i, doc in enumerate(corpus):
         # Extract
         temporal_extractor.extract_temporal_markers(doc.content, doc.metadata)
-        event_extractor.extract_events(doc.content)
+        # EventExtractor expects a Document protocol object
+        event_extractor.extract_events(doc)
 
         # Sample memory every 5 documents
         if i % 5 == 0:

@@ -396,7 +396,8 @@ def test_event_extraction_accuracy_gate(llm_client: LLMClient):
         predicted_events = event_extractor.extract_events(doc)
 
         # Calculate accuracy (text-based matching)
-        pred_texts = {e.description.lower() for e in predicted_events}
+        # Event model uses .name field (not .description)
+        pred_texts = {e.name.lower() for e in predicted_events}
         gt_texts = {e.text.lower() for e in doc.events}
 
         matches = len(pred_texts & gt_texts)

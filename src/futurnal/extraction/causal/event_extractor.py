@@ -20,11 +20,14 @@ Success Metric: Event extraction accuracy >80%
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Protocol
 
 from futurnal.extraction.causal.models import EventType
 from futurnal.extraction.temporal.models import Event, TemporalMark
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient(Protocol):
@@ -227,8 +230,12 @@ class EventExtractor:
             return event
             
         except Exception as e:
-            # Extraction failed, return None
-            # In production, log this error
+            # Log extraction failure for debugging
+            logger.warning(
+                "Event extraction failed for sentence: %s. Error: %s",
+                sentence[:100] + "..." if len(sentence) > 100 else sentence,
+                str(e)
+            )
             return None
     
     def _build_event_extraction_prompt(
@@ -341,7 +348,14 @@ Now extract from the given sentence:
             
             return None
             
-        except (json.JSONDecodeError, AttributeError):
+        except (json.JSONDecodeError, AttributeError) as e:
+            # Log parsing failures for debugging
+            result_preview = str(result)[:200] + "..." if len(str(result)) > 200 else str(result)
+            logger.debug(
+                "Failed to parse LLM response as JSON. Error: %s. Response preview: %s",
+                str(e),
+                result_preview
+            )
             return None
     
     def _split_into_sentences(self, text: str) -> List[str]:

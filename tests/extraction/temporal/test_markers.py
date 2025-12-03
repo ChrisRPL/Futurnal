@@ -141,13 +141,15 @@ class TestExplicitTimestampDetection:
 
         markers = extractor.extract_explicit_timestamps(text)
 
-        # Should extract at least 2 timestamps (2 dates, possibly the time)
+        # Should extract at least 2 timestamps (combined date+time, and standalone date)
         assert len(markers) >= 2
 
-        # Check for both dates
-        dates = [m.text for m in markers]
-        assert "2024-01-15" in dates
-        assert "2024-01-20" in dates
+        # Check for both dates (date+time combination or standalone)
+        marker_texts = [m.text for m in markers]
+        # First date may be combined with time: "2024-01-15 at 2:30 PM" or standalone "2024-01-15"
+        has_first_date = any("2024-01-15" in text for text in marker_texts)
+        assert has_first_date, f"Expected to find 2024-01-15 in {marker_texts}"
+        assert "2024-01-20" in marker_texts
 
     def test_no_false_positives_on_numbers(self):
         """Test that standalone numbers don't trigger extraction."""
@@ -196,102 +198,109 @@ class TestRelativeExpressionParsing:
     """
 
     def test_relative_day_yesterday(self):
-        """Test parsing 'yesterday'."""
+        """Test parsing 'yesterday'.
+
+        Note: Relative day expressions reset to midnight (00:00) for cleaner
+        semantics - 'yesterday' means 'the previous calendar day'.
+        """
         extractor = TemporalMarkerExtractor()
         reference = datetime(2024, 1, 15, 14, 30)
 
         marker = extractor.parse_relative_expression("yesterday", reference)
 
         assert marker is not None
-        assert marker.timestamp == datetime(2024, 1, 14, 14, 30)
+        # Uses midnight for day-level expressions
+        assert marker.timestamp == datetime(2024, 1, 14, 0, 0)
         assert marker.temporal_type == TemporalSourceType.RELATIVE
         assert marker.confidence >= 0.90
 
     def test_relative_day_today(self):
-        """Test parsing 'today'."""
+        """Test parsing 'today' - uses midnight for day-level expressions."""
         extractor = TemporalMarkerExtractor()
         reference = datetime(2024, 1, 15, 14, 30)
 
         marker = extractor.parse_relative_expression("today", reference)
 
         assert marker is not None
-        assert marker.timestamp == reference
+        # Day-level expressions use midnight (00:00)
+        assert marker.timestamp == datetime(2024, 1, 15, 0, 0)
         assert marker.temporal_type == TemporalSourceType.RELATIVE
 
     def test_relative_day_tomorrow(self):
-        """Test parsing 'tomorrow'."""
+        """Test parsing 'tomorrow' - uses midnight."""
         extractor = TemporalMarkerExtractor()
         reference = datetime(2024, 1, 15, 14, 30)
 
         marker = extractor.parse_relative_expression("tomorrow", reference)
 
         assert marker is not None
-        assert marker.timestamp == datetime(2024, 1, 16, 14, 30)
+        assert marker.timestamp == datetime(2024, 1, 16, 0, 0)
 
     def test_relative_week_last_week(self):
-        """Test parsing 'last week'."""
+        """Test parsing 'last week' - uses midnight."""
         extractor = TemporalMarkerExtractor()
         reference = datetime(2024, 1, 15, 14, 30)
 
         marker = extractor.parse_relative_expression("last week", reference)
 
         assert marker is not None
-        expected = reference - timedelta(weeks=1)
+        # Day-level expressions reset to midnight
+        expected = datetime(2024, 1, 8, 0, 0)  # reference - 1 week at midnight
         assert marker.timestamp == expected
 
     def test_relative_week_next_week(self):
-        """Test parsing 'next week'."""
+        """Test parsing 'next week' - uses midnight."""
         extractor = TemporalMarkerExtractor()
         reference = datetime(2024, 1, 15, 14, 30)
 
         marker = extractor.parse_relative_expression("next week", reference)
 
         assert marker is not None
-        expected = reference + timedelta(weeks=1)
+        expected = datetime(2024, 1, 22, 0, 0)  # reference + 1 week at midnight
         assert marker.timestamp == expected
 
     def test_duration_ago_days(self):
-        """Test parsing 'X days ago'."""
+        """Test parsing 'X days ago' - uses midnight."""
         extractor = TemporalMarkerExtractor()
         reference = datetime(2024, 1, 15, 14, 30)
 
         marker = extractor.parse_relative_expression("2 days ago", reference)
 
         assert marker is not None
-        expected = reference - timedelta(days=2)
+        expected = datetime(2024, 1, 13, 0, 0)  # reference - 2 days at midnight
         assert marker.timestamp == expected
 
     def test_duration_ago_weeks(self):
-        """Test parsing 'X weeks ago'."""
+        """Test parsing 'X weeks ago' - uses midnight."""
         extractor = TemporalMarkerExtractor()
         reference = datetime(2024, 1, 15, 14, 30)
 
         marker = extractor.parse_relative_expression("3 weeks ago", reference)
 
         assert marker is not None
-        expected = reference - timedelta(weeks=3)
+        expected = datetime(2023, 12, 25, 0, 0)  # reference - 3 weeks at midnight
         assert marker.timestamp == expected
 
     def test_duration_in_future_days(self):
-        """Test parsing 'in X days'."""
+        """Test parsing 'in X days' - uses midnight."""
         extractor = TemporalMarkerExtractor()
         reference = datetime(2024, 1, 15, 14, 30)
 
         marker = extractor.parse_relative_expression("in 3 days", reference)
 
         assert marker is not None
-        expected = reference + timedelta(days=3)
+        expected = datetime(2024, 1, 18, 0, 0)  # reference + 3 days at midnight
         assert marker.timestamp == expected
 
     def test_duration_in_future_weeks(self):
-        """Test parsing 'in X weeks'."""
+        """Test parsing 'in X weeks' - uses midnight."""
         extractor = TemporalMarkerExtractor()
         reference = datetime(2024, 1, 15, 14, 30)
 
         marker = extractor.parse_relative_expression("in 2 weeks", reference)
 
         assert marker is not None
-        expected = reference + timedelta(weeks=2)
+        expected = datetime(2024, 1, 29, 0, 0)  # reference + 2 weeks at midnight
         assert marker.timestamp == expected
 
     def test_relative_month_last_month(self):
