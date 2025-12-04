@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from futurnal.pkg.sync.events import SyncEvent
+
+logger = logging.getLogger(__name__)
 
 
 class PKGWriter(Protocol):
@@ -32,9 +38,25 @@ class NormalizationSink:
     - Document nodes for content storage
     - Vector embeddings for semantic search
     - ExperientialEvents for temporal pattern tracking (Phase 2 prep)
+
+    Sync Event Support (Module 05):
+        Optional sync_event_handler enables tracking of PKG ↔ Vector synchronization.
+        Used for integration testing and production monitoring.
+
+        Example:
+            >>> from futurnal.pkg.sync import SyncEventCapture
+            >>> capture = SyncEventCapture()
+            >>> sink = NormalizationSink(
+            ...     pkg_writer=pkg_writer,
+            ...     vector_writer=vector_writer,
+            ...     sync_event_handler=capture.capture
+            ... )
+            >>> sink.handle(document)
+            >>> assert capture.count == 2  # pkg_write + vector_write
     """
     pkg_writer: PKGWriter
     vector_writer: VectorWriter
+    sync_event_handler: Optional[Callable[["SyncEvent"], None]] = None
 
     def handle(self, element: dict) -> None:
         # Support both old format (element_path) and new format (direct payload)
@@ -46,31 +68,116 @@ class NormalizationSink:
             # New format: payload included directly
             payload = element
 
+        sha256 = element.get("sha256") or payload.get("sha256")
+        path = element.get("path") or payload.get("path")
+        source = element.get("source") or payload.get("source")
+
         document_payload = {
-            "sha256": element.get("sha256") or payload.get("sha256"),
-            "path": element.get("path") or payload.get("path"),
-            "source": element.get("source") or payload.get("source"),
+            "sha256": sha256,
+            "path": path,
+            "source": source,
             "metadata": payload.get("metadata", {}),
             "text": payload.get("text"),
         }
         self.pkg_writer.write_document(document_payload)
+
+        # Emit sync event: PKG write completed, vector sync pending
+        self._emit_sync_event(
+            event_type="entity_created",
+            entity_id=sha256,
+            entity_type="Document",
+            source_operation="pkg_write",
+            vector_sync_status="pending",
+            metadata={"path": path, "source": source},
+        )
+
         embedding_payload = {
-            "sha256": element.get("sha256") or payload.get("sha256"),
-            "path": element.get("path") or payload.get("path"),
-            "source": element.get("source") or payload.get("source"),
+            "sha256": sha256,
+            "path": path,
+            "source": source,
             "text": payload.get("text"),
         }
         if "embedding" in payload:
             embedding_payload["embedding"] = payload["embedding"]
         self.vector_writer.write_embedding(embedding_payload)
 
+        # Emit sync event: Vector write completed
+        self._emit_sync_event(
+            event_type="entity_created",
+            entity_id=sha256,
+            entity_type="Document",
+            source_operation="vector_write",
+            vector_sync_status="completed",
+            metadata={"path": path, "source": source},
+        )
+
         # Create experiential event for Ghost's temporal awareness
         # Phase 2 (Analyst) will use these events for correlation detection
         self._create_experiential_event(element, payload)
 
     def handle_deletion(self, element: dict) -> None:
-        self.pkg_writer.remove_document(element["sha256"])
-        self.vector_writer.remove_embedding(element["sha256"])
+        sha256 = element["sha256"]
+
+        self.pkg_writer.remove_document(sha256)
+
+        # Emit sync event: PKG delete completed, vector sync pending
+        self._emit_sync_event(
+            event_type="entity_deleted",
+            entity_id=sha256,
+            entity_type="Document",
+            source_operation="pkg_delete",
+            vector_sync_status="pending",
+        )
+
+        self.vector_writer.remove_embedding(sha256)
+
+        # Emit sync event: Vector delete completed
+        self._emit_sync_event(
+            event_type="entity_deleted",
+            entity_id=sha256,
+            entity_type="Document",
+            source_operation="vector_delete",
+            vector_sync_status="completed",
+        )
+
+    def _emit_sync_event(
+        self,
+        event_type: str,
+        entity_id: str,
+        entity_type: str,
+        source_operation: str,
+        vector_sync_status: str,
+        metadata: Optional[dict] = None,
+    ) -> None:
+        """Emit a sync event if a handler is configured.
+
+        Args:
+            event_type: Type of event (entity_created, entity_deleted, etc.)
+            entity_id: Entity identifier (usually SHA256)
+            entity_type: Type of entity (Document, etc.)
+            source_operation: Operation that triggered sync (pkg_write, vector_write, etc.)
+            vector_sync_status: Current sync status (pending, completed, failed)
+            metadata: Optional additional event data
+        """
+        if not self.sync_event_handler:
+            return
+
+        try:
+            from futurnal.pkg.sync.events import SyncEvent
+
+            event = SyncEvent(
+                event_type=event_type,
+                entity_id=entity_id,
+                entity_type=entity_type,
+                timestamp=datetime.utcnow(),
+                source_operation=source_operation,
+                vector_sync_status=vector_sync_status,
+                metadata=metadata or {},
+            )
+            self.sync_event_handler(event)
+        except Exception as e:
+            # Don't fail operations due to sync event emission failure
+            logger.warning(f"Failed to emit sync event: {e}")
 
     def _create_experiential_event(self, element: dict, payload: dict) -> None:
         """Create an ExperientialEvent tracking document ingestion.

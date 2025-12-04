@@ -55,8 +55,30 @@ requires_testcontainers = pytest.mark.skipif(
     reason="testcontainers not installed"
 )
 
+def _is_docker_available() -> bool:
+    """Check if Docker is available and running."""
+    import subprocess
+    # Check common socket locations
+    socket_paths = [
+        "/var/run/docker.sock",  # Linux
+        os.path.expanduser("~/.docker/run/docker.sock"),  # macOS Docker Desktop
+    ]
+    if os.environ.get("DOCKER_HOST"):
+        return True
+    if any(os.path.exists(p) for p in socket_paths):
+        return True
+    # Fallback: try running docker command
+    try:
+        result = subprocess.run(
+            ["docker", "ps"], capture_output=True, timeout=5
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
 requires_docker = pytest.mark.skipif(
-    not os.environ.get("DOCKER_HOST") and not os.path.exists("/var/run/docker.sock"),
+    not _is_docker_available(),
     reason="Docker not available"
 )
 
@@ -79,14 +101,32 @@ def neo4j_container() -> Generator:
     if not TESTCONTAINERS_AVAILABLE:
         pytest.skip("testcontainers not available")
 
-    # Use Neo4j 5.x community edition
-    container = Neo4jContainer("neo4j:5.15.0-community")
+    import time
+    from testcontainers.core.container import DockerContainer
+    from testcontainers.core.waiting_utils import wait_for_logs
+
+    # Use generic DockerContainer to avoid neo4j driver compatibility issues
+    container = DockerContainer("neo4j:5.15.0-community")
     container.with_env("NEO4J_AUTH", "neo4j/testpassword")
-    container.with_env("NEO4J_PLUGINS", '["apoc"]')
+    container.with_exposed_ports(7687, 7474)
 
     try:
         container.start()
-        logger.info(f"Started Neo4j container: {container.get_connection_url()}")
+
+        # Wait for Neo4j to be ready
+        wait_for_logs(container, "Remote interface available at", timeout=60)
+
+        # Give it a moment to fully initialize
+        time.sleep(2)
+
+        # Build connection URL
+        host = container.get_container_host_ip()
+        port = container.get_exposed_port(7687)
+
+        # Store connection info for later use
+        container._bolt_url = f"bolt://{host}:{port}"
+
+        logger.info(f"Started Neo4j container: {container._bolt_url}")
         yield container
     finally:
         container.stop()
@@ -107,7 +147,7 @@ def neo4j_driver(neo4j_container) -> Generator[Driver, None, None]:
         pytest.skip("neo4j driver not available")
 
     driver = GraphDatabase.driver(
-        neo4j_container.get_connection_url(),
+        neo4j_container._bolt_url,
         auth=("neo4j", "testpassword")
     )
 

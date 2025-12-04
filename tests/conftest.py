@@ -30,9 +30,19 @@ _ensure_unstructured_stub()
 
 
 def _ensure_neo4j_stub() -> None:
+    # First check if real neo4j is available
     if "neo4j" in sys.modules:
         return
 
+    # Try to import real neo4j
+    try:
+        import neo4j
+        # Real neo4j is installed, don't stub
+        return
+    except ImportError:
+        pass
+
+    # neo4j not installed, create stub
     neo4j_module = types.ModuleType("neo4j")
 
     class _FakeDriver:

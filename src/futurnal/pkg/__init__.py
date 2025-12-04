@@ -11,7 +11,9 @@ Module Structure:
 - schema/: Schema definitions, constraints, and migration support (Module 01)
 - database/: Database setup, configuration, and lifecycle (Module 02)
 - repository/: Data access layer (Module 03)
-- temporal/: Temporal query support (Module 04)
+- queries/: Temporal query support (Module 04)
+- sync/: PKG ↔ Vector store synchronization (Module 05)
+- validation/: Production readiness validation (Module 05)
 
 Implementation follows production plan:
 docs/phase-1/pkg-graph-storage-production-plan/
@@ -63,6 +65,33 @@ from futurnal.pkg.schema import (
     # Migration
     SchemaVersionManager,
 )
+from futurnal.pkg.queries import (
+    # Main service (Module 04)
+    TemporalGraphQueries,
+    # Result models
+    CausalPath,
+    CausalChainResult,
+    TemporalNeighborhood,
+    TemporalQueryResult,
+    # Exceptions
+    TemporalQueryError,
+    InvalidTimeRangeError,
+    EventNotFoundError,
+    CausalChainDepthError,
+)
+from futurnal.pkg.sync import (
+    # Sync events (Module 05)
+    SyncEvent,
+    SyncEventCapture,
+    SyncEventType,
+    SyncStatus,
+)
+from futurnal.pkg.validation import (
+    # Production readiness (Module 05)
+    ProductionReadinessValidator,
+    ProductionReadinessReport,
+    ValidationResult,
+)
 
 __all__ = [
     # Database (Module 02)
@@ -98,4 +127,23 @@ __all__ = [
     "validate_schema",
     # Migration
     "SchemaVersionManager",
+    # Temporal Queries (Module 04)
+    "TemporalGraphQueries",
+    "CausalPath",
+    "CausalChainResult",
+    "TemporalNeighborhood",
+    "TemporalQueryResult",
+    "TemporalQueryError",
+    "InvalidTimeRangeError",
+    "EventNotFoundError",
+    "CausalChainDepthError",
+    # Sync Events (Module 05)
+    "SyncEvent",
+    "SyncEventCapture",
+    "SyncEventType",
+    "SyncStatus",
+    # Production Readiness (Module 05)
+    "ProductionReadinessValidator",
+    "ProductionReadinessReport",
+    "ValidationResult",
 ]
