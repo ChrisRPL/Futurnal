@@ -8,7 +8,8 @@ supporting Option B requirements including:
 - Comprehensive provenance tracking
 
 Module Structure:
-- schema/: Schema definitions, constraints, and migration support
+- schema/: Schema definitions, constraints, and migration support (Module 01)
+- database/: Database setup, configuration, and lifecycle (Module 02)
 - repository/: Data access layer (Module 03)
 - temporal/: Temporal query support (Module 04)
 
@@ -22,6 +23,21 @@ Option B Compliance:
 - No hardcoded entity types (seed schema only)
 """
 
+from futurnal.pkg.database import (
+    # Configuration
+    PKGDatabaseConfig,
+    # Manager
+    PKGDatabaseManager,
+    # Backup
+    PKGBackupManager,
+    # Exceptions
+    PKGDatabaseError,
+    PKGConnectionError,
+    PKGBackupError,
+    PKGRestoreError,
+    PKGSchemaInitializationError,
+    PKGHealthCheckError,
+)
 from futurnal.pkg.schema import (
     # Node models
     PersonNode,
@@ -49,7 +65,17 @@ from futurnal.pkg.schema import (
 )
 
 __all__ = [
-    # Node models
+    # Database (Module 02)
+    "PKGDatabaseConfig",
+    "PKGDatabaseManager",
+    "PKGBackupManager",
+    "PKGDatabaseError",
+    "PKGConnectionError",
+    "PKGBackupError",
+    "PKGRestoreError",
+    "PKGSchemaInitializationError",
+    "PKGHealthCheckError",
+    # Node models (Module 01)
     "PersonNode",
     "OrganizationNode",
     "ConceptNode",
