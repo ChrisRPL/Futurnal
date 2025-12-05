@@ -69,6 +69,10 @@ class BaseAdapter:
             DocumentFormat.JUPYTER: {".ipynb"},
             DocumentFormat.XML: {".xml"},
             DocumentFormat.RTF: {".rtf"},
+            # Multi-modal formats (Module 08)
+            DocumentFormat.AUDIO: {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma"},
+            DocumentFormat.IMAGE: {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".gif", ".webp"},
+            DocumentFormat.SCANNED_PDF: {".pdf"},  # Runtime detection
         }
 
         extensions = set()
@@ -204,6 +208,10 @@ class BaseAdapter:
             DocumentFormat.JUPYTER: "application/x-ipynb+json",
             DocumentFormat.XML: "application/xml",
             DocumentFormat.RTF: "application/rtf",
+            # Multi-modal formats (Module 08)
+            DocumentFormat.AUDIO: "audio/mpeg",  # Generic audio MIME type
+            DocumentFormat.IMAGE: "image/png",   # Generic image MIME type
+            DocumentFormat.SCANNED_PDF: "application/pdf",
         }
 
         return mime_map.get(format, "application/octet-stream")

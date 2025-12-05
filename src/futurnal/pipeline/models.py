@@ -53,6 +53,10 @@ class DocumentFormat(str, Enum):
     JUPYTER = "jupyter"
     XML = "xml"
     RTF = "rtf"
+    # Multi-modal formats (Module 08: Multimodal Integration)
+    AUDIO = "audio"              # Audio files (.mp3, .wav, .m4a, .ogg, .flac)
+    IMAGE = "image"              # Image files (.png, .jpg, .jpeg, .tiff, .bmp)
+    SCANNED_PDF = "scanned_pdf"  # PDFs requiring OCR (detected at runtime)
     UNKNOWN = "unknown"
 
 
