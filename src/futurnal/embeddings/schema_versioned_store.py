@@ -654,6 +654,46 @@ class SchemaVersionedEmbeddingStore:
 
         return False
 
+    def delete_embedding_by_entity_id(
+        self,
+        entity_id: str,
+    ) -> int:
+        """Delete all embeddings for an entity by entity_id.
+
+        Used by PKGSyncHandler when an entity is deleted from PKG.
+
+        Args:
+            entity_id: PKG entity ID whose embeddings should be deleted
+
+        Returns:
+            Number of embeddings deleted
+        """
+        deleted_count = 0
+
+        for collection in [
+            self._writer._events_collection,
+            self._writer._entities_collection,
+        ]:
+            try:
+                # Query embeddings for this entity
+                results = collection.get(
+                    where={"entity_id": entity_id},
+                    include=["metadatas"],
+                )
+
+                embedding_ids = results.get("ids", [])
+                if embedding_ids:
+                    collection.delete(ids=embedding_ids)
+                    deleted_count += len(embedding_ids)
+                    logger.debug(
+                        f"Deleted {len(embedding_ids)} embedding(s) for entity: {entity_id}"
+                    )
+
+            except Exception as e:
+                logger.warning(f"Error deleting embeddings for entity {entity_id}: {e}")
+
+        return deleted_count
+
     # -------------------------------------------------------------------------
     # Properties and Utilities
     # -------------------------------------------------------------------------

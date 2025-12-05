@@ -8,14 +8,17 @@ These models enable:
 - Production monitoring of sync operations
 - Debugging sync failures
 - Audit trail for data consistency verification
+- PKG mutation event emission for embedding synchronization (Module 04)
 
-Implementation follows production plan:
-docs/phase-1/pkg-graph-storage-production-plan/05-integration-testing.md
+Implementation follows production plans:
+- docs/phase-1/pkg-graph-storage-production-plan/05-integration-testing.md
+- docs/phase-1/vector-embedding-service-production-plan/04-pkg-synchronization.md
 
 Option B Compliance:
 - Events capture temporal metadata (timestamps)
 - Support for experiential event tracking (Phase 2 prep)
 - No mocks - real event capture for testing
+- PKGEvent carries full mutation context for embedding sync
 
 Example Usage:
     >>> from futurnal.pkg.sync import SyncEvent, SyncEventCapture, SyncEventType
@@ -45,6 +48,17 @@ Example Usage:
     >>> events = capture.get_events_for_entity("doc_abc123")
     >>> assert len(events) == 2
     >>> assert events[-1].vector_sync_status == SyncStatus.COMPLETED
+
+    >>> # PKG mutation events for embedding sync
+    >>> from futurnal.pkg.sync import PKGEvent
+    >>> pkg_event = PKGEvent(
+    ...     event_id="evt_123",
+    ...     event_type=SyncEventType.ENTITY_CREATED,
+    ...     entity_id="person_456",
+    ...     entity_type="Person",
+    ...     new_data={"name": "John Doe", "description": "Engineer"},
+    ...     schema_version=1,
+    ... )
 """
 
 from __future__ import annotations
@@ -64,13 +78,25 @@ logger = logging.getLogger(__name__)
 
 
 class SyncEventType(str, Enum):
-    """Type of sync event."""
+    """Type of sync event.
 
+    Covers both PKG mutations and batch operations for embedding synchronization.
+    """
+
+    # Entity mutations (triggers embedding sync)
     ENTITY_CREATED = "entity_created"
     ENTITY_UPDATED = "entity_updated"
     ENTITY_DELETED = "entity_deleted"
+
+    # Relationship mutations
     RELATIONSHIP_CREATED = "relationship_created"
+    RELATIONSHIP_UPDATED = "relationship_updated"
     RELATIONSHIP_DELETED = "relationship_deleted"
+
+    # Schema evolution (triggers selective re-embedding)
+    SCHEMA_EVOLVED = "schema_evolved"
+
+    # Batch operations
     BATCH_STARTED = "batch_started"
     BATCH_COMPLETED = "batch_completed"
     BATCH_FAILED = "batch_failed"
@@ -425,3 +451,176 @@ class SyncEventCapture:
             raise AssertionError(
                 f"Sync not completed for entity {entity_id}. Status: {latest.vector_sync_status}"
             )
+
+
+# ---------------------------------------------------------------------------
+# PKG Mutation Event Model (Module 04)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PKGEvent:
+    """Rich PKG mutation event for embedding synchronization.
+
+    Captures full mutation context to enable proper embedding sync:
+    - For ENTITY_CREATED: new_data contains the entity properties to embed
+    - For ENTITY_UPDATED: old_data and new_data enable change detection
+    - For ENTITY_DELETED: entity_id identifies embedding to remove
+    - For SCHEMA_EVOLVED: triggers selective re-embedding
+
+    This model is used by PKGEventEmitter and consumed by PKGSyncHandler
+    to maintain consistency between PKG and the Vector Embedding Store.
+
+    Option B Compliance:
+    - Temporal context preserved (timestamp field)
+    - Schema version tracked for autonomous evolution
+    - Extraction confidence for quality tracking
+
+    Production Plan Reference:
+    docs/phase-1/vector-embedding-service-production-plan/04-pkg-synchronization.md
+
+    Example:
+        >>> event = PKGEvent(
+        ...     event_id="evt_abc123",
+        ...     event_type=SyncEventType.ENTITY_CREATED,
+        ...     entity_id="person_456",
+        ...     entity_type="Person",
+        ...     new_data={"name": "John Doe", "description": "Software Engineer"},
+        ...     source_document_id="doc_789",
+        ...     extraction_confidence=0.95,
+        ...     schema_version=1,
+        ... )
+        >>> sync_event = event.to_sync_event(SyncStatus.PENDING)
+    """
+
+    # Required fields
+    event_id: str
+    event_type: SyncEventType | str
+    entity_id: str
+    entity_type: str
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+
+    # Mutation data
+    old_data: Optional[Dict[str, Any]] = None
+    new_data: Optional[Dict[str, Any]] = None
+
+    # Provenance
+    source_document_id: Optional[str] = None
+    extraction_confidence: Optional[float] = None
+
+    # Schema tracking
+    schema_version: int = 1
+
+    def __post_init__(self):
+        """Convert string event type to enum if needed."""
+        if isinstance(self.event_type, str):
+            try:
+                self.event_type = SyncEventType(self.event_type)
+            except ValueError:
+                pass  # Keep as string if not a valid enum
+
+    def to_sync_event(
+        self,
+        sync_status: SyncStatus = SyncStatus.PENDING,
+        source_operation: SourceOperation = SourceOperation.PKG_WRITE,
+        duration_ms: Optional[float] = None,
+        error_message: Optional[str] = None,
+    ) -> SyncEvent:
+        """Convert to SyncEvent for backward compatibility.
+
+        Args:
+            sync_status: Vector store sync status
+            source_operation: Source of the operation
+            duration_ms: Operation duration in milliseconds
+            error_message: Error message if sync failed
+
+        Returns:
+            SyncEvent compatible with SyncEventCapture
+        """
+        return SyncEvent(
+            event_type=self.event_type,
+            entity_id=self.entity_id,
+            entity_type=self.entity_type,
+            timestamp=self.timestamp,
+            source_operation=source_operation,
+            vector_sync_status=sync_status,
+            metadata={
+                "event_id": self.event_id,
+                "source_document_id": self.source_document_id,
+                "extraction_confidence": self.extraction_confidence,
+                "schema_version": self.schema_version,
+            },
+            duration_ms=duration_ms,
+            error_message=error_message,
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "event_id": self.event_id,
+            "event_type": self.event_type.value if isinstance(self.event_type, Enum) else self.event_type,
+            "entity_id": self.entity_id,
+            "entity_type": self.entity_type,
+            "timestamp": self.timestamp.isoformat(),
+            "old_data": self.old_data,
+            "new_data": self.new_data,
+            "source_document_id": self.source_document_id,
+            "extraction_confidence": self.extraction_confidence,
+            "schema_version": self.schema_version,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PKGEvent":
+        """Create PKGEvent from dictionary."""
+        timestamp = data.get("timestamp")
+        if isinstance(timestamp, str):
+            timestamp = datetime.fromisoformat(timestamp)
+        elif timestamp is None:
+            timestamp = datetime.utcnow()
+
+        return cls(
+            event_id=data["event_id"],
+            event_type=data["event_type"],
+            entity_id=data["entity_id"],
+            entity_type=data["entity_type"],
+            timestamp=timestamp,
+            old_data=data.get("old_data"),
+            new_data=data.get("new_data"),
+            source_document_id=data.get("source_document_id"),
+            extraction_confidence=data.get("extraction_confidence"),
+            schema_version=data.get("schema_version", 1),
+        )
+
+    @property
+    def is_creation(self) -> bool:
+        """Check if this is an entity creation event."""
+        return self.event_type == SyncEventType.ENTITY_CREATED
+
+    @property
+    def is_update(self) -> bool:
+        """Check if this is an entity update event."""
+        return self.event_type == SyncEventType.ENTITY_UPDATED
+
+    @property
+    def is_deletion(self) -> bool:
+        """Check if this is an entity deletion event."""
+        return self.event_type == SyncEventType.ENTITY_DELETED
+
+    @property
+    def is_schema_evolution(self) -> bool:
+        """Check if this is a schema evolution event."""
+        return self.event_type == SyncEventType.SCHEMA_EVOLVED
+
+    @property
+    def requires_embedding(self) -> bool:
+        """Check if this event requires embedding generation.
+
+        Events need embedding if:
+        - Creation: Always needs new embedding
+        - Update: May need re-embedding (checked separately)
+        - Schema evolution: May trigger re-embedding (checked separately)
+        """
+        return self.event_type in (
+            SyncEventType.ENTITY_CREATED,
+            SyncEventType.ENTITY_UPDATED,
+        )

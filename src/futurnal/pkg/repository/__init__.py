@@ -78,6 +78,10 @@ from futurnal.pkg.repository.entities import EntityRepository
 from futurnal.pkg.repository.relationships import RelationshipRepository
 from futurnal.pkg.repository.query_builder import PKGQueryBuilder, TemporalQueryBuilder
 from futurnal.pkg.repository.batch import BatchRepository, BatchResult, TripleBatchLoader
+from futurnal.pkg.repository.emitting_wrapper import (
+    EmittingEntityRepository,
+    EmittingRelationshipRepository,
+)
 from futurnal.pkg.repository.exceptions import (
     PKGRepositoryError,
     EntityNotFoundError,
@@ -102,6 +106,9 @@ __all__ = [
     "EntityRepository",
     "RelationshipRepository",
     "BatchRepository",
+    # Emitting wrappers (Module 04 - PKG Sync)
+    "EmittingEntityRepository",
+    "EmittingRelationshipRepository",
     # Query builders
     "PKGQueryBuilder",
     "TemporalQueryBuilder",

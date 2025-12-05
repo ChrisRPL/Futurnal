@@ -15,6 +15,9 @@ Vector Embedding Service. It implements distinct embedding strategies for:
 - **Schema-Versioned Storage**: Embeddings tracked by PKG schema version with
   automatic re-embedding triggers when schema evolves.
 
+- **PKG Synchronization (Module 04)**: Event-driven sync between PKG and
+  embedding store with incremental updates and consistency validation.
+
 Option B Compliance:
 - Ghost model FROZEN (pre-trained models, no fine-tuning)
 - Temporal-first design (timestamp REQUIRED for events)
@@ -26,6 +29,7 @@ Production Plan References:
 - docs/phase-1/vector-embedding-service-production-plan/01-temporal-aware-embeddings.md
 - docs/phase-1/vector-embedding-service-production-plan/02-multi-model-architecture.md
 - docs/phase-1/vector-embedding-service-production-plan/03-schema-versioned-storage.md
+- docs/phase-1/vector-embedding-service-production-plan/04-pkg-synchronization.md
 
 Example Usage:
     from futurnal.embeddings import (
@@ -112,6 +116,18 @@ from futurnal.embeddings.schema_versioned_store import SchemaVersionedEmbeddingS
 from futurnal.embeddings.service import MultiModelEmbeddingService
 from futurnal.embeddings.static_entity import StaticEntityEmbedder
 from futurnal.embeddings.temporal_event import TemporalEventEmbedder
+# PKG Synchronization (Module 04)
+from futurnal.embeddings.sync_handler import PKGSyncHandler
+from futurnal.embeddings.incremental_updater import (
+    IncrementalEmbeddingUpdater,
+    UpdaterConfig,
+    BatchStatistics,
+)
+from futurnal.embeddings.consistency_validator import (
+    EmbeddingConsistencyValidator,
+    ConsistencyReport,
+    RepairResult,
+)
 
 __all__ = [
     # Configuration
@@ -167,4 +183,12 @@ __all__ = [
     "BatchProcessingError",
     "SchemaVersionError",
     "ReembeddingError",
+    # PKG Synchronization (Module 04)
+    "PKGSyncHandler",
+    "IncrementalEmbeddingUpdater",
+    "UpdaterConfig",
+    "BatchStatistics",
+    "EmbeddingConsistencyValidator",
+    "ConsistencyReport",
+    "RepairResult",
 ]
