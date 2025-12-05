@@ -136,3 +136,63 @@ class BatchProcessingError(EmbeddingError):
     def failure_count(self) -> int:
         """Get number of failed items."""
         return len(self.failed_indices)
+
+
+class SchemaVersionError(EmbeddingError):
+    """Raised when schema version operations fail.
+
+    Common causes:
+    - PKG not connected (Neo4j driver unavailable)
+    - Schema version not found in PKG
+    - Schema hash computation failed
+    - Invalid schema version number
+
+    Production Plan Reference:
+    docs/phase-1/vector-embedding-service-production-plan/03-schema-versioned-storage.md
+    """
+
+    pass
+
+
+class ReembeddingError(EmbeddingError):
+    """Raised when re-embedding operations fail.
+
+    Common causes:
+    - Entity not found in PKG
+    - Embedding generation failed during re-embedding
+    - Storage update failed
+    - Batch processing interrupted
+
+    Attributes:
+        entity_id: ID of the entity that failed (if applicable)
+        cause: Original exception that caused the failure
+
+    Production Plan Reference:
+    docs/phase-1/vector-embedding-service-production-plan/03-schema-versioned-storage.md
+    """
+
+    def __init__(
+        self,
+        message: str,
+        entity_id: str = None,
+        cause: Exception = None,
+    ) -> None:
+        """Initialize re-embedding error.
+
+        Args:
+            message: Error description
+            entity_id: ID of the entity that failed (if applicable)
+            cause: Original exception that caused the failure
+        """
+        super().__init__(message)
+        self.entity_id = entity_id
+        self.cause = cause
+
+    def __str__(self) -> str:
+        """Format error message with entity context."""
+        base_msg = super().__str__()
+        if self.entity_id:
+            base_msg = f"{base_msg} (entity_id={self.entity_id})"
+        if self.cause:
+            base_msg = f"{base_msg}, caused by: {self.cause}"
+        return base_msg

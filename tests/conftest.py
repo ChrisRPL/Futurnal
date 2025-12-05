@@ -128,6 +128,14 @@ def _ensure_chromadb_stub() -> None:
     if "chromadb" in sys.modules:
         return
 
+    # Try to import real chromadb first
+    try:
+        import chromadb
+        # Real chromadb is installed, don't stub
+        return
+    except ImportError:
+        pass
+
     chromadb_module = types.ModuleType("chromadb")
     api_module = types.ModuleType("chromadb.api")
     models_module = types.ModuleType("chromadb.api.models")
@@ -152,6 +160,57 @@ def _ensure_chromadb_stub() -> None:
         def delete(self, ids=None):  # pragma: no cover - stub
             for identifier in ids or []:
                 self.storage.pop(identifier, None)
+
+        def query(self, query_embeddings=None, n_results=10, where=None, include=None):  # pragma: no cover - stub
+            """Query embeddings by vector similarity (stub returns empty)."""
+            import numpy as np
+            results = {"ids": [[]], "distances": [[]], "metadatas": [[]], "embeddings": [[]]}
+            if not self.storage or query_embeddings is None:
+                return results
+
+            # Simple stub: return all stored items up to n_results
+            stored_ids = list(self.storage.keys())[:n_results]
+            stored_metadatas = [self.storage[id_]["metadata"] for id_ in stored_ids]
+            stored_embeddings = [self.storage[id_]["embedding"] for id_ in stored_ids]
+            # Compute simple distances (stub uses zeros)
+            distances = [0.0] * len(stored_ids)
+
+            return {
+                "ids": [stored_ids],
+                "distances": [distances],
+                "metadatas": [stored_metadatas],
+                "embeddings": [stored_embeddings] if include and "embeddings" in include else [[]],
+            }
+
+        def get(self, ids=None, where=None, include=None):  # pragma: no cover - stub
+            """Get embeddings by ID (stub)."""
+            if ids:
+                result_ids = [id_ for id_ in ids if id_ in self.storage]
+            else:
+                result_ids = list(self.storage.keys())
+
+            return {
+                "ids": result_ids,
+                "metadatas": [self.storage[id_]["metadata"] for id_ in result_ids],
+                "embeddings": [self.storage[id_]["embedding"] for id_ in result_ids],
+                "documents": [self.storage[id_]["document"] for id_ in result_ids],
+            }
+
+        def update(self, ids=None, metadatas=None, embeddings=None, documents=None):  # pragma: no cover - stub
+            """Update embeddings by ID (stub)."""
+            if ids:
+                for index, id_ in enumerate(ids):
+                    if id_ in self.storage:
+                        if metadatas and index < len(metadatas):
+                            self.storage[id_]["metadata"] = metadatas[index]
+                        if embeddings and index < len(embeddings):
+                            self.storage[id_]["embedding"] = embeddings[index]
+                        if documents and index < len(documents):
+                            self.storage[id_]["document"] = documents[index]
+
+        def count(self):  # pragma: no cover - stub
+            """Return count of items in collection."""
+            return len(self.storage)
 
     collection_module.Collection = Collection
     models_module.Collection = Collection

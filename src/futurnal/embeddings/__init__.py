@@ -12,14 +12,20 @@ Vector Embedding Service. It implements distinct embedding strategies for:
 
 - **Event Sequences**: Sequence embeddings for causal pattern matching.
 
+- **Schema-Versioned Storage**: Embeddings tracked by PKG schema version with
+  automatic re-embedding triggers when schema evolves.
+
 Option B Compliance:
 - Ghost model FROZEN (pre-trained models, no fine-tuning)
 - Temporal-first design (timestamp REQUIRED for events)
-- Schema versioned (embeddings tagged with model version)
+- Schema versioned (embeddings tagged with PKG schema version)
+- Schema evolution support (re-embedding on schema changes)
 - Causal structure prepared (embeddings optimized for Phase 3)
 
-Production Plan Reference:
-docs/phase-1/vector-embedding-service-production-plan/01-temporal-aware-embeddings.md
+Production Plan References:
+- docs/phase-1/vector-embedding-service-production-plan/01-temporal-aware-embeddings.md
+- docs/phase-1/vector-embedding-service-production-plan/02-multi-model-architecture.md
+- docs/phase-1/vector-embedding-service-production-plan/03-schema-versioned-storage.md
 
 Example Usage:
     from futurnal.embeddings import (
@@ -71,7 +77,9 @@ from futurnal.embeddings.exceptions import (
     FusionError,
     ModelLoadError,
     ModelNotFoundError,
+    ReembeddingError,
     RoutingError,
+    SchemaVersionError,
     StorageError,
     TemporalContextError,
 )
@@ -85,15 +93,22 @@ from futurnal.embeddings.manager import ModelManager
 from futurnal.embeddings.metrics import EmbeddingMetrics, ModelMetrics
 from futurnal.embeddings.models import (
     EmbeddingEntityType,
+    EmbeddingMetadata,
     EmbeddingQuery,
     EmbeddingResult,
     FusionWeights,
     SimilarityResult,
     TemporalEmbeddingContext,
 )
+from futurnal.embeddings.reembedding import (
+    ReembeddingProgress,
+    ReembeddingService,
+    SchemaChangeDetection,
+)
 from futurnal.embeddings.registry import ModelRegistry, RegisteredModel
 from futurnal.embeddings.request import BatchEmbeddingRequest, EmbeddingRequest
 from futurnal.embeddings.router import ModelRouter
+from futurnal.embeddings.schema_versioned_store import SchemaVersionedEmbeddingStore
 from futurnal.embeddings.service import MultiModelEmbeddingService
 from futurnal.embeddings.static_entity import StaticEntityEmbedder
 from futurnal.embeddings.temporal_event import TemporalEventEmbedder
@@ -117,6 +132,12 @@ __all__ = [
     "BatchEmbeddingRequest",
     "EmbeddingMetrics",
     "ModelMetrics",
+    # Schema-Versioned Storage (Module 03)
+    "SchemaVersionedEmbeddingStore",
+    "ReembeddingService",
+    "SchemaChangeDetection",
+    "ReembeddingProgress",
+    "EmbeddingMetadata",
     # Embedders
     "TemporalEventEmbedder",
     "StaticEntityEmbedder",
@@ -144,4 +165,6 @@ __all__ = [
     "StorageError",
     "RoutingError",
     "BatchProcessingError",
+    "SchemaVersionError",
+    "ReembeddingError",
 ]
