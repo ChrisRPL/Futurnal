@@ -65,11 +65,13 @@ from futurnal.embeddings.config import (
 )
 from futurnal.embeddings.event_sequence import EventSequenceEmbedder
 from futurnal.embeddings.exceptions import (
+    BatchProcessingError,
     EmbeddingError,
     EmbeddingGenerationError,
     FusionError,
     ModelLoadError,
     ModelNotFoundError,
+    RoutingError,
     StorageError,
     TemporalContextError,
 )
@@ -80,6 +82,7 @@ from futurnal.embeddings.fusion import (
 )
 from futurnal.embeddings.integration import TemporalAwareVectorWriter
 from futurnal.embeddings.manager import ModelManager
+from futurnal.embeddings.metrics import EmbeddingMetrics, ModelMetrics
 from futurnal.embeddings.models import (
     EmbeddingEntityType,
     EmbeddingQuery,
@@ -88,6 +91,10 @@ from futurnal.embeddings.models import (
     SimilarityResult,
     TemporalEmbeddingContext,
 )
+from futurnal.embeddings.registry import ModelRegistry, RegisteredModel
+from futurnal.embeddings.request import BatchEmbeddingRequest, EmbeddingRequest
+from futurnal.embeddings.router import ModelRouter
+from futurnal.embeddings.service import MultiModelEmbeddingService
 from futurnal.embeddings.static_entity import StaticEntityEmbedder
 from futurnal.embeddings.temporal_event import TemporalEventEmbedder
 
@@ -101,6 +108,15 @@ __all__ = [
     "get_high_quality_config",
     # Manager
     "ModelManager",
+    # Multi-Model Architecture (Module 02)
+    "ModelRegistry",
+    "RegisteredModel",
+    "ModelRouter",
+    "MultiModelEmbeddingService",
+    "EmbeddingRequest",
+    "BatchEmbeddingRequest",
+    "EmbeddingMetrics",
+    "ModelMetrics",
     # Embedders
     "TemporalEventEmbedder",
     "StaticEntityEmbedder",
@@ -126,4 +142,6 @@ __all__ = [
     "FusionError",
     "TemporalContextError",
     "StorageError",
+    "RoutingError",
+    "BatchProcessingError",
 ]

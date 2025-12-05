@@ -337,6 +337,44 @@ def mock_chromadb_client():
 
 
 # -----------------------------------------------------------------------------
+# Multi-Model Architecture Fixtures (Module 02)
+# -----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def model_registry():
+    """Create a test model registry with default models."""
+    from futurnal.embeddings.registry import ModelRegistry
+
+    return ModelRegistry()
+
+
+@pytest.fixture
+def sample_embedding_request():
+    """Create a sample embedding request for Person."""
+    from futurnal.embeddings.request import EmbeddingRequest
+
+    return EmbeddingRequest(
+        entity_type="Person",
+        content="John Smith, Software Engineer at Futurnal",
+        entity_name="John Smith",
+    )
+
+
+@pytest.fixture
+def sample_event_request(sample_temporal_context):
+    """Create a sample event embedding request with temporal context."""
+    from futurnal.embeddings.request import EmbeddingRequest
+
+    return EmbeddingRequest(
+        entity_type="Event",
+        content="Team Meeting: Quarterly planning discussion",
+        entity_name="Team Meeting",
+        temporal_context=sample_temporal_context,
+    )
+
+
+# -----------------------------------------------------------------------------
 # Utility Functions
 # -----------------------------------------------------------------------------
 

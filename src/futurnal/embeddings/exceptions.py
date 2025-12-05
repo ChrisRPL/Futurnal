@@ -80,3 +80,59 @@ class StorageError(EmbeddingError):
     """
 
     pass
+
+
+class RoutingError(EmbeddingError):
+    """Raised when model routing fails.
+
+    Common causes:
+    - Unsupported entity type
+    - No models available for entity type
+    - Router configuration error
+    """
+
+    pass
+
+
+class BatchProcessingError(EmbeddingError):
+    """Raised when batch processing fails.
+
+    Contains partial results for successfully processed items,
+    allowing recovery and continuation of processing.
+
+    Attributes:
+        message: Error description
+        successful_results: List of results for successfully processed items
+        failed_indices: Indices of failed items in the original batch
+        errors: List of (index, exception) tuples for failed items
+    """
+
+    def __init__(
+        self,
+        message: str,
+        successful_results: list = None,
+        failed_indices: list = None,
+        errors: list = None,
+    ) -> None:
+        """Initialize batch processing error.
+
+        Args:
+            message: Error description
+            successful_results: List of results for successfully processed items
+            failed_indices: Indices of failed items in the original batch
+            errors: List of (index, exception) tuples for failed items
+        """
+        super().__init__(message)
+        self.successful_results = successful_results or []
+        self.failed_indices = failed_indices or []
+        self.errors = errors or []
+
+    @property
+    def partial_success(self) -> bool:
+        """Check if some items were successfully processed."""
+        return len(self.successful_results) > 0
+
+    @property
+    def failure_count(self) -> int:
+        """Get number of failed items."""
+        return len(self.failed_indices)
