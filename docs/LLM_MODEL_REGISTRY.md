@@ -1,7 +1,9 @@
 # Futurnal LLM Model Registry
 
-**Updated**: December 3, 2025  
+**Updated**: December 5, 2025
 **Purpose**: Comprehensive list of available and recommended LLM models for Futurnal
+
+> **Module 08 Update**: Multimodal models (Whisper V3, DeepSeek-OCR, Orchestrator-8B) are now fully integrated via `futurnal.extraction` package.
 
 ---
 
@@ -26,6 +28,7 @@
 **Access**: `FUTURNAL_PRODUCTION_LLM=llama3.1`
 
 ### 3. Llama 3.3 70B ✅
+(UPDATE: THIS MODEL WILL NOT BE USED DUE TO BIG SIZE)
 **Model**: `meta-llama/Llama-3.3-70B-Instruct`  
 **Status**: Integrated  
 **VRAM**: ~24GB (8-bit quantized)  
@@ -44,62 +47,70 @@
 **Access**: `FUTURNAL_PRODUCTION_LLM=qwen`
 
 ### 5. Bielik 4.5B (Polish) ✅
-**Model**: `speakleash/Bielik-4.5B-v3.0-Instruct`  
-**Status**: Integrated  
-**VRAM**: ~5GB (4-bit quantized)  
-**Use Case**: Polish language documents  
-**Pros**: Optimized for Polish, smaller/faster  
-**Cons**: Limited to Polish language  
+**Model**: `speakleash/Bielik-4.5B-v3.0-Instruct`
+**Status**: Integrated
+**VRAM**: ~5GB (4-bit quantized)
+**Use Case**: Polish language documents
+**Pros**: Optimized for Polish, smaller/faster
+**Cons**: Limited to Polish language
 **Access**: `FUTURNAL_PRODUCTION_LLM=bielik`
+
+### 6. NVIDIA Orchestrator-8B ✅ (Module 08)
+**Model**: `nvidia/Orchestrator-8B`
+**Status**: Integrated (Module 08 Phase 3)
+**VRAM**: ~8GB (4-bit quantized)
+**Use Case**: Multi-turn agentic tasks, tool coordination
+**Pros**: Designed for coordinating expert models and tools, intelligent routing
+**Cons**: Requires Ollama server
+**Access**: `FUTURNAL_ORCHESTRATOR_BACKEND=nvidia` or `auto`
+**Implementation**: `src/futurnal/extraction/orchestrator_client.py`
+
+### 7. DeepSeek-OCR ✅ (Module 08)
+**Model**: `deepseek-ai/DeepSeek-OCR`
+**Status**: Integrated (Module 08 Phase 2)
+**VRAM**: ~8GB
+**Use Case**: Document OCR, image-to-text extraction
+**Pros**: SOTA OCR performance (>98% accuracy), layout preservation
+**Cons**: Requires image preprocessing
+**Access**: `FUTURNAL_VISION_BACKEND=deepseek` or `auto`
+**Implementation**: `src/futurnal/extraction/ocr_client.py`
+**Fallback**: Tesseract OCR
+
+### 8. Whisper Large V3 ✅ (Module 08)
+**Model**: `openai/whisper-large-v3`
+**Status**: Integrated (Module 08 Phase 1)
+**VRAM**: ~4GB (via Ollama) or ~10GB (HuggingFace)
+**Use Case**: Audio transcription, ASR
+**Pros**: SOTA automatic speech recognition, 98+ languages, temporal segments
+**Cons**: Requires audio files in supported formats
+**Access**: `FUTURNAL_AUDIO_BACKEND=ollama` or `auto`
+**Implementation**: `src/futurnal/extraction/whisper_client.py`
+**Fallback**: HuggingFace Transformers
+
+### 9. Kimi-K2-Thinking ✅
+**Model**: `moonshotai/Kimi-K2-Thinking`
+**Status**: Integrated
+**VRAM**: ~16GB (4-bit quantized)
+**Use Case**: Complex reasoning tasks, advanced thinking
+**Pros**: Advanced reasoning capabilities, alternative to Llama 3.3 70B
+**Cons**: May require custom Ollama model setup
+**Access**: `FUTURNAL_PRODUCTION_LLM=kimi`
+**Implementation**: `src/futurnal/extraction/local_llm_client.py`
+
+### 10. GPT-OSS-20B-Derestricted ✅
+**Model**: `ArliAI/gpt-oss-20b-Derestricted`
+**Status**: Integrated
+**VRAM**: ~12GB (4-bit quantized)
+**Use Case**: Unrestricted content processing
+**Pros**: No content moderation guardrails, useful for research
+**Cons**: Use responsibly - no safety filters
+**Access**: `FUTURNAL_PRODUCTION_LLM=gpt-oss`
+**Implementation**: `src/futurnal/extraction/local_llm_client.py`
+**Warning**: Use carefully, ensure compliance with use case
 
 ---
 
 ## Future Model Recommendations
-
-### For Agentic Coordination
-
-#### NVIDIA Orchestrator-8B
-**Model**: `nvidia/Orchestrator-8B`  
-**Use Case**: Multi-turn agentic tasks, tool coordination  
-**Why**: Designed for coordinating expert models and tools  
-**Integration Priority**: HIGH  
-**Proposed Use**: Could enhance GRPO experiential learning coordination
-
-### For OCR Tasks
-
-#### DeepSeek-OCR
-**Model**: `deepseek-ai/DeepSeek-OCR`  
-**Use Case**: Document OCR, image-to-text extraction  
-**Why**: State-of-the-art OCR performance  
-**Integration Priority**: MEDIUM  
-**Proposed Use**: Extract text from scanned documents, images before entity extraction
-
-### For Advanced Reasoning
-
-#### Kimi-K2-Thinking
-**Model**: `moonshotai/Kimi-K2-Thinking`  
-**Use Case**: Complex reasoning tasks  
-**Why**: Advanced reasoning capabilities  
-**Integration Priority**: MEDIUM  
-**Proposed Use**: Alternative to Llama 3.3 70B for reasoning-heavy extraction
-
-### For Unrestricted Use
-
-#### GPT-OSS-20B-Derestricted  
-**Model**: `ArliAI/gpt-oss-20b-Derestricted`  
-**Use Case**: Unrestricted content processing  
-**Why**: No content moderation guardrails  
-**Integration Priority**: LOW  
-**Caution**: Use carefully, ensure compliance with use case
-
-### For Audio/Speech
-
-#### Whisper Large V3
-**Model**: `openai/whisper-large-v3`  
-**Use Case**: Audio transcription, ASR  
-**Why**: SOTA automatic speech recognition  
-**Integration Priority**: MEDIUM  
-**Proposed Use**: Transcribe audio notes/meetings before entity extraction
 
 ### For Content Safety
 
@@ -120,20 +131,23 @@
 |-----------|-----------------------------|-------------|
 | 4GB       | Phi-3 Mini 3.8B            | Fast/Basic  |
 | 5-8GB     | Bielik 4.5B / Llama 3.1 8B | Good        |
-| 16GB      | Qwen 2.5 32B Coder         | Excellent   |
+| 12GB      | GPT-OSS-20B                | Good (unrestricted) |
+| 16GB      | Qwen 2.5 32B / Kimi-K2     | Excellent   |
 | 24GB+     | Llama 3.3 70B              | Best        |
 
 ### By Use Case
 
-| Task                    | Recommended Model      |
-|-------------------------|------------------------|
-| Entity extraction (EN)  | Qwen 2.5 32B / Llama 3.1 8B |
-| Entity extraction (PL)  | Bielik 4.5B           |
-| Reasoning tasks         | Llama 3.3 70B         |
-| Fast testing            | Phi-3 Mini            |
-| OCR preprocessing       | DeepSeek-OCR (future) |
-| Audio transcription     | Whisper V3 (future)   |
-| Agentic coordination    | Orchestrator (future) |
+| Task                    | Recommended Model      | Status |
+|-------------------------|------------------------|--------|
+| Entity extraction (EN)  | Qwen 2.5 32B / Llama 3.1 8B | ✅ Integrated |
+| Entity extraction (PL)  | Bielik 4.5B v3        | ✅ Integrated |
+| Reasoning tasks         | Llama 3.3 70B / Kimi-K2 | ✅ Integrated |
+| Advanced reasoning      | Kimi-K2-Thinking      | ✅ Integrated |
+| Unrestricted content    | GPT-OSS-20B           | ✅ Integrated |
+| Fast testing            | Phi-3 Mini            | ✅ Integrated |
+| OCR preprocessing       | DeepSeek-OCR          | ✅ Integrated (Module 08) |
+| Audio transcription     | Whisper V3            | ✅ Integrated (Module 08) |
+| Agentic coordination    | Orchestrator-8B       | ✅ Integrated (Module 08) |
 
 ### By Language
 
@@ -147,21 +161,21 @@
 
 ## Integration Status
 
-### ✅ Ready to Use
+### ✅ Ready to Use (Text LLMs)
 - Phi-3 Mini 3.8B
-- Llama 3.1 8B  
+- Llama 3.1 8B
 - Llama 3.3 70B
-- Bielik 4.5B
+- Bielik 4.5B v3 (Polish)
 - Qwen 2.5 32B (with network caveats)
+- **Kimi-K2-Thinking** - Advanced reasoning via `FUTURNAL_PRODUCTION_LLM=kimi`
+- **GPT-OSS-20B-Derestricted** - Unrestricted use via `FUTURNAL_PRODUCTION_LLM=gpt-oss`
 
-### 🔄 Planned Integration
-- NVIDIA Orchestrator-8B (agentic coordination)
-- DeepSeek-OCR (document preprocessing)
-- Whisper Large V3 (audio pipeline)
+### ✅ Ready to Use (Module 08: Multimodal)
+- **NVIDIA Orchestrator-8B** - Agentic coordination via `orchestrator_client.py`
+- **DeepSeek-OCR** - Document preprocessing via `ocr_client.py`
+- **Whisper Large V3** - Audio transcription via `whisper_client.py`
 
 ### 📋 Under Consideration
-- Kimi-K2-Thinking (reasoning alternative)
-- GPT-OSS-20B-Derestricted (use case dependent)
 - Bielik-Guard (content safety)
 
 ---
@@ -198,6 +212,20 @@ export FUTURNAL_PRODUCTION_LLM=auto
 pytest tests/ -v
 ```
 
+### Advanced Reasoning (Kimi-K2)
+```bash
+export FUTURNAL_PRODUCTION_LLM=kimi
+pytest tests/ -v
+# Alternative to Llama 3.3 70B for complex reasoning
+```
+
+### Unrestricted Content (GPT-OSS-20B)
+```bash
+export FUTURNAL_PRODUCTION_LLM=gpt-oss
+pytest tests/ -v
+# WARNING: No content moderation - use responsibly
+```
+
 ---
 
 ## Implementation Notes
@@ -225,15 +253,31 @@ First download can take time (10-60 minutes for large models).
 
 ---
 
-## Future Enhancements
+## Module 08: Multimodal Pipeline (IMPLEMENTED)
 
-### Multi-Modal Pipeline
-1. **Audio Input** → Whisper V3 → Text
-2. **Image Input** → DeepSeek-OCR → Text  
-3. **Text Processing** → Current entity extraction
-4. **Coordination** → Orchestrator-8B → Optimal routing
+### Multi-Modal Pipeline (Now Active)
+1. **Audio Input** → Whisper V3 → Text (via `AudioAdapter`)
+2. **Image Input** → DeepSeek-OCR → Text (via `ImageAdapter`)
+3. **Scanned PDF** → DeepSeek-OCR → Text (via `ScannedPDFAdapter`)
+4. **Text Processing** → Current entity extraction (via existing adapters)
+5. **Coordination** → Orchestrator-8B → Optimal routing (via `MultiModalRouter`)
 
-### Specialized Extraction
+### Unified API
+```python
+from futurnal.extraction import extract_from_any_source
+
+# Single file - auto-detects modality
+doc = await extract_from_any_source("recording.wav")
+
+# Mixed batch - orchestrator coordinates
+docs = await extract_from_any_source([
+    "slides.pdf",
+    "recording.wav",
+    "notes.md"
+], strategy="parallel")
+```
+
+### Specialized Extraction Paths
 - **OCR path**: DeepSeek-OCR + Qwen 2.5 Coder
 - **Audio path**: Whisper V3 + Llama 3.1 8B
 - **Reasoning path**: Llama 3.3 70B + Orchestrator

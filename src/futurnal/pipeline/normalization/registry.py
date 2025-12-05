@@ -226,6 +226,7 @@ class FormatAdapterRegistry:
         This method imports and registers all built-in adapters:
         - Text-based: Markdown, Email, HTML, Code
         - Binary: PDF (also handles DOCX, PPTX)
+        - Multimodal: Audio, Image, ScannedPDF (Module 08)
         - Fallback: Generic
 
         Called by factory function to set up standard adapter registry.
@@ -237,6 +238,11 @@ class FormatAdapterRegistry:
         from .adapters.markdown import MarkdownAdapter
         from .adapters.pdf import PDFAdapter
 
+        # Module 08: Multimodal Integration - Phase 4 (Integration & Polish)
+        from .adapters.audio import AudioAdapter
+        from .adapters.image import ImageAdapter
+        from .adapters.scanned_pdf import ScannedPDFAdapter
+
         # Register text-based format adapters
         self.register(MarkdownAdapter())
         self.register(EmailAdapter())
@@ -246,10 +252,18 @@ class FormatAdapterRegistry:
         # Register binary format adapters
         self.register(PDFAdapter())
 
+        # Register multimodal adapters (Module 08: Multimodal Integration)
+        # - AudioAdapter: Whisper V3 transcription for audio files
+        # - ImageAdapter: DeepSeek-OCR for image text extraction
+        # - ScannedPDFAdapter: PDF→Image→OCR pipeline for scanned documents
+        self.register(AudioAdapter())
+        self.register(ImageAdapter())
+        self.register(ScannedPDFAdapter())
+
         # Register fallback adapter for unknown formats
         self.register_fallback(GenericAdapter())
 
         logger.info(
             f"Registered {len(self._adapters)} default adapters "
-            f"with GenericAdapter as fallback"
+            f"(including 3 multimodal) with GenericAdapter as fallback"
         )
