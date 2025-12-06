@@ -141,11 +141,34 @@ class HybridSearchAPI:
         # Performance profiling
         self.profiler = PerformanceProfiler()
 
-        # Multimodal handler (lazy init)
+        # Multimodal handler
         self.multimodal_handler = None
+        self.ocr_processor = None
+        self.transcription_processor = None
+        if self.multimodal_enabled:
+            self._init_multimodal()
 
         # Schema manager stub
         self.schema_manager = None
+
+    def _init_multimodal(self) -> None:
+        """Initialize multimodal components."""
+        try:
+            from futurnal.search.hybrid.multimodal import (
+                MultimodalQueryHandler,
+                OCRContentProcessor,
+                TranscriptionProcessor,
+            )
+
+            self.multimodal_handler = MultimodalQueryHandler(
+                pkg_client=self.pkg,
+            )
+            self.ocr_processor = OCRContentProcessor()
+            self.transcription_processor = TranscriptionProcessor()
+            logger.info("Multimodal search components initialized")
+        except Exception as e:
+            logger.warning(f"Could not init multimodal components: {e}")
+            self.multimodal_handler = None
 
     def _init_router(self) -> None:
         """Initialize query router with available backends."""
@@ -183,7 +206,21 @@ class HybridSearchAPI:
         results: List[Dict[str, Any]] = []
 
         try:
-            # Route and execute query
+            # Check for multimodal hints first
+            if self.multimodal_handler:
+                modality_summary = self.multimodal_handler.get_modality_summary(query)
+                if modality_summary:
+                    # Has modality hints - use multimodal search
+                    results = await self._multimodal_search(query, top_k, filters)
+                    self.last_strategy = "multimodal"
+                    intent_type = "multimodal"
+                    if results:
+                        # Cache and return multimodal results
+                        if self.cache:
+                            self.cache.set(CacheLayer.QUERY_RESULT, query, results)
+                        return results
+
+            # Standard routing
             if self.router:
                 # Use route_query which returns QueryPlan
                 plan = self.router.route_query(query)
@@ -362,6 +399,58 @@ class HybridSearchAPI:
         """Basic fallback search."""
         return await self._general_search(query, top_k, None)
 
+    async def _multimodal_search(
+        self,
+        query: str,
+        top_k: int,
+        filters: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Execute multimodal-aware search.
+
+        Uses modality hints to route to appropriate content sources
+        (OCR documents, audio transcriptions, etc.).
+
+        Args:
+            query: Natural language query with modality hints
+            top_k: Number of results to return
+            filters: Optional search filters
+
+        Returns:
+            List of search results from specified modalities
+        """
+        if not self.multimodal_handler:
+            return await self._general_search(query, top_k, filters)
+
+        try:
+            # Analyze query for modality hints
+            plan = self.multimodal_handler.analyze_query(query)
+
+            # Execute multimodal search
+            multimodal_results = await self.multimodal_handler.execute(
+                query=query,
+                plan=plan,
+                top_k=top_k,
+            )
+
+            # Convert to standard result format
+            results: List[Dict[str, Any]] = []
+            for r in multimodal_results:
+                results.append({
+                    "id": r.entity_id,
+                    "content": r.content,
+                    "score": r.score,
+                    "confidence": r.source_confidence,
+                    "source_type": r.source_type.value,
+                    "retrieval_boost": r.retrieval_boost,
+                    **r.metadata,
+                })
+
+            return results
+
+        except Exception as e:
+            logger.warning(f"Multimodal search failed, falling back: {e}")
+            return await self._general_search(query, top_k, filters)
+
     async def record_feedback(
         self,
         query: str,
@@ -385,31 +474,112 @@ class HybridSearchAPI:
                 context={"result_id": clicked_result_id} if clicked_result_id else None,
             )
 
-    async def index_ocr_content(self, content: Dict[str, Any]) -> str:
-        """Index OCR-extracted content.
+    async def index_ocr_content(self, ocr_output: Dict[str, Any]) -> str:
+        """Index OCR-extracted content with source metadata.
+
+        Processes OCR output using OCRContentProcessor to extract
+        text, source metadata, and fuzzy variants for search.
 
         Args:
-            content: OCR content with text, confidence, source_file
+            ocr_output: Raw OCR output with text, confidence, source_file,
+                layout information, and optional bounding boxes
 
         Returns:
             ID of indexed content
+
+        Example:
+            content_id = await api.index_ocr_content({
+                "text": "Scanned document content",
+                "confidence": 0.92,
+                "source_file": "document.pdf",
+                "language": "en",
+            })
         """
-        content_id = f"ocr_{hash(content.get('text', ''))}"
-        # Store in PKG (placeholder)
-        logger.info(f"Indexed OCR content: {content_id}")
+        # Process with OCR processor if available
+        if self.ocr_processor:
+            processed = self.ocr_processor.process_ocr_result(ocr_output)
+            content_text = processed["content"]
+            source_metadata = processed["source_metadata"]
+            fuzzy_variants = processed.get("fuzzy_variants", [])
+        else:
+            content_text = ocr_output.get("text", "")
+            source_metadata = {"source_type": "ocr_document"}
+            fuzzy_variants = []
+
+        content_id = f"ocr_{hash(content_text)}"
+
+        # Store in PKG with source metadata (actual storage is placeholder)
+        # In production, this would call self.pkg.store_content() with:
+        # - content: content_text
+        # - source_metadata: source_metadata
+        # - fuzzy_variants: fuzzy_variants for search expansion
+        logger.info(
+            f"Indexed OCR content: {content_id}",
+            extra={
+                "source_type": source_metadata.get("source_type"),
+                "confidence": source_metadata.get("extraction_confidence"),
+            },
+        )
         return content_id
 
-    async def index_transcription(self, transcription: Dict[str, Any]) -> str:
-        """Index audio transcription.
+    async def index_transcription(self, whisper_output: Dict[str, Any]) -> str:
+        """Index audio transcription with source metadata.
+
+        Processes Whisper output using TranscriptionProcessor to extract
+        text, speaker info, and homophone-expanded searchable content.
 
         Args:
-            transcription: Transcription with text, segments, language
+            whisper_output: Raw Whisper output with text, segments,
+                language, speaker labels, and confidence scores
 
         Returns:
             ID of indexed content
+
+        Example:
+            content_id = await api.index_transcription({
+                "text": "Meeting discussion about project",
+                "segments": [{"text": "...", "start": 0, "end": 5}],
+                "language": "en",
+            })
         """
-        content_id = f"audio_{hash(transcription.get('text', ''))}"
-        logger.info(f"Indexed transcription: {content_id}")
+        # Process with transcription processor if available
+        if self.transcription_processor:
+            processed = self.transcription_processor.process_transcription(
+                whisper_output
+            )
+            content_text = processed["content"]
+            searchable_content = processed["searchable_content"]
+            source_metadata = processed["source_metadata"]
+            segments = processed.get("segments", [])
+            speakers = processed.get("speakers", [])
+        else:
+            content_text = whisper_output.get("text", "")
+            searchable_content = content_text
+            source_metadata = {"source_type": "audio_transcription"}
+            segments = whisper_output.get("segments", [])
+            speakers = []
+
+        content_id = f"audio_{hash(content_text)}"
+
+        # Store in PKG with source metadata (actual storage is placeholder)
+        # In production, this would call self.pkg.store_content() with:
+        # - content: content_text
+        # - searchable_content: searchable_content (homophone-expanded)
+        # - source_metadata: source_metadata
+        # - segments: segments for timestamp-based retrieval
+        # - speakers: speakers for speaker-based filtering
+        logger.info(
+            f"Indexed transcription: {content_id}",
+            extra={
+                "source_type": source_metadata.get("source_type"),
+                "duration": processed.get("transcription_metadata", {}).get(
+                    "duration_seconds"
+                )
+                if self.transcription_processor
+                else None,
+                "speaker_count": len(speakers),
+            },
+        )
         return content_id
 
     async def index_text(self, text: str) -> str:
