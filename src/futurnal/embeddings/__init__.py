@@ -18,6 +18,10 @@ Vector Embedding Service. It implements distinct embedding strategies for:
 - **PKG Synchronization (Module 04)**: Event-driven sync between PKG and
   embedding store with incremental updates and consistency validation.
 
+- **Quality Evolution (Module 05)**: Embedding quality tracking and evolution
+  mechanisms integrated with experiential learning pipeline for continuous
+  quality improvement.
+
 Option B Compliance:
 - Ghost model FROZEN (pre-trained models, no fine-tuning)
 - Temporal-first design (timestamp REQUIRED for events)
@@ -30,6 +34,7 @@ Production Plan References:
 - docs/phase-1/vector-embedding-service-production-plan/02-multi-model-architecture.md
 - docs/phase-1/vector-embedding-service-production-plan/03-schema-versioned-storage.md
 - docs/phase-1/vector-embedding-service-production-plan/04-pkg-synchronization.md
+- docs/phase-1/vector-embedding-service-production-plan/05-quality-evolution.md
 
 Example Usage:
     from futurnal.embeddings import (
@@ -128,6 +133,17 @@ from futurnal.embeddings.consistency_validator import (
     ConsistencyReport,
     RepairResult,
 )
+# Quality Evolution (Module 05)
+from futurnal.embeddings.quality import (
+    EmbeddingQualityMetrics,
+    QualityMetricsStore,
+    GoldenEmbeddingsManager,
+    QualityMetricsTracker,
+    EmbeddingQualityEvolution,
+    ExperientialLearningMonitor,
+    EmbeddingPerformanceProfiler,
+    PerformanceMetric,
+)
 
 __all__ = [
     # Configuration
@@ -191,4 +207,13 @@ __all__ = [
     "EmbeddingConsistencyValidator",
     "ConsistencyReport",
     "RepairResult",
+    # Quality Evolution (Module 05)
+    "EmbeddingQualityMetrics",
+    "QualityMetricsStore",
+    "GoldenEmbeddingsManager",
+    "QualityMetricsTracker",
+    "EmbeddingQualityEvolution",
+    "ExperientialLearningMonitor",
+    "EmbeddingPerformanceProfiler",
+    "PerformanceMetric",
 ]
