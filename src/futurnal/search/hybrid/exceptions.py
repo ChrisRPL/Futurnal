@@ -86,3 +86,61 @@ class InvalidHybridQueryError(HybridSearchError):
     """
 
     pass
+
+
+# =============================================================================
+# Query Routing Exceptions (Module 04)
+# =============================================================================
+
+
+class IntentClassificationError(HybridSearchError):
+    """Error during intent classification.
+
+    Raised when:
+    - LLM backend unavailable (both Ollama and HuggingFace)
+    - Classification request times out
+    - Response parsing fails
+    - Invalid intent returned
+
+    Production Plan Reference:
+    docs/phase-1/hybrid-search-api-production-plan/04-query-routing-orchestration.md
+    """
+
+    pass
+
+
+class ModelSelectionError(HybridSearchError):
+    """Error during dynamic model selection.
+
+    Raised when:
+    - Requested model not available
+    - Model switching fails
+    - Invalid model name specified
+    """
+
+    pass
+
+
+class StrategyExecutionError(HybridSearchError):
+    """Error during strategy execution.
+
+    Raised when:
+    - Primary strategy fails
+    - Secondary strategy fails
+    - Strategy not configured
+    - Execution timeout
+    """
+
+    pass
+
+
+class GRPOFeedbackError(HybridSearchError):
+    """Error during GRPO feedback processing.
+
+    Raised when:
+    - Signal recording fails
+    - Advantage extraction fails
+    - GRPO update fails
+    """
+
+    pass
