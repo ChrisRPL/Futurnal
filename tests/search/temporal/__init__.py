@@ -1,0 +1,1 @@
+"""Temporal search module tests."""
