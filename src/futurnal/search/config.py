@@ -100,6 +100,68 @@ class TemporalSearchConfig:
 
 
 @dataclass
+class CausalSearchConfig:
+    """Configuration for causal chain retrieval.
+
+    All settings have sensible defaults aligned with production plan targets.
+
+    Production Plan Reference:
+    docs/phase-1/hybrid-search-api-production-plan/02-causal-chain-retrieval.md
+
+    Example:
+        >>> config = CausalSearchConfig(
+        ...     default_max_hops=5,
+        ...     default_min_confidence=0.7,
+        ... )
+    """
+
+    # Traversal configuration
+    default_max_hops: int = 3
+    """Default maximum hops for causal traversal. Default: 3."""
+
+    max_allowed_hops: int = 10
+    """Maximum allowed hops (cannot be exceeded). Default: 10."""
+
+    default_min_confidence: float = 0.6
+    """Default minimum causal confidence. Default: 0.6."""
+
+    # Correlation detection
+    default_correlation_strength: float = 0.5
+    """Default minimum correlation strength. Default: 0.5."""
+
+    # Query limits and performance
+    default_result_limit: int = 20
+    """Default number of results per query. Default: 20."""
+
+    max_result_limit: int = 100
+    """Maximum allowed results per query. Default: 100."""
+
+    query_timeout_ms: float = 2000.0
+    """Query timeout in milliseconds. Target: <2s. Default: 2000ms."""
+
+    # Performance targets (for monitoring)
+    target_latency_ms: float = 2000.0
+    """Target query latency in milliseconds. Default: 2000ms (2s)."""
+
+    def __post_init__(self) -> None:
+        """Validate configuration values."""
+        if self.default_max_hops > self.max_allowed_hops:
+            raise ValueError(
+                "default_max_hops cannot exceed max_allowed_hops"
+            )
+
+        if not 0.0 <= self.default_min_confidence <= 1.0:
+            raise ValueError(
+                "default_min_confidence must be between 0.0 and 1.0"
+            )
+
+        if not 0.0 <= self.default_correlation_strength <= 1.0:
+            raise ValueError(
+                "default_correlation_strength must be between 0.0 and 1.0"
+            )
+
+
+@dataclass
 class SearchConfig:
     """Top-level search configuration.
 
@@ -115,8 +177,10 @@ class SearchConfig:
     temporal: TemporalSearchConfig = field(default_factory=TemporalSearchConfig)
     """Temporal search configuration."""
 
-    # Future: Add causal, schema-aware, multimodal configs
-    # causal: CausalSearchConfig = field(default_factory=CausalSearchConfig)
+    causal: CausalSearchConfig = field(default_factory=CausalSearchConfig)
+    """Causal chain retrieval configuration."""
+
+    # Future: Add schema-aware, multimodal configs
     # schema_aware: SchemaAwareConfig = field(default_factory=SchemaAwareConfig)
 
     # Audit logging
