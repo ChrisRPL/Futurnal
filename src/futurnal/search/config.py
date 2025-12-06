@@ -15,7 +15,10 @@ Option B Compliance:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from futurnal.search.hybrid.config import HybridSearchConfig
 
 
 @dataclass
@@ -180,8 +183,9 @@ class SearchConfig:
     causal: CausalSearchConfig = field(default_factory=CausalSearchConfig)
     """Causal chain retrieval configuration."""
 
-    # Future: Add schema-aware, multimodal configs
-    # schema_aware: SchemaAwareConfig = field(default_factory=SchemaAwareConfig)
+    # Hybrid search config is lazily imported to avoid circular dependencies
+    _hybrid: Optional["HybridSearchConfig"] = field(default=None, repr=False)
+    """Schema-aware hybrid retrieval configuration (Module 03)."""
 
     # Audit logging
     enable_audit_logging: bool = True
@@ -189,6 +193,23 @@ class SearchConfig:
 
     audit_log_content: bool = False
     """Log query content (privacy-sensitive). Default: False."""
+
+    @property
+    def hybrid(self) -> "HybridSearchConfig":
+        """Get hybrid search configuration (lazy loading).
+
+        Returns:
+            HybridSearchConfig instance
+        """
+        if self._hybrid is None:
+            from futurnal.search.hybrid.config import HybridSearchConfig
+            self._hybrid = HybridSearchConfig()
+        return self._hybrid
+
+    @hybrid.setter
+    def hybrid(self, value: "HybridSearchConfig") -> None:
+        """Set hybrid search configuration."""
+        self._hybrid = value
 
     @classmethod
     def from_env(cls) -> "SearchConfig":
