@@ -5,12 +5,14 @@
  * Cinzel for brand headlines, Times New Roman for taglines, black & white aesthetic.
  */
 
+import { useState } from 'react';
 import { Routes, Route, Navigate, Link } from 'react-router-dom';
 import { useOrchestratorStatus, useConnectors } from '@/hooks/useApi';
 import { useSubscription } from '@/hooks/useSubscription';
 import { useAuth } from '@/contexts/AuthContext';
 import { openSubscriptionPortal } from '@/lib/subscription';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { CommandPalette } from '@/components/search';
 import {
   Search,
   FolderPlus,
@@ -120,7 +122,12 @@ function ActivityItem({ icon, message, time }: ActivityItemProps) {
 /**
  * Dashboard / Home page
  */
-function HomePage() {
+interface HomePageProps {
+  /** Handler to open the search palette */
+  onOpenSearch?: () => void;
+}
+
+function HomePage({ onOpenSearch }: HomePageProps) {
   const { data: orchestratorStatus, isLoading: isLoadingStatus } = useOrchestratorStatus();
   const { data: connectors } = useConnectors();
   const { user, logout } = useAuth();
@@ -267,7 +274,7 @@ function HomePage() {
                 description="Query your knowledge"
                 icon={<Search className="w-6 h-6" />}
                 primary
-                onClick={() => console.log('Search')}
+                onClick={onOpenSearch}
               />
               <QuickAction
                 title="Add Source"
@@ -362,22 +369,29 @@ function RootRedirect() {
  * Main App with routing
  */
 function App() {
+  const [searchOpen, setSearchOpen] = useState(false);
+
   return (
-    <Routes>
-      <Route path="/" element={<RootRedirect />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/signup" element={<Signup />} />
-      <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route
-        path="/dashboard"
-        element={
-          <ProtectedRoute>
-            <HomePage />
-          </ProtectedRoute>
-        }
-      />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      {/* Global Command Palette - available on all pages */}
+      <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
+
+      <Routes>
+        <Route path="/" element={<RootRedirect />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <HomePage onOpenSearch={() => setSearchOpen(true)} />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   );
 }
 
