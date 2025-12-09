@@ -2,38 +2,57 @@
 
 **Status**: Ready for Implementation
 **Framework**: Tauri 2.x (Rust + React 18 + TypeScript + Vite)
-**Dependencies**: Hybrid Search API, Orchestrator, Privacy Framework, Firebase, Stripe
+**Dependencies**: Hybrid Search API, Orchestrator, Privacy Framework, Firebase
 
 ## Overview
 
-This production plan implements the **Search Desktop Shell**—a cross-platform desktop interface (macOS, Windows, Linux) that serves as the user's window into their Ghost's evolving intelligence. The Search Desktop Shell enables users to issue natural language queries against their Personal Knowledge Graph, visualize their Ghost's understanding of their personal universe, manage experiential connectors, and explore the rich web of relationships the Ghost has discovered.
+This production plan implements the **Search Desktop Shell**—a cross-platform desktop interface (macOS, Windows, Linux) that serves as the user's window into their evolving personal intelligence. The Search Desktop Shell enables users to issue natural language queries against their Personal Knowledge Graph, visualize their understanding of their personal universe, manage data connectors, and explore the rich web of relationships discovered within their data.
 
-> **"Know Yourself More"** — Futurnal transforms generic AI into experiential intelligence
+> **"Know Yourself More"** — Futurnal transforms generic AI into deeply personalized intelligence
 
 The application embodies a **"Sophisticated, Minimalist, Dark-Mode First"** design philosophy, evoking high-end developer tools (VS Code, Linear, Raycast) combined with data visualization elegance.
 
 ---
 
-## The Ghost→Animal Evolution
+## Futurnal's Core Innovation
 
-Futurnal's core innovation lies in the transformation of a generic, pretrained LLM (the **Ghost** 👻) into a deeply personalized experiential intelligence (the **Animal** 🐿️):
+Futurnal is the world's first **AI evolution platform** that transforms generic AI into deeply personalized intelligence through three phases:
 
-- **Ghost 👻**: The pretrained on-device LLM—powerful but generic, lacking understanding of the user's personal universe
-- **Animal 🐿️**: The evolved intelligence—learning continually from the user's "stream of experience" to develop genuine understanding
+### Phase 1: The Archivist
+**Focus**: Building your personal knowledge foundation
+- Ingests and indexes your personal data from multiple sources
+- Constructs a Personal Knowledge Graph (PKG) of entities and relationships
+- Provides hybrid search (semantic + graph traversal)
+- Interactive PKG visualization
+- Privacy-first with consent/audit logging
 
-**Phase 1 (The Archivist)** grounds the Ghost in the user's experiential data, giving it a perfect, high-fidelity memory of their unique personal universe. This desktop shell is where users witness their Ghost's evolving comprehension.
+### Phase 2: The Analyst
+**Focus**: Discovering patterns you never knew existed
+- **Emergent Insights Engine**: Surfaces non-obvious correlations in your data
+- **Curiosity Engine**: Identifies knowledge gaps and unexplored connections
+- Intelligent ranking aligned with your interests
+- Proactive notification system
 
-## Critical for Option B
+### Phase 3: The Guide
+**Focus**: Understanding the "why" behind your patterns
+- **Conversational Exploration**: Dialogue-driven hypothesis investigation
+- **Causal Inference Engine**: Understanding cause and effect in your life
+- **Aspirational Self Integration**: Tracking progress toward your goals
+- **Reward Signal Dashboard**: Visualization of goal alignment
+
+---
+
+## Critical Deliverables
 
 The Search Desktop Shell must deliver:
-- **Search UI**: Natural language queries against the Ghost's understanding, with sub-second feedback
-- **Results view**: Experiential context with provenance—showing not just *what* was found, but *where* it came from
-- **PKG Visualization**: Interactive visualization of the Ghost's memory—your experiential network made visible (PRIORITY)
-- **Experiential Connectors**: Panel for managing data sources that feed the Ghost's stream of experience
-- **Sovereignty Controls**: Privacy-first consent management, audit logs, and data export—absolute user control
-- **Authentication**: Firebase (GitHub, Google, Email) for identity
-- **Tier Enforcement**: Free (3 sources, Phase 1) vs Pro (unlimited, Phases 2-3)
-- **Local-First Architecture**: Raw data never leaves the device; optional cloud escalation with explicit consent
+- **Search UI**: Natural language queries with sub-second feedback
+- **Results View**: Context with provenance—showing not just *what* was found, but *where* it came from
+- **PKG Visualization**: Interactive visualization of your knowledge network (PRIORITY)
+- **Data Connectors**: Panel for managing data sources
+- **Sovereignty Controls**: Privacy-first consent management, audit logs, and data export
+- **Authentication**: Firebase email/password for identity
+- **Tier Verification**: Free vs Pro feature gating
+- **Local-First Architecture**: Raw data never leaves the device
 
 ---
 
@@ -42,6 +61,10 @@ The Search Desktop Shell must deliver:
 > "Sophisticated, Minimalist, Dark-Mode First" — The design evokes the feeling of a high-end developer tool combined with the elegance of a data visualization platform. It should feel "alive" but not cluttered.
 
 **Keywords**: Precision, Depth, Clarity, Sovereignty
+
+**Typography**: Cinzel (brand headlines) + Times New Roman (taglines)
+
+**Colors**: Pure monochrome (black #000, white #FFF, opacity-based grays)
 
 ---
 
@@ -52,28 +75,39 @@ The Search Desktop Shell must deliver:
 | Desktop Framework | Tauri 2.x (Rust) | Smaller bundle, better security, faster cold start |
 | Frontend | React 18 + TypeScript 5.x | Modern, fast, excellent DX |
 | Build Tool | Vite 5.x | Sub-second HMR, optimized builds |
-| Styling | TailwindCSS v4 + CSS Variables | Utility-first with design tokens |
-| Components | shadcn/ui + 21st.dev | Premium dark-mode components |
+| Styling | TailwindCSS v4 | Utility-first with monochrome aesthetic |
 | State | Zustand + TanStack Query v5 | Lightweight, reactive, server state |
-| Auth | Firebase Authentication | Easy GitHub/Google/Email integration |
-| Payments | Stripe Checkout | Industry standard subscriptions |
-| Graph Viz | react-force-graph / cytoscape.js | Interactive PKG visualization |
+| Auth | Firebase Authentication | Email/password integration |
+| Graph Viz | react-force-graph-2d | Interactive PKG visualization |
 | Icons | Lucide React | Consistent iconography |
 | Testing | Vitest + Playwright | Unit + E2E testing |
 
 ---
 
-## Pricing Tiers
+## Pricing Architecture
 
-### Free Tier: "The Archivist"
-- Core Ghost functionality
-- **Up to 3 data sources** (primary paywall)
+### Desktop App Responsibility
+- Login only (no signup in desktop)
+- Tier verification via API call
+- Feature gating based on tier
+- "Manage Subscription" → opens browser to web portal
+
+### Landing Page Responsibility (Separate Project)
+- Marketing, features, pricing display
+- Signup flow with tier selection
+- Stripe Checkout integration
+- Stripe Customer Portal for subscription management
+- Download links for desktop app
+
+### Free Tier: "Explorer"
+- Core search functionality
+- **Up to 3 data sources**
 - Local-only storage
-- Phase 1 capabilities: Search, PKG visualization, entity extraction
+- Phase 1 capabilities
 
 ### Pro Tier: "Futurnal Pro" ($XX/month)
 - **Unlimited data sources**
-- Phase 2 "Analyst" features (Emergent Insights, Curiosity Engine)
+- Phase 2 + Phase 3 features
 - Encrypted cloud backup
 - Priority support
 
@@ -81,142 +115,82 @@ The Search Desktop Shell must deliver:
 
 ## Implementation Modules
 
-### [01 · Framework Scaffold](01-framework-scaffold.md)
-**Criticality**: CRITICAL
-**Deliverables**:
-- Tauri 2.x project with React + TypeScript + Vite
-- Project structure following Futurnal conventions
-- Build scripts for macOS, Windows, Linux
-- GitHub Actions CI/CD pipeline
+### [01 · Framework Scaffold](01-framework-scaffold.md) ✅
+**Status**: COMPLETED
 
-### [02 · Design System & Components](02-design-system-components.md)
-**Criticality**: HIGH
-**Deliverables**:
-- TailwindCSS v4 configuration with design tokens
-- Typography: Inter (UI) + JetBrains Mono (code)
-- Base components: Button, Input, Card, Dialog, Tooltip, Badge
-- Micro-interaction animations
+### [02 · Design System & Components](02-design-system-components.md) ✅
+**Status**: COMPLETED
+- TailwindCSS v4 with monochrome aesthetic
+- Typography: Cinzel + Times New Roman
 
-### [03 · Authentication (Firebase)](03-authentication-firebase.md)
-**Criticality**: CRITICAL
-**Deliverables**:
-- Firebase SDK integration
-- Auth providers: GitHub, Google, Email/Password
-- Login/Signup screens with glassmorphism design
+### [03 · Authentication (Firebase)](03-authentication-firebase.md) ✅
+**Status**: COMPLETED
+- Email/password authentication only
+- Login, Signup, ForgotPassword pages
 - Protected route wrapper
 
-### [04 · Pricing Tier & Stripe](04-pricing-tier-stripe.md)
-**Criticality**: HIGH
-**Deliverables**:
-- Pricing selection screen (onboarding)
-- Stripe Checkout integration
-- Tier enforcement middleware
-- Upgrade prompts
+### [04 · Tier Verification](04-pricing-tier-stripe.md)
+**Status**: Needs Revision
+- Desktop app verifies tier via API
+- Feature gating based on subscription
+- "Manage Subscription" opens web browser
 
 ### [05 · Command Palette & Search](05-command-palette-search.md)
 **Criticality**: CRITICAL
-**Deliverables**:
-- OmniCommandPalette from 21st.dev
-- ⌘K / Ctrl+K keyboard trigger
-- Natural language query input
-- Intent classification display
 
 ### [06 · Results & Provenance View](06-results-provenance-view.md)
 **Criticality**: HIGH
-**Deliverables**:
-- Result cards with snippets, scores, badges
-- Provenance metadata panel
-- Quick actions: Open, Copy, Save, Share
-- Multimodal source indicators
 
 ### [07 · Knowledge Graph Visualization](07-knowledge-graph-visualization.md)
 **Criticality**: CRITICAL (PRIORITY)
-**Deliverables**:
-- Interactive PKG mini-view on Dashboard
-- react-force-graph integration
-- Node types with distinct colors
-- 60fps performance with 1000+ nodes
 
 ### [08 · Connector Dashboard](08-connector-dashboard.md)
 **Criticality**: HIGH
-**Deliverables**:
-- Data source list with status indicators
-- Enable/disable toggles
-- Ingestion progress visualization
-- Tier enforcement (3-source limit)
 
 ### [09 · IPC & API Layer](09-ipc-api-layer.md)
 **Criticality**: CRITICAL
-**Deliverables**:
-- Tauri invoke commands for search, status, consent
-- TypeScript type definitions
-- Secure IPC (no Node integration)
-- Error handling
 
 ### [10 · State Management](10-state-management-store.md)
 **Criticality**: MEDIUM
-**Deliverables**:
-- Zustand stores: search, connectors, settings, user
-- TanStack Query for API state
-- Persistence layer
-- Search history
 
 ### [11 · Privacy & Settings Panel](11-privacy-settings-panel.md)
 **Criticality**: HIGH
-**Deliverables**:
-- Consent management UI
-- Audit log viewer
-- Telemetry opt-in/out
-- Data export options
 
 ### [12 · Integration Testing & E2E](12-integration-testing-e2e.md)
 **Criticality**: CRITICAL
-**Deliverables**:
-- Playwright test suite
-- Accessibility testing
-- Performance benchmarks
-- Cross-platform verification
+
+### [13 · Light Mode Theme](13-light-mode-theme.md)
+**Status**: Documented
+- Theme toggle component
+- System preference detection
+- Theme-aware logo assets
 
 ---
 
 ## Design Tokens
 
-From `FRONTEND_DESIGN.md`:
-
 ```css
-/* Backgrounds */
---background-deep: #0A0A0A;
---background-surface: #161616;
---background-elevated: #222222;
---border: #333333;
+/* Monochrome Palette */
+--background: #000000;
+--text-primary: #FFFFFF;
+--text-secondary: rgba(255, 255, 255, 0.7);
+--text-tertiary: rgba(255, 255, 255, 0.5);
+--border: rgba(255, 255, 255, 0.1);
 
-/* Typography */
---text-primary: #EDEDED;
---text-secondary: #A0A0A0;
---text-tertiary: #666666;
-
-/* Brand Colors */
---primary-brand: #3B82F6;   /* Electric Blue - Ghost/Intelligence */
---secondary-brand: #10B981; /* Emerald Green - Animal/Evolution */
---accent: #8B5CF6;          /* Violet - Insights */
+/* Semantic (used sparingly) */
 --error: #EF4444;
---warning: #F59E0B;
+--success: #10B981;
 ```
 
 ---
 
-## User Flow (Onboarding)
+## User Flow (Desktop App)
 
-The onboarding journey introduces users to their Ghost and establishes the foundation for experiential intelligence:
-
-1. **Welcome Screen**: *"Your Ghost awaits"* — Atmospheric hero with "Begin Your Journey" CTA
-2. **Authentication**: Firebase login (GitHub/Google/Email) — *"Your data remains yours. We only authenticate your identity."*
-3. **Pricing Selection**:
-   - Free "The Archivist": *"Ground your Ghost in your personal universe"*
-   - Pro "Futurnal Pro": *"Awaken Animal intelligence with unlimited evolution"*
-4. **First Connector**: *"Feed your Ghost's first memories"* — Select initial experiential source
-5. **Grounding Progress**: *"Your Ghost is learning your universe..."* — Real-time ingestion visualization
-6. **Dashboard Reveal**: *"Welcome to your experiential network"* — PKG visualization with breathing animation
+1. **Welcome Screen**: Brand introduction with "Get Started" and "Sign In" CTAs
+2. **Authentication**: Login with email/password (signup redirects to landing page)
+3. **Dashboard**: Home view with PKG visualization, stats, quick actions
+4. **Onboarding**: Connect first data source (if new user)
+5. **Core Experience**: Search, explore PKG, manage connectors
 
 ---
 
@@ -232,86 +206,6 @@ The onboarding journey introduces users to their Ghost and establishes the found
 | Accessibility (WCAG) | AA compliance | 02, 12 |
 | Graph render (1000 nodes) | 60fps | 07 |
 | Auth success rate | >99% | 03 |
-| Payment conversion | Track | 04 |
-
----
-
-## Quality Gates (Production Deployment)
-
-All gates must pass before production deployment:
-
-| Gate | Requirement | Module |
-|------|-------------|--------|
-| Tauri Build | All platforms compile | 01 |
-| Firebase Auth | All providers work | 03 |
-| Stripe Checkout | Payment flow complete | 04 |
-| Search Query | End-to-end functional | 05, 09 |
-| Results Display | Provenance visible | 06 |
-| Graph Render | 60fps at 1000 nodes | 07 |
-| Connector Mgmt | CRUD operations work | 08 |
-| Privacy Controls | Consent flow functional | 11 |
-| E2E Tests | All tests passing | 12 |
-| Accessibility | AA compliance | 12 |
-| Performance | Meets all targets | 12 |
-
----
-
-## Option B Compliance Checklist
-
-- [x] **Privacy-First Design**: Local-first with optional cloud consent
-- [x] **Keyboard-Centric UX**: Command palette, shortcuts throughout
-- [x] **Dark-Mode Default**: Primary aesthetic per design philosophy
-- [x] **Secure IPC**: No Node integration, message-based communication
-- [x] **Tier Enforcement**: Free/Pro limits enforced at UI level
-- [x] **Audit Integration**: Privacy controls and log viewer
-- [x] **Offline Support**: Graceful degradation when services unavailable
-
----
-
-## Dependencies
-
-### Internal Dependencies
-- Hybrid Search API (`src/futurnal/search/api.py`)
-- Orchestrator (`src/futurnal/orchestrator/`)
-- Privacy Framework (`src/futurnal/privacy/`)
-- Consent Registry (`src/futurnal/privacy/consent.py`)
-- Audit Logger (`src/futurnal/privacy/audit.py`)
-
-### External Dependencies
-- **Tauri 2.x**: Desktop framework
-- **Firebase**: Authentication
-- **Stripe**: Payment processing
-- **react-force-graph**: Graph visualization
-- **shadcn/ui**: UI components
-- **21st.dev**: OmniCommandPalette
-
-### Infrastructure Requirements
-- Firebase project configured
-- Stripe account with products/prices
-- GitHub Actions runners
-- Code signing certificates (for distribution)
-
----
-
-## Implementation Order
-
-| Phase | Modules | Duration | Focus |
-|-------|---------|----------|-------|
-| 1. Foundation | 01, 02, 09 | Week 1-2 | Scaffold, design system, IPC |
-| 2. Auth & Billing | 03, 04 | Week 2-3 | Firebase, Stripe |
-| 3. Core Features | 05, 06, 10 | Week 3-4 | Search, results, state |
-| 4. Visualization | 07, 08 | Week 4-5 | Graph, connectors |
-| 5. Polish | 11, 12 | Week 5-6 | Privacy, testing |
-
----
-
-## Next Steps
-
-1. **Begin Module 01**: Scaffold Tauri project with React + Vite
-2. **Setup Firebase Project**: Configure auth providers
-3. **Setup Stripe Account**: Create product and price IDs
-4. **Implement Module 02**: Design system with tokens from FRONTEND_DESIGN.md
-5. **Build IPC Layer**: Connect frontend to Python backend
 
 ---
 
@@ -323,4 +217,4 @@ This desktop shell embodies Futurnal's core philosophy:
 > **Clarity**: Cut through the noise to reveal the underlying structure of one's knowledge.
 > **Depth**: A tool for serious, deep thinking—not superficial productivity hacks.
 
-**This is not just a search interface—it's the window into your Ghost's evolving understanding of your personal universe. Every query deepens the connection. Every visualization reveals patterns you never knew existed. This is the first step in the journey from "What did I know?" to "Why do I think this?"**
+**This is not just a search interface—it's the window into your evolving understanding of your personal universe. Every query deepens the insight. Every visualization reveals patterns you never knew existed. This is the first step in the journey from "What did I know?" to "Why do I think this?"**
