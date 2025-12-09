@@ -216,16 +216,30 @@ export type UserTier = 'free' | 'pro';
 
 export interface UserTierLimits {
   maxSources: number;
-  features: string[];
+  hasCloudBackup: boolean;
+  // Phase 2 features
+  hasEmergentInsights: boolean;
+  hasCuriosityEngine: boolean;
+  // Phase 3 features
+  hasCausalExploration: boolean;
+  hasAspirationalSelf: boolean;
 }
 
 export const TIER_LIMITS: Record<UserTier, UserTierLimits> = {
   free: {
     maxSources: 3,
-    features: ['search', 'graph_view', 'local_storage'],
+    hasCloudBackup: false,
+    hasEmergentInsights: false,
+    hasCuriosityEngine: false,
+    hasCausalExploration: false,
+    hasAspirationalSelf: false,
   },
   pro: {
     maxSources: Infinity,
-    features: ['search', 'graph_view', 'local_storage', 'cloud_backup', 'insights', 'causal_analysis'],
+    hasCloudBackup: true,
+    hasEmergentInsights: true,
+    hasCuriosityEngine: true,
+    hasCausalExploration: true,
+    hasAspirationalSelf: true,
   },
 };

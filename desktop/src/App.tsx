@@ -7,7 +7,9 @@
 
 import { Routes, Route, Navigate, Link } from 'react-router-dom';
 import { useOrchestratorStatus, useConnectors } from '@/hooks/useApi';
+import { useSubscription } from '@/hooks/useSubscription';
 import { useAuth } from '@/contexts/AuthContext';
+import { openSubscriptionPortal } from '@/lib/subscription';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import {
   Search,
@@ -122,6 +124,7 @@ function HomePage() {
   const { data: orchestratorStatus, isLoading: isLoadingStatus } = useOrchestratorStatus();
   const { data: connectors } = useConnectors();
   const { user, logout } = useAuth();
+  const { isPro, isLoading: isTierLoading } = useSubscription();
 
   const isActive = orchestratorStatus?.running ?? false;
   const totalNodes = 0;
@@ -164,12 +167,32 @@ function HomePage() {
               </div>
             )}
 
+            {/* Tier Badge */}
+            {user && !isTierLoading && (
+              <span
+                className={`text-xs px-2 py-1 border ${
+                  isPro ? 'border-white/30 text-white/80' : 'border-white/10 text-white/40'
+                }`}
+              >
+                {isPro ? 'Pro' : 'Free'}
+              </span>
+            )}
+
             {/* User */}
             {user && (
               <div className="flex items-center gap-4">
-                <span className="text-sm text-white/40 hidden md:block">
-                  {user.email}
-                </span>
+                <span className="text-sm text-white/40 hidden md:block">{user.email}</span>
+
+                {/* Manage Subscription - only show for Pro */}
+                {isPro && (
+                  <button
+                    onClick={openSubscriptionPortal}
+                    className="text-sm text-white/40 hover:text-white transition-colors hidden sm:block"
+                  >
+                    Manage
+                  </button>
+                )}
+
                 <button
                   onClick={handleLogout}
                   className="text-white/40 hover:text-white transition-colors"
