@@ -9,70 +9,143 @@ The design should evoke the feeling of a high-end developer tool (like VS Code, 
 - **Theme**: Dark mode is the default and primary experience.
 
 ### 1.2. Color Palette
-The palette uses deep grays for backgrounds to reduce eye strain during deep work, with high-contrast text and vibrant accents for data and interactions.
+The palette uses a pure monochrome aesthetic - black backgrounds with white/gray text. No accent colors. This creates a timeless, sophisticated, and premium feel aligned with the Futurnal brand identity.
 
-**Neutral / Backgrounds**
-- **Background Deep**: `#0A0A0A` (Main app background)
-- **Background Surface**: `#161616` (Cards, Sidebars, Modals)
-- **Background Elevated**: `#222222` (Hover states, Inputs)
-- **Border**: `#333333` (Subtle dividers)
+**Dark Mode (Primary)**
+- **Background**: `#000000` (Pure black)
+- **Text Primary**: `#FFFFFF` (Pure white)
+- **Text Secondary**: `rgba(255, 255, 255, 0.7)` (70% white)
+- **Text Tertiary**: `rgba(255, 255, 255, 0.5)` (50% white)
+- **Text Muted**: `rgba(255, 255, 255, 0.3)` (30% white)
+- **Border**: `rgba(255, 255, 255, 0.1)` (10% white)
+- **Surface**: `rgba(255, 255, 255, 0.05)` (5% white - for inputs/cards)
 
-**Typography**
-- **Text Primary**: `#EDEDED` (High readability)
-- **Text Secondary**: `#A0A0A0` (Metadata, labels)
-- **Text Tertiary**: `#666666` (Placeholders, disabled)
+**Light Mode (Secondary)**
+- **Background**: `#FFFFFF` (Pure white)
+- **Text Primary**: `#000000` (Pure black)
+- **Text Secondary**: `rgba(0, 0, 0, 0.7)` (70% black)
+- **Text Tertiary**: `rgba(0, 0, 0, 0.5)` (50% black)
+- **Border**: `rgba(0, 0, 0, 0.1)` (10% black)
 
-**Brand & Accents**
-- **Primary Brand**: `#3B82F6` (Electric Blue - representing "The Ghost" / Intelligence)
-- **Secondary Brand**: `#10B981` (Emerald Green - representing "Growth" / "Animal" evolution)
-- **Accent/Focus**: `#8B5CF6` (Violet - for "Insights" and special states)
-- **Error**: `#EF4444`
-- **Warning**: `#F59E0B`
+**Semantic Colors**
+- **Error**: `#EF4444` (Red - used sparingly for error states only)
+- **Success**: `#10B981` (Green - used sparingly for success states only)
 
 ### 1.3. Typography
-- **Primary Font**: `Inter` (Google Fonts) - Clean, modern, highly legible at all sizes.
-- **Monospace Font**: `JetBrains Mono` or `Fira Code` - For code snippets, data structures, and logs.
-- **Weights**:
-    - Regular (400): Body text.
-    - Medium (500): Buttons, Navigation.
-    - SemiBold (600): Headings, emphasized data.
+Futurnal uses a refined serif typography system that evokes timeless elegance and sophistication.
 
-### 1.4. Assets Usage
-- **Logo**: `assets/logo.png` - Used as the app icon and in the login screen.
-- **Wordmark**: `assets/logo_text_horizontal.png` - Used in the top-left of the Sidebar or Navigation bar.
-- **Hero Image**: `assets/Gemini_Generated_Image_rcdxgarcdxgarcdx.png` - Used on the Landing/Login page background (with a dark overlay) to set the mood.
+- **Brand Headlines**: `Cinzel` (Google Fonts) - Elegant serif font with classical proportions. Used for page titles, hero text, and brand moments.
+  - Weights: Regular (400), Medium (500), SemiBold (600), Bold (700)
+  - Letter-spacing: `0.05em` (slightly expanded for elegance)
+
+- **Taglines & Italic Text**: `Times New Roman` / `Georgia` (System serif) - Classic serif for taglines, quotes, and italic emphasis.
+  - Style: Italic
+  - Used for: Taglines, quotes, secondary brand text
+
+**CSS Classes**:
+```css
+.font-brand {
+  font-family: 'Cinzel', serif;
+  letter-spacing: 0.05em;
+}
+
+.font-tagline {
+  font-family: 'Times New Roman', 'Georgia', serif;
+  font-style: italic;
+}
+```
+
+**Usage Guidelines**:
+- Page titles: `font-brand` + `text-3xl` or larger
+- Button text: `font-brand` or system sans-serif
+- Body text: System serif or `font-brand` at smaller sizes
+- Taglines: `font-tagline` + italic styling
+
+### 1.4. Logo Assets
+
+Futurnal uses a geometric logo system with variants for different contexts and themes.
+
+**Source Assets** (in `assets/` folder):
+| Asset | Description |
+|-------|-------------|
+| `logo.png` | Small icon logo (geometric mark only) |
+| `logo_big.png` | Large logo for hero sections |
+| `logo_text_horizon.png` | Horizontal logo with "FUTURNAL" text and tagline |
+| `logo_text_horizontal.png` | Alternative horizontal wordmark |
+
+**Desktop App Assets** (in `desktop/public/` folder):
+Each logo has a standard version (for light backgrounds) and a `_dark` version (inverted colors for dark backgrounds).
+
+| Asset | Theme | Usage |
+|-------|-------|-------|
+| `logo.png` | Light mode | Header icon, favicon |
+| `logo_dark.png` | Dark mode | Header icon on dark backgrounds |
+| `logo_big.png` | Light mode | Welcome page hero (light theme) |
+| `logo_big_dark.png` | Dark mode | Welcome page hero (dark theme) |
+| `logo_text_horizon.png` | Light mode | Dashboard header (light theme) |
+| `logo_text_horizon_dark.png` | Dark mode | Dashboard header (dark theme) |
+
+**Usage by Page**:
+| Page | Header Logo | Hero/Main Logo |
+|------|-------------|----------------|
+| Welcome | `logo_dark.png` | `logo_big_dark.png` |
+| Login | `logo_dark.png` | - |
+| Signup | `logo_dark.png` | - |
+| ForgotPassword | `logo_dark.png` | - |
+| Dashboard | `logo_text_horizon_dark.png` | - |
+
+**Theme-Aware Implementation**:
+```tsx
+// When implementing light mode support:
+const { resolvedTheme } = useTheme();
+const logoSrc = resolvedTheme === 'dark' ? '/logo_dark.png' : '/logo.png';
+```
 
 ---
 
 ## 2. UI Components
 
 ### 2.1. Buttons
-Buttons should feel tactile and precise.
-- **Primary Button**:
-    - Background: Primary Brand (`#3B82F6`) or White (`#EDEDED`) for high contrast.
-    - Text: Dark (`#0A0A0A`) if white background, or White if blue background.
-    - Radius: `6px` (Slightly rounded, not pill-shaped).
-    - Hover: Slight brightness increase + subtle lift (transform-y).
-    - Shadow: `0 4px 12px rgba(59, 130, 246, 0.3)` (Glow effect).
-- **Secondary Button**:
-    - Background: Transparent or Surface (`#222222`).
-    - Border: 1px solid `#333333`.
-    - Text: Secondary (`#A0A0A0`).
-    - Hover: Border becomes lighter (`#666666`), text becomes Primary.
+Buttons follow the monochrome aesthetic - no colored backgrounds.
+
+- **Primary Button** (Dark Mode):
+    - Background: `#FFFFFF` (Pure white)
+    - Text: `#000000` (Pure black)
+    - Radius: `0px` (Sharp corners for modern aesthetic)
+    - Hover: `rgba(255, 255, 255, 0.9)` (Slight dim)
+    - Font: Medium weight, larger text (`text-lg`)
+
+- **Primary Button** (Light Mode):
+    - Background: `#000000` (Pure black)
+    - Text: `#FFFFFF` (Pure white)
+    - Hover: `rgba(0, 0, 0, 0.9)` (Slight dim)
+
+- **Secondary Button** (Outline):
+    - Background: Transparent
+    - Border: `1px solid rgba(255, 255, 255, 0.3)` (dark mode)
+    - Text: `rgba(255, 255, 255, 0.7)`
+    - Hover: Border becomes `rgba(255, 255, 255, 0.6)`, text becomes white
+
+- **Ghost Button** (Text only):
+    - Background: Transparent
+    - Text: `rgba(255, 255, 255, 0.6)`
+    - Hover: Text becomes white
 
 ### 2.2. Text Boxes & Inputs
-- **Style**: Minimalist, flat, immersive.
-- **Background**: `#121212` or `#1A1A1A`.
-- **Border**: 1px solid `#333333`.
-- **Focus State**: Border color changes to Primary Brand (`#3B82F6`) with a subtle glow `box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2)`.
-- **Text**: Primary (`#EDEDED`).
-- **Placeholder**: Tertiary (`#666666`).
-- **Radius**: `6px`.
+- **Style**: Minimalist, flat, monochrome.
+- **Background**: `rgba(255, 255, 255, 0.05)` (5% white on dark mode)
+- **Border**: `1px solid rgba(255, 255, 255, 0.1)`
+- **Focus State**: Border becomes `rgba(255, 255, 255, 0.3)` (no colored glow)
+- **Text**: `#FFFFFF` (Pure white)
+- **Placeholder**: `rgba(255, 255, 255, 0.3)` (30% white)
+- **Radius**: `0px` (Sharp corners to match buttons)
 
 ### 2.3. Shadows & Depth
-- **Card Shadow**: `0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.3)` (Deep, soft shadows to lift content off the dark background).
-- **Modal Shadow**: `0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 10px 10px -5px rgba(0, 0, 0, 0.5)`.
-- **Glows**: Use subtle colored shadows behind key elements (like the "Insight" cards) to indicate activity/intelligence.
+Shadows are minimal in the monochrome design. The focus is on borders and opacity for depth.
+
+- **Card Shadow**: None or very subtle `0 4px 6px -1px rgba(0, 0, 0, 0.3)`
+- **Modal Shadow**: `0 20px 25px -5px rgba(0, 0, 0, 0.5)`
+- **Depth Indication**: Use border opacity (`border-white/10` to `border-white/30`) rather than shadows
 
 ---
 
@@ -82,7 +155,7 @@ Buttons should feel tactile and precise.
 - **Sidebar (Left)**:
     - Width: ~240px, collapsible.
     - Content:
-        - Top: `logo_text_horizontal.png`.
+        - Top: `logo_text_horizon_dark.png` (or `logo_text_horizon.png` in light mode).
         - Middle: Navigation (Search, Graph View, Data Sources, Settings).
         - Bottom: User Profile & Plan Status.
 - **Main Content Area**:
@@ -121,16 +194,17 @@ Futurnal operates on a Freemium model with a focus on privacy and "Prosumer" fea
 ### 4.2. User Flow: Launch & Onboarding (Phase I)
 
 **Step 1: Landing / Welcome Screen**
-- **Visual**: Full-screen background using `Gemini_Generated_Image_rcdxgarcdxgarcdx.png` with a heavy dark overlay.
-- **Center**: Large `logo.png` + "Futurnal".
-- **Action**: "Enter the Void" (or "Get Started") button.
+- **Visual**: Pure black background (`#000000`), no images.
+- **Header**: Small `logo_dark.png` in top-left.
+- **Center**: Large `logo_big_dark.png` as hero element.
+- **Value Proposition**: Clean typography explaining Futurnal's purpose.
+- **Actions**: "Get Started" (primary) and "Sign In" (secondary) buttons.
 
 **Step 2: Authentication (Sign Up / Login)**
-- **Design**: Centered card on glassmorphism background.
-- **Options**:
-    - "Continue with GitHub" (Target audience is devs).
-    - "Continue with Google".
-    - Email/Password.
+- **Design**: Full-screen black background with centered form (no glassmorphism).
+- **Header**: Small `logo_dark.png` + navigation link to alternate auth page.
+- **Options**: Email/Password only (no OAuth providers).
+- **Form Style**: Monochrome inputs with sharp corners, minimal borders.
 - **Privacy Note**: "Your data remains yours. We only authenticate your identity."
 
 **Step 3: Pricing Selection (The Gate)**
@@ -152,9 +226,32 @@ Futurnal operates on a Freemium model with a focus on privacy and "Prosumer" fea
 
 ---
 
-## 5. Technical Stack Recommendations
-- **Framework**: React (Vite) or Next.js (if server-side rendering is needed for SEO/Marketing pages, but for a local-first app, Vite + SPA is fine).
-- **Styling**: TailwindCSS (for rapid, consistent styling matching the design system).
-- **State Management**: Zustand or TanStack Query.
-- **Graph Visualization**: `react-force-graph` or `cytoscape.js`.
-- **Icons**: Lucide React or Heroicons.
+## 5. Technical Stack
+
+- **Framework**: React + Vite + Tauri (desktop app)
+- **Styling**: TailwindCSS v4 with `@tailwindcss/vite` plugin
+- **State Management**: Zustand + TanStack Query
+- **Graph Visualization**: `react-force-graph-2d`
+- **Icons**: Lucide React
+- **Authentication**: Firebase Authentication (email/password)
+- **Fonts**: Google Fonts (Cinzel) + System fonts (Times New Roman)
+
+### CSS Architecture
+```css
+/* globals.css structure */
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+/* Custom utility classes */
+.font-brand { font-family: 'Cinzel', serif; letter-spacing: 0.05em; }
+.font-tagline { font-family: 'Times New Roman', 'Georgia', serif; font-style: italic; }
+```
+
+### Vite Configuration
+```typescript
+// vite.config.ts - Plugin order is critical!
+export default defineConfig({
+  plugins: [tailwindcss(), react()], // tailwindcss MUST be first
+  // ...
+});
+```
