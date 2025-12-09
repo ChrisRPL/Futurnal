@@ -1,121 +1,16 @@
-/* ===== FONT FACE DECLARATIONS ===== */
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/inter/Inter-Regular.woff2') format('woff2');
-}
+/* ===== GOOGLE FONTS - Cinzel for Brand Headlines ===== */
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&display=swap');
 
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/inter/Inter-Medium.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'Inter';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/inter/Inter-SemiBold.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2') format('woff2');
-}
-
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2') format('woff2');
-}
-
-@import 'tailwindcss';
+/* ===== TAILWIND CSS v4 ===== */
+@import "tailwindcss";
 
 /*
  * Futurnal Design System
- * "Sophisticated, Minimalist, Dark-Mode First"
+ * "Sophisticated, Minimalist, Black & White"
  *
- * Design tokens from FRONTEND_DESIGN.md
+ * Brand: Cinzel (Headlines) + Times New Roman (Taglines)
+ * Colors: Monochromatic black/white with subtle grays
  */
-
-@theme {
-  /* ===== BACKGROUNDS ===== */
-  --color-background-deep: #0A0A0A;
-  --color-background-surface: #161616;
-  --color-background-elevated: #222222;
-  --color-border: #333333;
-  --color-border-hover: #666666;
-
-  /* ===== TYPOGRAPHY ===== */
-  --color-text-primary: #EDEDED;
-  --color-text-secondary: #A0A0A0;
-  --color-text-tertiary: #666666;
-
-  /* ===== BRAND COLORS ===== */
-  /* Primary Brand - Electric Blue - "The Ghost" / Intelligence */
-  --color-primary: #3B82F6;
-  --color-primary-hover: #60A5FA;
-  --color-primary-active: #2563EB;
-
-  /* Secondary Brand - Emerald Green - "Growth" / "Animal" evolution */
-  --color-secondary: #10B981;
-  --color-secondary-hover: #34D399;
-  --color-secondary-active: #059669;
-
-  /* Accent - Violet - "Insights" and special states */
-  --color-accent: #8B5CF6;
-  --color-accent-hover: #A78BFA;
-  --color-accent-active: #7C3AED;
-
-  /* ===== SEMANTIC COLORS ===== */
-  --color-error: #EF4444;
-  --color-error-hover: #F87171;
-  --color-warning: #F59E0B;
-  --color-warning-hover: #FBBF24;
-  --color-success: #10B981;
-  --color-info: #3B82F6;
-
-  /* ===== FONTS ===== */
-  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, monospace;
-
-  /* ===== SPACING ===== */
-  --spacing-xs: 0.25rem;
-  --spacing-sm: 0.5rem;
-  --spacing-md: 1rem;
-  --spacing-lg: 1.5rem;
-  --spacing-xl: 2rem;
-  --spacing-2xl: 3rem;
-
-  /* ===== RADII ===== */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
-  --radius-full: 9999px;
-
-  /* ===== SHADOWS ===== */
-  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
-  --shadow-modal: 0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 10px 10px -5px rgba(0, 0, 0, 0.5);
-  --shadow-glow-primary: 0 0 20px rgba(59, 130, 246, 0.3);
-  --shadow-glow-secondary: 0 0 20px rgba(16, 185, 129, 0.3);
-  --shadow-glow-accent: 0 0 20px rgba(139, 92, 246, 0.3);
-
-  /* ===== TRANSITIONS ===== */
-  --transition-fast: 150ms ease;
-  --transition-normal: 200ms ease;
-  --transition-slow: 300ms ease;
-}
 
 /* ===== BASE STYLES ===== */
 * {
@@ -131,127 +26,83 @@ html {
 body {
   margin: 0;
   padding: 0;
-  background-color: var(--color-background-deep);
-  color: var(--color-text-primary);
-  font-family: var(--font-sans);
+  background-color: #000000;
+  color: #FFFFFF;
+  font-family: 'Cinzel', serif;
   font-weight: 400;
-  line-height: 1.5;
+  line-height: 1.6;
   min-height: 100vh;
 }
 
 /* ===== SCROLLBAR STYLING ===== */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-background-surface);
+  background: #0A0A0A;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: var(--radius-full);
+  background: #262626;
+  border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-border-hover);
+  background: #404040;
 }
 
 /* ===== SELECTION ===== */
 ::selection {
-  background-color: var(--color-primary);
-  color: var(--color-text-primary);
+  background-color: #FFFFFF;
+  color: #000000;
 }
 
 /* ===== FOCUS STYLES ===== */
 :focus-visible {
-  outline: 2px solid var(--color-primary);
+  outline: 1px solid #FFFFFF;
   outline-offset: 2px;
 }
 
-/* ===== CODE BLOCKS ===== */
-code, pre {
-  font-family: var(--font-mono);
+/* ===== BRAND TYPOGRAPHY ===== */
+.font-brand {
+  font-family: 'Cinzel', serif;
+  letter-spacing: 0.05em;
 }
 
-pre {
-  background-color: var(--color-background-surface);
-  border-radius: var(--radius-md);
-  padding: var(--spacing-md);
-  overflow-x: auto;
-}
-
-code {
-  background-color: var(--color-background-elevated);
-  padding: 0.125rem 0.25rem;
-  border-radius: var(--radius-sm);
-  font-size: 0.875em;
-}
-
-pre code {
-  background: transparent;
-  padding: 0;
+.font-tagline {
+  font-family: 'Times New Roman', 'Georgia', serif;
+  font-style: italic;
 }
 
 /* ===== LINKS ===== */
 a {
-  color: var(--color-primary);
-  text-decoration: none;
-  transition: color var(--transition-fast);
+  color: #FFFFFF;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: opacity 150ms ease;
 }
 
 a:hover {
-  color: var(--color-primary-hover);
+  opacity: 0.7;
 }
 
-/* ===== HEADINGS ===== */
-h1, h2, h3, h4, h5, h6 {
-  font-weight: 600;
-  line-height: 1.25;
-  margin: 0;
+/* ===== CUSTOM ANIMATIONS ===== */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-h1 { font-size: 2.25rem; }
-h2 { font-size: 1.875rem; }
-h3 { font-size: 1.5rem; }
-h4 { font-size: 1.25rem; }
-h5 { font-size: 1.125rem; }
-h6 { font-size: 1rem; }
-
-/* ===== UTILITY CLASSES ===== */
-.text-ghost {
-  color: var(--color-primary);
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
-.text-animal {
-  color: var(--color-secondary);
+.animate-fade-in {
+  animation: fade-in 0.6s ease-out;
 }
 
-.text-insight {
-  color: var(--color-accent);
-}
-
-.bg-deep {
-  background-color: var(--color-background-deep);
-}
-
-.bg-surface {
-  background-color: var(--color-background-surface);
-}
-
-.bg-elevated {
-  background-color: var(--color-background-elevated);
-}
-
-.glow-ghost {
-  box-shadow: var(--shadow-glow-primary);
-}
-
-.glow-animal {
-  box-shadow: var(--shadow-glow-secondary);
-}
-
-.glow-insight {
-  box-shadow: var(--shadow-glow-accent);
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s ease-in-out infinite;
 }

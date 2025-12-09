@@ -1,14 +1,14 @@
 /**
  * Futurnal Desktop Shell - Root Application Component
  *
- * This is the main application component that provides the layout structure
- * and routing for the desktop shell. Follows FRONTEND_DESIGN.md brand guidelines.
+ * Clean, sophisticated design following Futurnal brand guidelines.
+ * Cinzel for brand headlines, Times New Roman for taglines, black & white aesthetic.
  */
 
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate, Link } from 'react-router-dom';
 import { useOrchestratorStatus, useConnectors } from '@/hooks/useApi';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/AuthContext';
+import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import {
   Search,
   FolderPlus,
@@ -18,8 +18,14 @@ import {
   HardDrive,
   Database,
   FileText,
-  Sparkles,
+  LogOut,
 } from 'lucide-react';
+
+// Auth Pages
+import Welcome from '@/pages/Welcome';
+import Login from '@/pages/Login';
+import Signup from '@/pages/Signup';
+import ForgotPassword from '@/pages/ForgotPassword';
 
 /**
  * Get time-based greeting
@@ -32,7 +38,7 @@ function getGreeting(): string {
 }
 
 /**
- * Stats card component - Brand-aligned stat display
+ * Stats card component
  */
 interface StatsCardProps {
   label: string;
@@ -42,286 +48,312 @@ interface StatsCardProps {
 
 function StatsCard({ label, value, icon }: StatsCardProps) {
   return (
-    <Card className="p-5">
-      <div className="flex items-center gap-3 mb-2">
-        <div className="text-text-secondary">{icon}</div>
-        <span className="text-sm text-text-secondary">{label}</span>
+    <div className="p-6 bg-white/5 border border-white/10">
+      <div className="flex items-center gap-3 mb-3">
+        <div className="text-white/40">{icon}</div>
+        <span className="text-sm text-white/60">{label}</span>
       </div>
-      <div className="text-2xl font-semibold text-text-primary">{value}</div>
-    </Card>
+      <div className="text-3xl font-light text-white">{value}</div>
+    </div>
   );
 }
 
 /**
- * Quick action card component - Following brand button guidelines
+ * Quick action button
  */
 interface QuickActionProps {
   title: string;
   description: string;
   icon: React.ReactNode;
-  variant?: 'primary' | 'secondary';
+  primary?: boolean;
   onClick?: () => void;
 }
 
-function QuickAction({ title, description, icon, variant = 'secondary', onClick }: QuickActionProps) {
-  const isPrimary = variant === 'primary';
-
+function QuickAction({ title, description, icon, primary = false, onClick }: QuickActionProps) {
   return (
-    <Button
-      variant={isPrimary ? 'default' : 'outline'}
-      className={`h-auto p-5 flex flex-col items-start gap-3 text-left group ${
-        isPrimary ? 'shadow-glow-primary' : 'hover:border-border-hover'
-      }`}
+    <button
       onClick={onClick}
+      className={`p-6 text-left transition-all ${
+        primary
+          ? 'bg-white text-black hover:bg-white/90'
+          : 'bg-transparent border border-white/10 text-white hover:border-white/30'
+      }`}
     >
-      <div className={`w-10 h-10 rounded-md flex items-center justify-center transition-colors ${
-        isPrimary
-          ? 'bg-white/20 text-white'
-          : 'bg-background-elevated text-primary group-hover:bg-primary/10'
+      <div className={`w-10 h-10 mb-4 flex items-center justify-center ${
+        primary ? 'text-black' : 'text-white/60'
       }`}>
         {icon}
       </div>
-      <div>
-        <div className={`font-medium mb-0.5 ${isPrimary ? 'text-white' : 'text-text-primary'}`}>
-          {title}
-        </div>
-        <div className={`text-sm ${isPrimary ? 'text-white/70' : 'text-text-secondary'}`}>
-          {description}
-        </div>
+      <div className={`font-medium mb-1 ${primary ? 'text-black' : 'text-white'}`}>
+        {title}
       </div>
-    </Button>
+      <div className={`text-sm ${primary ? 'text-black/60' : 'text-white/40'}`}>
+        {description}
+      </div>
+    </button>
   );
 }
 
 /**
- * Activity item component
+ * Activity item
  */
 interface ActivityItemProps {
   icon: React.ReactNode;
   message: string;
   time: string;
-  variant?: 'success' | 'info' | 'insight';
 }
 
-function ActivityItem({ icon, message, time, variant = 'info' }: ActivityItemProps) {
-  const variantColors = {
-    success: 'text-secondary',
-    info: 'text-primary',
-    insight: 'text-accent',
-  };
-
+function ActivityItem({ icon, message, time }: ActivityItemProps) {
   return (
-    <div className="flex items-start gap-3 py-3 border-b border-border last:border-0">
-      <div className={`mt-0.5 ${variantColors[variant]}`}>{icon}</div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm text-text-primary">{message}</p>
-        <p className="text-xs text-text-tertiary mt-0.5">{time}</p>
+    <div className="flex items-start gap-4 py-4 border-b border-white/5 last:border-0">
+      <div className="text-white/40 mt-0.5">{icon}</div>
+      <div className="flex-1">
+        <p className="text-sm text-white/80">{message}</p>
+        <p className="text-xs text-white/40 mt-1">{time}</p>
       </div>
     </div>
   );
 }
 
 /**
- * Home page component - The Ghost's Command Center
- * Design follows FRONTEND_DESIGN.md Section 3.2
+ * Dashboard / Home page
  */
 function HomePage() {
   const { data: orchestratorStatus, isLoading: isLoadingStatus } = useOrchestratorStatus();
   const { data: connectors } = useConnectors();
+  const { user, logout } = useAuth();
 
-  const ghostActive = orchestratorStatus?.running ?? false;
-  const totalNodes = 0; // Will be populated from PKG in future modules
+  const isActive = orchestratorStatus?.running ?? false;
+  const totalNodes = 0;
   const sourcesConnected = connectors?.length ?? 0;
-  const memoryUsage = '0 MB'; // Will be calculated from actual usage
+  const memoryUsage = '0 MB';
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch (err) {
+      console.error('Logout failed:', err);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-background-deep">
-      {/* Header / Navigation Bar */}
-      <header className="border-b border-border bg-background-surface">
-        <div className="flex items-center justify-between px-6 py-4 max-w-7xl mx-auto">
-          {/* Logo & Wordmark */}
-          <div className="flex items-center gap-3">
+    <div className="min-h-screen bg-black">
+      {/* Header */}
+      <header className="border-b border-white/10">
+        <div className="flex items-center justify-between px-8 py-5 max-w-7xl mx-auto">
+          {/* Logo */}
+          <Link to="/dashboard" className="no-underline">
             <img
-              src="/logo.png"
+              src="/logo_text_horizon_dark.png"
               alt="Futurnal"
-              className="h-9 w-9"
-              onError={(e) => {
-                // Fallback if logo not found
-                e.currentTarget.style.display = 'none';
-              }}
+              className="h-8 w-auto"
             />
-            <span className="text-xl font-semibold text-text-primary">Futurnal</span>
-          </div>
+          </Link>
 
-          {/* Ghost Status Indicator */}
-          <div className="flex items-center gap-2">
+          {/* Right side */}
+          <div className="flex items-center gap-6">
+            {/* Status */}
             {isLoadingStatus ? (
-              <span className="text-sm text-text-tertiary animate-pulse">Connecting...</span>
-            ) : ghostActive ? (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-secondary/10 border border-secondary/20">
-                <span className="w-2 h-2 rounded-full bg-secondary animate-pulse" />
-                <span className="text-sm font-medium text-secondary">Ghost Active</span>
-              </div>
+              <span className="text-sm text-white/40">Connecting...</span>
             ) : (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-background-elevated border border-border">
-                <span className="w-2 h-2 rounded-full bg-text-tertiary" />
-                <span className="text-sm font-medium text-text-tertiary">Ghost Idle</span>
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-white' : 'bg-white/30'}`} />
+                <span className="text-sm text-white/60">
+                  {isActive ? 'Active' : 'Idle'}
+                </span>
+              </div>
+            )}
+
+            {/* User */}
+            {user && (
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-white/40 hidden md:block">
+                  {user.email}
+                </span>
+                <button
+                  onClick={handleLogout}
+                  className="text-white/40 hover:text-white transition-colors"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
               </div>
             )}
           </div>
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="p-6 lg:p-8">
-        <div className="max-w-7xl mx-auto space-y-8">
-
-          {/* Dashboard Header - Per brand guidelines */}
+      {/* Main */}
+      <main className="px-8 py-12">
+        <div className="max-w-7xl mx-auto space-y-12">
+          {/* Greeting */}
           <div>
-            <h1 className="text-2xl lg:text-3xl font-semibold text-text-primary">
-              {getGreeting()}. {ghostActive ? 'Your Ghost is active.' : 'Your Ghost awaits.'}
+            <h1 className="text-3xl md:text-4xl font-brand tracking-wide text-white mb-2">
+              {getGreeting()}
             </h1>
-            <p className="text-text-secondary mt-1">
-              Your Personal Knowledge Graph command center.
+            <p className="text-white/60 text-lg">
+              Your personal knowledge graph awaits.
             </p>
           </div>
 
-          {/* Stats Row - Per brand guidelines Section 3.2 */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <StatsCard
-              label="Total Nodes"
+              label="Knowledge Nodes"
               value={totalNodes.toLocaleString()}
-              icon={<CircleDot className="w-4 h-4" />}
+              icon={<CircleDot className="w-5 h-5" />}
             />
             <StatsCard
-              label="Sources Connected"
+              label="Connected Sources"
               value={sourcesConnected}
-              icon={<Database className="w-4 h-4" />}
+              icon={<Database className="w-5 h-5" />}
             />
             <StatsCard
-              label="Memory Usage"
+              label="Memory"
               value={memoryUsage}
-              icon={<HardDrive className="w-4 h-4" />}
+              icon={<HardDrive className="w-5 h-5" />}
             />
           </div>
 
-          {/* Central Graph Placeholder - Per brand guidelines */}
-          <Card className="p-6 min-h-[300px] flex flex-col items-center justify-center">
-            <div className="text-center">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-xl bg-primary/10 flex items-center justify-center">
-                <Network className="w-8 h-8 text-primary" />
-              </div>
-              <h3 className="text-lg font-medium text-text-primary mb-2">Knowledge Graph</h3>
-              {sourcesConnected === 0 ? (
-                <p className="text-text-secondary text-sm max-w-md">
-                  Connect your first data source to begin building your Personal Knowledge Graph.
-                  Your Ghost will extract entities and relationships automatically.
-                </p>
-              ) : (
-                <p className="text-text-secondary text-sm max-w-md">
-                  Graph visualization will appear here once entities are extracted.
-                  Processing {sourcesConnected} source{sourcesConnected !== 1 ? 's' : ''}.
-                </p>
-              )}
+          {/* Graph Placeholder */}
+          <div className="p-12 border border-white/10 text-center">
+            <div className="w-16 h-16 mx-auto mb-6 border border-white/20 flex items-center justify-center">
+              <Network className="w-8 h-8 text-white/40" />
             </div>
-          </Card>
+            <h3 className="text-xl font-brand tracking-wide text-white mb-3">
+              Knowledge Graph
+            </h3>
+            {sourcesConnected === 0 ? (
+              <p className="text-white/50 max-w-lg mx-auto">
+                Connect your first data source to begin building your personal knowledge graph.
+                Futurnal will automatically extract entities and relationships from your data.
+              </p>
+            ) : (
+              <p className="text-white/50 max-w-lg mx-auto">
+                Processing {sourcesConnected} source{sourcesConnected !== 1 ? 's' : ''}.
+                Your knowledge graph visualization will appear here.
+              </p>
+            )}
+          </div>
 
-          {/* Quick Actions Grid */}
+          {/* Quick Actions */}
           <div>
-            <h2 className="text-lg font-medium text-text-primary mb-4">Quick Actions</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <h2 className="text-lg font-medium text-white mb-6">Quick Actions</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               <QuickAction
                 title="Search"
                 description="Query your knowledge"
-                icon={<Search className="w-5 h-5" />}
-                variant="primary"
-                onClick={() => console.log('Navigate to Search')}
+                icon={<Search className="w-6 h-6" />}
+                primary
+                onClick={() => console.log('Search')}
               />
               <QuickAction
                 title="Add Source"
                 description="Connect new data"
-                icon={<FolderPlus className="w-5 h-5" />}
-                onClick={() => console.log('Open Add Source dialog')}
+                icon={<FolderPlus className="w-6 h-6" />}
+                onClick={() => console.log('Add Source')}
               />
               <QuickAction
                 title="Graph View"
                 description="Explore connections"
-                icon={<Network className="w-5 h-5" />}
-                onClick={() => console.log('Navigate to Graph View')}
+                icon={<Network className="w-6 h-6" />}
+                onClick={() => console.log('Graph')}
               />
               <QuickAction
                 title="Settings"
-                description="Configure your Ghost"
-                icon={<Settings className="w-5 h-5" />}
-                onClick={() => console.log('Navigate to Settings')}
+                description="Configure preferences"
+                icon={<Settings className="w-6 h-6" />}
+                onClick={() => console.log('Settings')}
               />
             </div>
           </div>
 
-          {/* Recent Activity / Insights - Per brand guidelines */}
+          {/* Recent Activity */}
           <div>
-            <h2 className="text-lg font-medium text-text-primary mb-4">Recent Activity</h2>
-            <Card className="p-0 overflow-hidden">
-              <div className="px-5 py-4">
-                {sourcesConnected === 0 ? (
-                  <div className="text-center py-8">
-                    <Sparkles className="w-8 h-8 text-accent mx-auto mb-3 opacity-50" />
-                    <p className="text-text-secondary">No activity yet</p>
-                    <p className="text-text-tertiary text-sm mt-1">
-                      Add a data source to see ingestion activity and emergent insights here.
-                    </p>
-                  </div>
-                ) : (
-                  <div>
-                    <ActivityItem
-                      icon={<FileText className="w-4 h-4" />}
-                      message="System initialized and ready for ingestion"
-                      time="Just now"
-                      variant="success"
-                    />
-                    <ActivityItem
-                      icon={<Database className="w-4 h-4" />}
-                      message={`${sourcesConnected} data source${sourcesConnected !== 1 ? 's' : ''} connected`}
-                      time="Just now"
-                      variant="info"
-                    />
-                  </div>
-                )}
-              </div>
-            </Card>
+            <h2 className="text-lg font-medium text-white mb-6">Recent Activity</h2>
+            <div className="border border-white/10 p-6">
+              {sourcesConnected === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-white/50">No activity yet</p>
+                  <p className="text-white/30 text-sm mt-2">
+                    Connect a data source to see activity and insights.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <ActivityItem
+                    icon={<FileText className="w-4 h-4" />}
+                    message="System initialized and ready"
+                    time="Just now"
+                  />
+                  <ActivityItem
+                    icon={<Database className="w-4 h-4" />}
+                    message={`${sourcesConnected} data source${sourcesConnected !== 1 ? 's' : ''} connected`}
+                    time="Just now"
+                  />
+                </div>
+              )}
+            </div>
           </div>
-
-          {/* Development Info (Dev Only) */}
-          {import.meta.env.DEV && (
-            <Card className="p-4 border-dashed">
-              <h4 className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2">
-                Development Mode
-              </h4>
-              <div className="font-mono text-xs text-text-tertiary space-y-0.5">
-                <p>Version: {import.meta.env.VITE_APP_VERSION ?? '0.1.0'}</p>
-                <p>Environment: {import.meta.env.MODE}</p>
-              </div>
-            </Card>
-          )}
         </div>
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-white/5 px-8 py-6 mt-12">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-white/30">
+          <p>Futurnal v{import.meta.env.VITE_APP_VERSION ?? '0.1.0'}</p>
+          <p className="font-tagline italic">Know Yourself More</p>
+        </div>
+      </footer>
     </div>
   );
 }
 
 /**
- * Main App component with routing
+ * Root redirect - Welcome for guests, dashboard for authenticated users
+ */
+function RootRedirect() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-black">
+        <div className="animate-pulse-subtle">
+          <img
+            src="/logo_dark.png"
+            alt="Loading"
+            className="w-12 h-12"
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (user) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <Welcome />;
+}
+
+/**
+ * Main App with routing
  */
 function App() {
   return (
     <Routes>
-      <Route path="/" element={<HomePage />} />
-      {/* Additional routes added in future modules:
-          - /search - Search interface (Module 02)
-          - /graph - Knowledge graph visualization (Module 03)
-          - /sources - Data source management (Module 04)
-          - /settings - Settings & preferences (Module 05)
-      */}
+      <Route path="/" element={<RootRedirect />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/signup" element={<Signup />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <HomePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
