@@ -250,15 +250,17 @@ class GitHubAPIClient:
         token_info = self.validate_token()
         token_scopes = set(token_info.scopes)
 
-        # For private repositories, require 'repo' scope
+        # For private repositories, require 'repo' scope (classic PAT)
+        # Fine-grained PATs don't use traditional scopes, so check is only for classic PATs
         if visibility == VisibilityType.PRIVATE:
-            if "repo" not in token_scopes:
+            # If there are scopes and 'repo' isn't one, fail for classic PAT
+            # Fine-grained PATs have empty scopes but may still have access
+            if token_scopes and "repo" not in token_scopes:
                 return False
 
-        # For public repositories, 'public_repo' or 'repo' is sufficient
-        if visibility == VisibilityType.PUBLIC:
-            if "repo" not in token_scopes and "public_repo" not in token_scopes:
-                return False
+        # For public repositories, no special scope is required
+        # Fine-grained PATs can access public repos without traditional OAuth scopes
+        # Classic PATs with no scopes can still read public repos via API
 
         # Check additional required scopes
         for scope in required_scopes:

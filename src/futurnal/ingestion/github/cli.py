@@ -38,6 +38,7 @@ from .oauth_flow import GitHubOAuthDeviceFlow
 
 app = typer.Typer(help="Manage GitHub repository sources")
 console = Console()
+error_console = Console(stderr=True)  # For error messages to be captured by Tauri
 
 
 # ---------------------------------------------------------------------------
@@ -64,17 +65,15 @@ def _get_credential_manager() -> GitHubCredentialManager:
 def _parse_owner_repo(repo_spec: str) -> tuple[str, str]:
     """Parse owner/repo specification."""
     if "/" not in repo_spec:
-        console.print(
-            "[red]Error:[/red] Repository must be in format 'owner/repo'",
-            style="bold",
+        error_console.print(
+            "Error: Repository must be in format 'owner/repo'"
         )
         raise typer.Exit(1)
 
     parts = repo_spec.split("/")
     if len(parts) != 2:
-        console.print(
-            "[red]Error:[/red] Repository must be in format 'owner/repo'",
-            style="bold",
+        error_console.print(
+            "Error: Repository must be in format 'owner/repo'"
         )
         raise typer.Exit(1)
 
@@ -85,20 +84,9 @@ def _get_github_client_id() -> str:
     """Get GitHub OAuth client ID from environment."""
     client_id = os.getenv("FUTURNAL_GITHUB_CLIENT_ID")
     if not client_id:
-        console.print(
-            "[red]Error:[/red] FUTURNAL_GITHUB_CLIENT_ID environment variable not set",
-            style="bold",
-        )
-        console.print(
-            "\nTo use OAuth authentication, you need to create a GitHub OAuth App:",
-            style="dim",
-        )
-        console.print(
-            "1. Go to https://github.com/settings/developers", style="dim"
-        )
-        console.print("2. Create a new OAuth App", style="dim")
-        console.print(
-            "3. Set FUTURNAL_GITHUB_CLIENT_ID environment variable", style="dim"
+        error_console.print(
+            "Error: FUTURNAL_GITHUB_CLIENT_ID environment variable not set. "
+            "To use OAuth, create a GitHub OAuth App at https://github.com/settings/developers"
         )
         raise typer.Exit(1)
     return client_id
@@ -144,10 +132,9 @@ def add_repository(
     try:
         privacy = PrivacyLevel(privacy_level.lower())
     except ValueError:
-        console.print(
-            f"[red]Error:[/red] Invalid privacy level '{privacy_level}'. "
-            "Must be: strict, standard, or permissive",
-            style="bold",
+        error_console.print(
+            f"Error: Invalid privacy level '{privacy_level}'. "
+            "Must be: strict, standard, or permissive"
         )
         raise typer.Exit(1)
 
@@ -193,21 +180,26 @@ def add_repository(
             console.print("\n[green]✓[/green] Authorization successful!")
 
         except RuntimeError as e:
-            console.print(f"\n[red]Error:[/red] OAuth flow failed: {e}", style="bold")
+            error_console.print(f"Error: OAuth flow failed: {e}")
             raise typer.Exit(1)
 
     elif auth.lower() == "token":
         # Personal Access Token
         if not token:
-            token = Prompt.ask(
-                "\nEnter your GitHub Personal Access Token", password=True
-            )
+            # Only prompt interactively if stdin is a TTY
+            if sys.stdin.isatty():
+                token = Prompt.ask(
+                    "\nEnter your GitHub Personal Access Token", password=True
+                )
+            else:
+                # Non-interactive mode - require --token flag
+                error_console.print(
+                    "Error: Token is required. Use --token <your-token> flag."
+                )
+                raise typer.Exit(1)
 
         if not token:
-            console.print(
-                "[red]Error:[/red] Token is required for token authentication",
-                style="bold",
-            )
+            error_console.print("Error: Token is required for token authentication")
             raise typer.Exit(1)
 
         access_token = token.strip()
@@ -215,17 +207,15 @@ def add_repository(
 
         # Validate token format
         if not validate_token_format(access_token, cred_type):
-            console.print(
-                "[red]Error:[/red] Invalid token format. "
-                "Expected classic PAT (ghp_*) or fine-grained PAT (github_pat_*)",
-                style="bold",
+            error_console.print(
+                "Error: Invalid token format. "
+                "Expected classic PAT (ghp_*) or fine-grained PAT (github_pat_*)"
             )
             raise typer.Exit(1)
 
     else:
-        console.print(
-            f"[red]Error:[/red] Invalid auth method '{auth}'. Must be: oauth or token",
-            style="bold",
+        error_console.print(
+            f"Error: Invalid auth method '{auth}'. Must be: oauth or token"
         )
         raise typer.Exit(1)
 
@@ -259,16 +249,18 @@ def add_repository(
 
         # Verify required scopes
         if not api_client.verify_required_scopes([], repo_info.visibility):
-            console.print(
-                "\n[red]Error:[/red] Token does not have required scopes for this repository.",
-                style="bold",
-            )
             if repo_info.visibility == VisibilityType.PRIVATE:
-                console.print("  Private repositories require the 'repo' scope.")
+                error_console.print(
+                    "Error: Token does not have required scopes. Private repositories require the 'repo' scope."
+                )
+            else:
+                error_console.print(
+                    "Error: Token does not have required scopes for this repository."
+                )
             raise typer.Exit(1)
 
     except RuntimeError as e:
-        console.print(f"\n[red]Error:[/red] {e}", style="bold")
+        error_console.print(f"Error: {e}")
         raise typer.Exit(1)
 
     # Parse branches
@@ -304,9 +296,7 @@ def add_repository(
             )
         console.print("  [green]✓[/green] Credentials stored in OS keychain")
     except Exception as e:
-        console.print(
-            f"  [red]Error:[/red] Failed to store credentials: {e}", style="bold"
-        )
+        error_console.print(f"Error: Failed to store credentials: {e}")
         raise typer.Exit(1)
 
     # Register repository
@@ -341,7 +331,7 @@ def add_repository(
         )
 
     except Exception as e:
-        console.print(f"  [red]Error:[/red] Registration failed: {e}", style="bold")
+        error_console.print(f"Error: Registration failed: {e}")
         # Cleanup credentials on failure
         try:
             cred_manager.delete_credentials(credential_id)
@@ -412,7 +402,7 @@ def inspect_repository(
     try:
         descriptor = registry.get(repo_id)
     except FileNotFoundError:
-        console.print(f"\n[red]Error:[/red] Repository '{repo_id}' not found", style="bold")
+        error_console.print(f"Error: Repository '{repo_id}' not found")
         raise typer.Exit(1)
 
     console.print(f"\n[bold]Repository Details:[/bold]")
@@ -457,7 +447,7 @@ def remove_repository(
     try:
         descriptor = registry.get(repo_id)
     except FileNotFoundError:
-        console.print(f"\n[red]Error:[/red] Repository '{repo_id}' not found", style="bold")
+        error_console.print(f"Error: Repository '{repo_id}' not found")
         raise typer.Exit(1)
 
     console.print(f"\n[bold]Repository to remove:[/bold]")
@@ -473,7 +463,7 @@ def remove_repository(
         registry.remove(repo_id)
         console.print(f"[green]✓[/green] Repository removed from registry")
     except Exception as e:
-        console.print(f"[red]Error:[/red] Failed to remove repository: {e}", style="bold")
+        error_console.print(f"Error: Failed to remove repository: {e}")
         raise typer.Exit(1)
 
     # Delete credentials if requested
@@ -502,7 +492,7 @@ def test_connection(
     try:
         descriptor = registry.get(repo_id)
     except FileNotFoundError:
-        console.print(f"\n[red]Error:[/red] Repository '{repo_id}' not found", style="bold")
+        error_console.print(f"Error: Repository '{repo_id}' not found")
         raise typer.Exit(1)
 
     console.print(f"\n[bold]Testing connection to:[/bold] {descriptor.full_name}")
@@ -512,9 +502,7 @@ def test_connection(
         creds = cred_manager.retrieve_credentials(descriptor.credential_id)
         console.print("  [green]✓[/green] Credentials retrieved")
     except Exception as e:
-        console.print(
-            f"  [red]✗[/red] Failed to retrieve credentials: {e}", style="bold"
-        )
+        error_console.print(f"Error: Failed to retrieve credentials: {e}")
         raise typer.Exit(1)
 
     # Test API access
@@ -540,7 +528,7 @@ def test_connection(
         console.print(f"\n[green bold]Connection test successful![/green bold]")
 
     except RuntimeError as e:
-        console.print(f"  [red]✗[/red] Connection failed: {e}", style="bold")
+        error_console.print(f"Error: Connection failed: {e}")
         raise typer.Exit(1)
 
 
