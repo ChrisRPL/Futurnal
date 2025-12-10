@@ -363,7 +363,13 @@ class LocalFilesConnector:
     def _handle_deletions(
         self, source: LocalIngestionSource, current_paths: Iterable[Path], *, job_id: str
     ) -> None:
-        tracked = {record.path.resolve(): record for record in self._state_store.iter_all()}
+        # Only track files under this source's root to avoid cross-source deletion
+        source_root = Path(source.root_path).resolve()
+        tracked = {
+            record.path.resolve(): record
+            for record in self._state_store.iter_all()
+            if record.path.resolve().is_relative_to(source_root)
+        }
         removed = detect_deletions(tracked.keys(), current_paths)
         policy = build_policy(allow_plaintext=source.allow_plaintext_paths)
         for path in removed:

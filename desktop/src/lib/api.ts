@@ -19,7 +19,6 @@ import type {
   OrchestratorStatus,
   GraphData,
 } from '@/types/api';
-import { generateMockGraphData } from '@/lib/graphMockData';
 
 /**
  * API Error class for handling Tauri IPC errors.
@@ -307,10 +306,32 @@ export const privacyApi = {
 
 export const orchestratorApi = {
   /**
-   * Get orchestrator status.
+   * Get orchestrator daemon status.
    */
   async getStatus(): Promise<OrchestratorStatus> {
     return invokeWithTimeout('get_orchestrator_status');
+  },
+
+  /**
+   * Start the orchestrator daemon.
+   */
+  async start(): Promise<void> {
+    return invokeWithTimeout('start_orchestrator');
+  },
+
+  /**
+   * Stop the orchestrator daemon.
+   */
+  async stop(): Promise<void> {
+    return invokeWithTimeout('stop_orchestrator');
+  },
+
+  /**
+   * Ensure orchestrator is running (starts if not).
+   * Returns true if the orchestrator was started, false if already running.
+   */
+  async ensureRunning(): Promise<boolean> {
+    return invokeWithTimeout('ensure_orchestrator_running');
   },
 };
 
@@ -321,21 +342,15 @@ export const orchestratorApi = {
 export const graphApi = {
   /**
    * Get knowledge graph data for visualization.
-   * Falls back to mock data if backend returns empty results or is unavailable.
+   * Returns empty graph data if backend returns empty results or is unavailable.
    */
   async getGraph(limit?: number): Promise<GraphData> {
     try {
       const result = await invokeWithTimeout<GraphData>('get_knowledge_graph', { limit });
-      // If backend returns empty, use mock data for UI testing
-      if (!result.nodes || result.nodes.length === 0) {
-        console.info('[Graph API] Using mock data - no data from backend');
-        return generateMockGraphData(limit ?? 50);
-      }
       return result;
-    } catch {
-      // Return mock data for UI testing when backend is unavailable
-      console.info('[Graph API] Using mock data - backend unavailable');
-      return generateMockGraphData(limit ?? 50);
+    } catch (error) {
+      console.warn('[Graph API] Failed to fetch graph data:', error);
+      return { nodes: [], links: [] };
     }
   },
 };

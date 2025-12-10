@@ -41,6 +41,7 @@ export function formatDateTime(date: string | Date): string {
 
 /**
  * Format relative time (e.g., "2 hours ago").
+ * Also exported as formatDistanceToNow for compatibility.
  */
 export function formatRelativeTime(date: string | Date): string {
   const d = typeof date === 'string' ? new Date(date) : date;
@@ -198,3 +199,6 @@ export function formatTimestampRelative(timestamp: string): string {
 
   return formatDate(date);
 }
+
+/** Alias for formatRelativeTime for compatibility */
+export const formatDistanceToNow = formatRelativeTime;

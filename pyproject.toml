@@ -7,7 +7,7 @@ name = "futurnal"
 version = "0.1.0"
 description = "Futurnal Phase 1 ingestion components"
 requires-python = ">=3.11"
-dependencies = ["typer>=0.12", "imapclient>=3.3", "certifi>=2024.2.2"]
+dependencies = ["typer>=0.12", "imapclient>=3.0", "certifi>=2024.2.2"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

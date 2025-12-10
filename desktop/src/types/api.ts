@@ -156,7 +156,16 @@ export interface AuditLogQuery {
 // Orchestrator Types
 // ============================================================================
 
+/** Daemon status from `orchestrator daemon-status --json` */
 export interface OrchestratorStatus {
+  running: boolean;
+  pid: number | null;
+  workspace: string;
+  stale_pid_file: boolean;
+}
+
+/** Full orchestrator status with job queue metrics (for future use) */
+export interface OrchestratorFullStatus {
   running: boolean;
   active_jobs: number;
   pending_jobs: number;

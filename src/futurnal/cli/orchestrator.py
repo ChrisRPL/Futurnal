@@ -19,8 +19,9 @@ from rich.panel import Panel
 from rich.live import Live
 
 from futurnal.configuration.settings import Settings, load_settings
-from futurnal.orchestrator.scheduler import IngestionOrchestrator
+from futurnal.orchestrator.scheduler import IngestionOrchestrator, SourceRegistration
 from futurnal.orchestrator.queue import JobQueue, JobStatus
+from futurnal.ingestion.local.state import StateStore
 from futurnal.orchestrator.models import IngestionJob, JobPriority, JobType
 from futurnal.orchestrator.quarantine_cli import quarantine_app
 from futurnal.orchestrator.config_cli import orchestrator_config_app
@@ -111,6 +112,20 @@ def _log_cli_action(workspace: Path, action: str, details: dict) -> None:
             metadata=details,
         )
     )
+
+
+def _load_job_queue(workspace: Path) -> JobQueue:
+    """Initialize job queue database."""
+    queue_dir = workspace / "queue"
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    return JobQueue(queue_dir / "jobs.db")
+
+
+def _load_state_store(workspace: Path) -> StateStore:
+    """Initialize state store database."""
+    state_dir = workspace / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    return StateStore(state_dir / "state.db")
 
 
 @orchestrator_app.command("status")
@@ -1286,6 +1301,39 @@ def stop_orchestrator(
         raise typer.Exit(1)
 
 
+@orchestrator_app.command("daemon-status")
+def daemon_status(
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON for IPC"),
+) -> None:
+    """Show orchestrator daemon running status.
+
+    This command checks if the orchestrator daemon process is currently running.
+    Use --json for machine-readable output (used by desktop app IPC).
+    """
+    workspace_path = _get_workspace_path(workspace)
+    daemon = OrchestratorDaemon(workspace_path)
+    status = daemon.status()
+
+    status_data = {
+        "running": status.running,
+        "pid": status.pid,
+        "workspace": str(workspace_path),
+        "stale_pid_file": status.stale_pid_file,
+    }
+
+    if json_output:
+        console.print(json.dumps(status_data))
+    else:
+        if status.running:
+            console.print(f"[green]✓ Orchestrator is running (PID: {status.pid})[/green]")
+        elif status.stale_pid_file:
+            console.print("[yellow]Orchestrator is not running (stale PID file detected)[/yellow]")
+        else:
+            console.print("[yellow]Orchestrator is not running[/yellow]")
+        console.print(f"Workspace: {workspace_path}")
+
+
 # Keep original start command for orchestrator daemon
 @orchestrator_app.command("start")
 def start_orchestrator(
@@ -1345,8 +1393,14 @@ def start_orchestrator(
         from futurnal.ingestion.imap.descriptor import MailboxRegistry
         from futurnal.ingestion.imap.orchestrator_integration import ImapSourceRegistration
 
+        # Initialize job queue and state store
+        job_queue = _load_job_queue(workspace_path)
+        state_store = _load_state_store(workspace_path)
+
         orchestrator = IngestionOrchestrator(
             workspace_dir=str(workspace_path),
+            job_queue=job_queue,
+            state_store=state_store,
         )
 
         # Load and register IMAP mailboxes
@@ -1384,6 +1438,69 @@ def start_orchestrator(
                 console.print("[yellow]No IMAP mailboxes configured[/yellow]")
         else:
             console.print("[yellow]No IMAP mailboxes configured[/yellow]")
+
+        # Load and register local folder sources from sources.json
+        local_sources_config = Path.home() / ".futurnal" / "sources.json"
+        if local_sources_config.exists():
+            try:
+                from futurnal.ingestion.local.config import load_config_from_dict
+
+                config_data = json.loads(local_sources_config.read_text())
+                sources_list = load_config_from_dict(config_data)
+
+                if sources_list.root:
+                    console.print(f"\n[bold yellow]Registering {len(sources_list.root)} local source(s):[/bold yellow]")
+
+                    table = Table()
+                    table.add_column("Name", style="cyan")
+                    table.add_column("Path", style="green")
+                    table.add_column("Schedule", style="blue")
+
+                    priority_map = {
+                        "low": JobPriority.LOW,
+                        "normal": JobPriority.NORMAL,
+                        "high": JobPriority.HIGH,
+                    }
+
+                    for source in sources_list.root:
+                        # Skip paused sources
+                        if source.paused:
+                            continue
+
+                        # Determine schedule and interval (preserve original or default to @interval)
+                        schedule = source.schedule if source.schedule else "@interval"
+                        interval = source.interval_seconds if source.interval_seconds else 300
+
+                        # Create and register the source
+                        registration = SourceRegistration(
+                            source=source,
+                            schedule=schedule,
+                            interval_seconds=int(interval) if schedule == "@interval" else None,
+                            priority=priority_map.get(source.priority, JobPriority.NORMAL),
+                            paused=source.paused,
+                        )
+                        orchestrator.register_source(registration)
+
+                        # Display in table
+                        if schedule == "@manual":
+                            schedule_display = "Manual (file watcher)"
+                        elif schedule == "@interval":
+                            schedule_display = f"Every {interval}s"
+                        else:
+                            schedule_display = schedule
+                        table.add_row(
+                            source.name,
+                            str(source.root_path)[:50] + "..." if len(str(source.root_path)) > 50 else str(source.root_path),
+                            schedule_display,
+                        )
+
+                    console.print(table)
+                else:
+                    console.print("[yellow]No local sources configured[/yellow]")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Failed to load local sources: {e}[/yellow]")
+        else:
+            console.print("[yellow]No local sources configured[/yellow]")
 
         # Start orchestrator
         console.print("\n[bold green]Orchestrator started![/bold green]")

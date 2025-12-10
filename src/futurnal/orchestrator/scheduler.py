@@ -201,6 +201,7 @@ class IngestionOrchestrator:
                 kwargs={"trigger": "interval"},
                 id=f"interval-{registration.source.name}",
                 replace_existing=True,
+                next_run_time=datetime.now(),  # Run immediately on registration
             )
         elif registration.schedule != "@manual":
             trigger = CronTrigger.from_crontab(registration.schedule)

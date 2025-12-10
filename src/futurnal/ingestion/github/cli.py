@@ -351,10 +351,30 @@ def add_repository(
 
 
 @app.command("list")
-def list_repositories() -> None:
+def list_repositories(
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON")
+) -> None:
     """List all registered GitHub repositories."""
+    import json as json_module
+
     registry = _get_registry()
     repos = registry.list()
+
+    if json_output:
+        # Output as JSON for desktop app
+        result = []
+        for repo in repos:
+            result.append({
+                "id": repo.id,
+                "name": repo.name,
+                "full_name": repo.full_name,
+                "github_host": repo.github_host,
+                "visibility": repo.visibility.value,
+                "branches": repo.branches,
+                "updated_at": repo.updated_at.isoformat(),
+            })
+        print(json_module.dumps(result))
+        return
 
     if not repos:
         console.print("\n[yellow]No GitHub repositories registered.[/yellow]")

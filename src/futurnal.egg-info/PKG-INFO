@@ -4,3 +4,5 @@ Version: 0.1.0
 Summary: Futurnal Phase 1 ingestion components
 Requires-Python: >=3.11
 Requires-Dist: typer>=0.12
+Requires-Dist: imapclient>=3.0
+Requires-Dist: certifi>=2024.2.2

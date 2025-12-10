@@ -155,3 +155,47 @@ pub async fn check_python_available() -> Result<bool, PythonError> {
         Err(_) => Ok(false),
     }
 }
+
+/// Spawn a CLI command in the background (daemon mode).
+///
+/// This function spawns the process and returns immediately without waiting.
+/// Used for long-running processes like the orchestrator daemon.
+///
+/// # Arguments
+/// * `args` - Command arguments (e.g., ["orchestrator", "start"])
+///
+/// # Returns
+/// Ok(()) if spawn succeeded, error otherwise
+pub async fn spawn_cli_background(args: &[&str]) -> Result<(), PythonError> {
+    use std::process::Command as StdCommand;
+
+    let mut cmd = StdCommand::new("python3");
+    cmd.arg("-m")
+        .arg("futurnal.cli")
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .stdin(Stdio::null());
+
+    // Set working directory to parent of desktop (where src/futurnal is)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            let futurnal_root = parent.parent().unwrap_or(parent);
+            cmd.current_dir(futurnal_root);
+        }
+    }
+
+    // Spawn detached process
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Create new process group so it survives parent exit
+        cmd.process_group(0);
+    }
+
+    cmd.spawn()?;
+
+    log::info!("Spawned background process: python3 -m futurnal.cli {}", args.join(" "));
+
+    Ok(())
+}

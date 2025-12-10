@@ -131,6 +131,34 @@ export function useRetryConnector() {
   });
 }
 
+/**
+ * Hook to pause all connectors.
+ */
+export function usePauseAllConnectors() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => connectorsApi.pauseAll(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.connectors });
+    },
+  });
+}
+
+/**
+ * Hook to resume all connectors.
+ */
+export function useResumeAllConnectors() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => connectorsApi.resumeAll(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.connectors });
+    },
+  });
+}
+
 // ============================================================================
 // Privacy Hooks
 // ============================================================================

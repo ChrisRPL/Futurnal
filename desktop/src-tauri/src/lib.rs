@@ -43,6 +43,9 @@ pub fn run() {
             commands::privacy::get_audit_logs,
             // Orchestrator commands
             commands::orchestrator::get_orchestrator_status,
+            commands::orchestrator::start_orchestrator,
+            commands::orchestrator::stop_orchestrator,
+            commands::orchestrator::ensure_orchestrator_running,
             // Graph commands
             commands::graph::get_knowledge_graph,
         ])

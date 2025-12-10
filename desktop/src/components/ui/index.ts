@@ -39,3 +39,11 @@ export {
 } from './tooltip';
 
 export { ScrollArea, ScrollBar } from './scroll-area';
+
+export { Switch } from './switch';
+
+export { Progress } from './progress';
+export type { ProgressProps } from './progress';
+
+export { Label } from './label';
+export type { LabelProps } from './label';

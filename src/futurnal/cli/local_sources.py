@@ -326,6 +326,20 @@ def register_local_source(
         max=120.0,
         help="Debounce interval in seconds between watcher-triggered job enqueues",
     ),
+    schedule: str = typer.Option(
+        "@manual",
+        help="Schedule: '@manual', '@interval', or cron expression",
+    ),
+    interval_seconds: Optional[float] = typer.Option(
+        None,
+        min=60.0,
+        max=86400.0,
+        help="Interval in seconds for '@interval' schedule (default: 300)",
+    ),
+    priority: str = typer.Option(
+        "normal",
+        help="Job priority: low, normal, high",
+    ),
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config"),
 ) -> None:
     """Register or update a local directory source."""
@@ -344,6 +358,9 @@ def register_local_source(
         "max_files_per_batch": max_files_per_batch,
         "scan_interval_seconds": scan_interval_seconds,
         "watcher_debounce_seconds": watcher_debounce_seconds,
+        "schedule": schedule,
+        "interval_seconds": interval_seconds,
+        "priority": priority,
     }
 
     new_source = LocalIngestionSource(**source_dict)
@@ -357,8 +374,10 @@ def register_local_source(
 def list_sources(
     config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config"),
     source_type: Optional[str] = typer.Option(None, help="Filter by source type (e.g., 'obsidian')"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """List configured local sources."""
+    import json as json_module
 
     sources = _load_sources(config_path)
 
@@ -424,7 +443,29 @@ def list_sources(
             return
 
     elif not sources:
+        if json_output:
+            print(json_module.dumps([]))
+            return
         typer.echo("No sources configured")
+        return
+
+    # JSON output mode
+    if json_output:
+        result = []
+        for source_name, source in sources.items():
+            if hasattr(source, "root_path"):
+                root_path = str(source.root_path)
+                source_type_val = getattr(source, "source_type", "local_folder")
+            else:
+                root_path = str(source["root_path"])
+                source_type_val = source.get("type", "local_folder")
+            result.append({
+                "id": source_name,
+                "name": source_name,
+                "connector_type": source_type_val,
+                "path": root_path,
+            })
+        print(json_module.dumps(result))
         return
 
     for source_name, source in sources.items():

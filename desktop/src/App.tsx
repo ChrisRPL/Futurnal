@@ -26,12 +26,13 @@ import {
   LogOut,
 } from 'lucide-react';
 
-// Auth Pages
+// Pages
 import Welcome from '@/pages/Welcome';
 import Login from '@/pages/Login';
 import Signup from '@/pages/Signup';
 import ForgotPassword from '@/pages/ForgotPassword';
 import GraphPage from '@/pages/Graph';
+import ConnectorsPage from '@/pages/Connectors';
 
 /**
  * Get time-based greeting
@@ -279,7 +280,7 @@ function HomePage({ onOpenSearch }: HomePageProps) {
                 title="Add Source"
                 description="Connect new data"
                 icon={<FolderPlus className="w-6 h-6" />}
-                onClick={() => console.log('Add Source')}
+                onClick={() => navigate('/connectors')}
               />
               <QuickAction
                 title="Graph View"
@@ -393,6 +394,14 @@ function App() {
           element={
             <ProtectedRoute>
               <GraphPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/connectors"
+          element={
+            <ProtectedRoute>
+              <ConnectorsPage />
             </ProtectedRoute>
           }
         />
