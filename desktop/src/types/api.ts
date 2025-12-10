@@ -185,6 +185,13 @@ export interface GraphNode {
   node_type: EntityType;
   timestamp?: string;
   metadata?: Record<string, unknown>;
+  // Simulation coordinates (added by react-force-graph-2d during rendering)
+  x?: number;
+  y?: number;
+  vx?: number;
+  vy?: number;
+  fx?: number;
+  fy?: number;
 }
 
 export interface GraphLink {

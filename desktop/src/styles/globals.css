@@ -136,3 +136,27 @@ a:hover {
 .animate-slide-in-right {
   animation: slide-in-right 0.2s ease-out;
 }
+
+/* ===== GRAPH BREATHING ANIMATION ===== */
+@keyframes graph-breathe {
+  0%, 100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.03);
+  }
+}
+
+.graph-breathing {
+  animation: graph-breathe 4s ease-in-out infinite;
+}
+
+/* Node pulse for selection highlight */
+@keyframes node-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(255, 255, 255, 0);
+  }
+}

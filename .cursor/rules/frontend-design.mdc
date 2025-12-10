@@ -1,0 +1,137 @@
+---
+globs: desktop/**/*.tsx,desktop/**/*.css,landing/**/*.tsx,landing/**/*.css,**/*.scss
+description: Futurnal frontend design system - monochrome aesthetic, typography, and branding
+---
+# Futurnal Frontend Design System
+
+Reference: [FRONTEND_DESIGN.md](mdc:FRONTEND_DESIGN.md)
+
+## Design Philosophy
+**"Sophisticated, Minimalist, Dark-Mode First"**
+- Dark mode is the default and primary experience
+- Keywords: Precision, Depth, Clarity, Sovereignty
+- No accent colors - pure monochrome aesthetic
+
+## Color Palette
+
+### Dark Mode (Primary)
+| Token | Value | Tailwind |
+|-------|-------|----------|
+| Background | `#000000` | `bg-black` |
+| Text Primary | `#FFFFFF` | `text-white` |
+| Text Secondary | `rgba(255,255,255,0.7)` | `text-white/70` |
+| Text Tertiary | `rgba(255,255,255,0.5)` | `text-white/50` |
+| Text Muted | `rgba(255,255,255,0.3)` | `text-white/30` |
+| Border | `rgba(255,255,255,0.1)` | `border-white/10` |
+| Surface | `rgba(255,255,255,0.05)` | `bg-white/5` |
+
+### Light Mode
+| Token | Value | Tailwind |
+|-------|-------|----------|
+| Background | `#FFFFFF` | `bg-white` |
+| Text Primary | `#000000` | `text-black` |
+| Text Secondary | `rgba(0,0,0,0.7)` | `text-black/70` |
+| Border | `rgba(0,0,0,0.1)` | `border-black/10` |
+
+### Semantic Colors (Sparingly)
+- Error: `#EF4444` (red)
+- Success: `#10B981` (green)
+
+## Typography
+
+### Fonts
+- **Brand Headlines**: `Cinzel` (Google Fonts) - elegant serif
+- **Taglines**: `Times New Roman` / `Georgia` (system serif, italic)
+
+### CSS Classes
+```css
+.font-brand {
+  font-family: 'Cinzel', serif;
+  letter-spacing: 0.05em;
+}
+
+.font-tagline {
+  font-family: 'Times New Roman', 'Georgia', serif;
+  font-style: italic;
+}
+```
+
+### Usage
+| Element | Classes |
+|---------|---------|
+| Page Title | `text-3xl font-brand tracking-wide text-white` |
+| Tagline | `font-tagline italic text-white/40` |
+| Body | `text-white/80` |
+| Labels | `text-sm text-white/60` |
+
+## Logo Assets
+
+### Desktop App (`desktop/public/`)
+| Asset | Theme | Usage |
+|-------|-------|-------|
+| `logo.png` | Light | Header icon |
+| `logo_dark.png` | Dark | Header icon on dark backgrounds |
+| `logo_big.png` | Light | Welcome hero (light theme) |
+| `logo_big_dark.png` | Dark | Welcome hero (dark theme) |
+| `logo_text_horizon.png` | Light | Dashboard header (light) |
+| `logo_text_horizon_dark.png` | Dark | Dashboard header (dark) |
+
+### Usage by Page
+| Page | Header Logo | Hero Logo |
+|------|-------------|-----------|
+| Welcome | `logo_dark.png` | `logo_big_dark.png` |
+| Login | `logo_dark.png` | - |
+| Signup | `logo_dark.png` | - |
+| ForgotPassword | `logo_dark.png` | - |
+| Dashboard | `logo_text_horizon_dark.png` | - |
+
+### Theme-Aware Implementation
+```tsx
+const { resolvedTheme } = useTheme();
+const logoSrc = resolvedTheme === 'dark' ? '/logo_dark.png' : '/logo.png';
+```
+
+## Component Patterns
+
+### Buttons
+- **Primary**: `bg-white text-black hover:bg-white/90` (dark mode)
+- **Secondary**: `bg-transparent border border-white/30 text-white/70 hover:border-white/60`
+- **Ghost**: `bg-transparent text-white/60 hover:text-white`
+- **All buttons**: Sharp corners (no rounded), `transition-all`
+
+### Inputs
+```tsx
+<input className="w-full px-4 py-3 bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-white/30 transition-colors" />
+```
+
+### Cards
+- Background: `bg-white/5`
+- Border: `border border-white/10`
+- No rounded corners
+- Minimal shadows
+
+## UI Copy Guidelines
+
+### Do NOT Use
+- "Ghost" as user-facing terminology
+- "Animal" evolution references
+- Colored accent elements
+
+### Do Use
+- "Personal knowledge graph"
+- "AI evolution platform"
+- "Personalized intelligence"
+- Monochrome visual language
+
+## Technical Stack
+
+- **Framework**: React + Vite + Tauri (desktop), Next.js (landing)
+- **Styling**: TailwindCSS v4 with `@tailwindcss/vite`
+- **Icons**: Lucide React
+- **Fonts**: Google Fonts (Cinzel) + System fonts
+
+### Vite Config (Critical)
+```typescript
+// tailwindcss() MUST be before react()
+plugins: [tailwindcss(), react()]
+```

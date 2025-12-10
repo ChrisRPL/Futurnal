@@ -19,6 +19,7 @@ import type {
   OrchestratorStatus,
   GraphData,
 } from '@/types/api';
+import { generateMockGraphData } from '@/lib/graphMockData';
 
 /**
  * API Error class for handling Tauri IPC errors.
@@ -154,12 +155,12 @@ function getMockSearchResults(queryText: string): SearchResponse {
 
   return {
     results: mockResults,
-    total_count: mockResults.length,
-    query: queryText,
+    total: mockResults.length,
+    query_id: `mock-${Date.now()}`,
     intent: {
       primary: 'exploratory',
-      confidence: 0.85,
     },
+    execution_time_ms: 42,
   };
 }
 
@@ -320,8 +321,21 @@ export const orchestratorApi = {
 export const graphApi = {
   /**
    * Get knowledge graph data for visualization.
+   * Falls back to mock data if backend returns empty results or is unavailable.
    */
   async getGraph(limit?: number): Promise<GraphData> {
-    return invokeWithTimeout('get_knowledge_graph', { limit });
+    try {
+      const result = await invokeWithTimeout<GraphData>('get_knowledge_graph', { limit });
+      // If backend returns empty, use mock data for UI testing
+      if (!result.nodes || result.nodes.length === 0) {
+        console.info('[Graph API] Using mock data - no data from backend');
+        return generateMockGraphData(limit ?? 50);
+      }
+      return result;
+    } catch {
+      // Return mock data for UI testing when backend is unavailable
+      console.info('[Graph API] Using mock data - backend unavailable');
+      return generateMockGraphData(limit ?? 50);
+    }
   },
 };

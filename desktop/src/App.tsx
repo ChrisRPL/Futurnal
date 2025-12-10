@@ -6,13 +6,14 @@
  */
 
 import { useState } from 'react';
-import { Routes, Route, Navigate, Link } from 'react-router-dom';
+import { Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
 import { useOrchestratorStatus, useConnectors } from '@/hooks/useApi';
 import { useSubscription } from '@/hooks/useSubscription';
 import { useAuth } from '@/contexts/AuthContext';
 import { openSubscriptionPortal } from '@/lib/subscription';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { CommandPalette } from '@/components/search';
+import { GraphMiniView } from '@/components/graph';
 import {
   Search,
   FolderPlus,
@@ -30,6 +31,7 @@ import Welcome from '@/pages/Welcome';
 import Login from '@/pages/Login';
 import Signup from '@/pages/Signup';
 import ForgotPassword from '@/pages/ForgotPassword';
+import GraphPage from '@/pages/Graph';
 
 /**
  * Get time-based greeting
@@ -128,6 +130,7 @@ interface HomePageProps {
 }
 
 function HomePage({ onOpenSearch }: HomePageProps) {
+  const navigate = useNavigate();
   const { data: orchestratorStatus, isLoading: isLoadingStatus } = useOrchestratorStatus();
   const { data: connectors } = useConnectors();
   const { user, logout } = useAuth();
@@ -244,25 +247,21 @@ function HomePage({ onOpenSearch }: HomePageProps) {
             />
           </div>
 
-          {/* Graph Placeholder */}
-          <div className="p-12 border border-white/10 text-center">
-            <div className="w-16 h-16 mx-auto mb-6 border border-white/20 flex items-center justify-center">
-              <Network className="w-8 h-8 text-white/40" />
+          {/* Knowledge Graph Mini-View */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-medium text-white flex items-center gap-2">
+                <Network className="w-5 h-5 text-white/60" />
+                Knowledge Graph
+              </h2>
+              <button
+                onClick={() => navigate('/graph')}
+                className="text-xs text-white/50 hover:text-white transition-colors"
+              >
+                Open full view
+              </button>
             </div>
-            <h3 className="text-xl font-brand tracking-wide text-white mb-3">
-              Knowledge Graph
-            </h3>
-            {sourcesConnected === 0 ? (
-              <p className="text-white/50 max-w-lg mx-auto">
-                Connect your first data source to begin building your personal knowledge graph.
-                Futurnal will automatically extract entities and relationships from your data.
-              </p>
-            ) : (
-              <p className="text-white/50 max-w-lg mx-auto">
-                Processing {sourcesConnected} source{sourcesConnected !== 1 ? 's' : ''}.
-                Your knowledge graph visualization will appear here.
-              </p>
-            )}
+            <GraphMiniView className="h-72" />
           </div>
 
           {/* Quick Actions */}
@@ -286,7 +285,7 @@ function HomePage({ onOpenSearch }: HomePageProps) {
                 title="Graph View"
                 description="Explore connections"
                 icon={<Network className="w-6 h-6" />}
-                onClick={() => console.log('Graph')}
+                onClick={() => navigate('/graph')}
               />
               <QuickAction
                 title="Settings"
@@ -386,6 +385,14 @@ function App() {
           element={
             <ProtectedRoute>
               <HomePage onOpenSearch={() => setSearchOpen(true)} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/graph"
+          element={
+            <ProtectedRoute>
+              <GraphPage />
             </ProtectedRoute>
           }
         />

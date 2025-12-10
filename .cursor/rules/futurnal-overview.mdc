@@ -14,9 +14,10 @@ description: High-level guidance for Futurnal project structure, phases, and cor
 - Functional and non-functional requirements are defined in [requirements/system-requirements.md](mdc:requirements/system-requirements.md); roadmap milestones and KPIs are tracked in [requirements/roadmap.md](mdc:requirements/roadmap.md).
 
 ## Option B Implementation (CRITICAL)
-- **Phase 1 Roadmap**: [docs/phase-1/PHASE-1-OPTION-B-ROADMAP.md](mdc:docs/phase-1/PHASE-1-OPTION-B-ROADMAP.md) - 5-month timeline with Ghost→Animal evolution
+- **Phase 1 Roadmap**: [docs/phase-1/PHASE-1-OPTION-B-ROADMAP.md](mdc:docs/phase-1/PHASE-1-OPTION-B-ROADMAP.md) - 5-month timeline for AI evolution platform
 - **Critical Trilogy**: [docs/phase-1/CRITICAL_IMPLEMENTATION_TRILOGY.md](mdc:docs/phase-1/CRITICAL_IMPLEMENTATION_TRILOGY.md) - Training-Free GRPO, TOTAL, AgentFlow
 - **Production Plans**: [docs/phase-1/*-production-plan/](mdc:docs/phase-1/) - Module-by-module implementation guides
+- **Frontend Design**: [FRONTEND_DESIGN.md](mdc:FRONTEND_DESIGN.md) - Visual design system and branding guidelines
 
 ## Development Prompts & Guides
 - Implementation prompts for each development phase are in [prompts/phase-1-archivist.md](mdc:prompts/phase-1-archivist.md), [prompts/phase-2-analyst.md](mdc:prompts/phase-2-analyst.md), and [prompts/phase-3-guide.md](mdc:prompts/phase-3-guide.md); use them when planning or executing sprint tasks.
