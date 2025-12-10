@@ -1,0 +1,292 @@
+/**
+ * ResultCard - Main search result display component
+ *
+ * Displays a search result with:
+ * - Entity type and source type badges with icons
+ * - Timestamp in relative format
+ * - Score and confidence indicators
+ * - Highlighted content snippet with expand/collapse
+ * - Causal chain preview (when present)
+ * - Quick actions (Open, Copy, Save, Share)
+ * - Collapsible provenance panel
+ */
+
+import { useState, useCallback } from 'react';
+import {
+  Calendar,
+  FileText,
+  Code,
+  User,
+  Lightbulb,
+  Image,
+  Mic,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  Copy,
+  Bookmark,
+  Share2,
+  Sparkles,
+} from 'lucide-react';
+import { open } from '@tauri-apps/plugin-shell';
+import { cn, highlightTerms, formatTimestampRelative } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { ScoreIndicator } from './ScoreIndicator';
+import { ConfidenceIndicator } from './ConfidenceIndicator';
+import { CausalChainPreview } from './CausalChainPreview';
+import { ProvenancePanel } from './ProvenancePanel';
+import type { SearchResult, EntityType, SourceType } from '@/types/api';
+
+interface ResultCardProps {
+  /** Search result data */
+  result: SearchResult;
+  /** Search query for term highlighting */
+  query: string;
+  /** Whether this card is selected */
+  isSelected?: boolean;
+  /** Handler for card selection */
+  onSelect?: () => void;
+  /** Additional class names */
+  className?: string;
+}
+
+/** Icon mapping for entity types */
+const ENTITY_ICONS: Record<EntityType, typeof FileText> = {
+  Event: Calendar,
+  Document: FileText,
+  Code: Code,
+  Person: User,
+  Concept: Lightbulb,
+};
+
+/** Icon mapping for source types */
+const SOURCE_ICONS: Record<SourceType, typeof FileText> = {
+  text: FileText,
+  ocr: Image,
+  audio: Mic,
+  code: Code,
+};
+
+/** Maximum content length before showing expand button */
+const MAX_CONTENT_LENGTH = 200;
+
+export function ResultCard({
+  result,
+  query,
+  isSelected = false,
+  onSelect,
+  className,
+}: ResultCardProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [showProvenance, setShowProvenance] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
+
+  const EntityIcon = result.entity_type
+    ? ENTITY_ICONS[result.entity_type]
+    : FileText;
+  const SourceIcon = result.source_type
+    ? SOURCE_ICONS[result.source_type]
+    : FileText;
+
+  // Highlight query terms in content
+  const highlightedContent = highlightTerms(result.content, query);
+
+  // Check if content is long enough to warrant expand/collapse
+  const isLongContent = result.content.length > MAX_CONTENT_LENGTH;
+
+  // Handle copy action
+  const handleCopy = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(result.content);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  }, [result.content]);
+
+  // Handle open source action
+  const handleOpenSource = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const sourcePath = result.metadata.source as string | undefined;
+    if (sourcePath) {
+      try {
+        await open(sourcePath);
+      } catch (err) {
+        console.error('Failed to open source:', err);
+      }
+    }
+  }, [result.metadata.source]);
+
+  // Toggle expand/collapse
+  const handleToggleExpand = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsExpanded((prev) => !prev);
+  }, []);
+
+  // Toggle provenance panel
+  const handleToggleProvenance = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowProvenance((prev) => !prev);
+  }, []);
+
+  return (
+    <div
+      data-slot="result-card"
+      data-testid="result-card"
+      data-selected={isSelected}
+      onClick={onSelect}
+      className={cn(
+        'group p-4 transition-all duration-150 cursor-pointer',
+        'bg-white/5 border border-white/10',
+        'hover:border-white/20 hover:bg-white/[0.07]',
+        isSelected && 'bg-white/10 border-l-2 border-l-white/50',
+        className
+      )}
+    >
+      {/* Header Row */}
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Entity Type Badge */}
+          {result.entity_type && (
+            <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 bg-white/10 text-white/70 rounded">
+              <EntityIcon className="h-3 w-3" />
+              {result.entity_type}
+            </span>
+          )}
+
+          {/* Source Type Badge (only show for non-text sources) */}
+          {result.source_type && result.source_type !== 'text' && (
+            <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 bg-white/5 text-white/50 rounded border border-white/10">
+              <SourceIcon className="h-3 w-3" />
+              {result.source_type.toUpperCase()}
+              {result.source_confidence && (
+                <span className="text-white/40">
+                  {Math.round(result.source_confidence * 100)}%
+                </span>
+              )}
+            </span>
+          )}
+
+          {/* Timestamp */}
+          {result.timestamp && (
+            <span className="inline-flex items-center gap-1 text-xs text-white/40">
+              <Calendar className="h-3 w-3" />
+              {formatTimestampRelative(result.timestamp)}
+            </span>
+          )}
+        </div>
+
+        {/* Score and Confidence Indicators */}
+        <div className="flex items-center gap-2">
+          <ScoreIndicator score={result.score} />
+          <ConfidenceIndicator confidence={result.confidence} />
+        </div>
+      </div>
+
+      {/* Content Snippet */}
+      <div
+        className={cn(
+          'text-sm text-white/80 leading-relaxed',
+          !isExpanded && isLongContent && 'line-clamp-3'
+        )}
+        dangerouslySetInnerHTML={{ __html: highlightedContent }}
+      />
+
+      {/* Expand/Collapse Button */}
+      {isLongContent && (
+        <button
+          onClick={handleToggleExpand}
+          className="mt-2 text-xs text-white/50 hover:text-white/70 flex items-center gap-1 transition-colors"
+        >
+          {isExpanded ? (
+            <>
+              <ChevronUp className="h-3 w-3" />
+              Show less
+            </>
+          ) : (
+            <>
+              <ChevronDown className="h-3 w-3" />
+              Show more
+            </>
+          )}
+        </button>
+      )}
+
+      {/* Causal Chain Preview */}
+      {result.causal_chain && (
+        <CausalChainPreview chain={result.causal_chain} className="mt-3" />
+      )}
+
+      {/* Footer - Provenance Toggle and Quick Actions */}
+      <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/10">
+        {/* Provenance Toggle */}
+        <button
+          onClick={handleToggleProvenance}
+          className="text-xs text-white/40 hover:text-white/60 flex items-center gap-1 transition-colors"
+        >
+          <Sparkles className="h-3 w-3" />
+          {showProvenance ? 'Hide' : 'Show'} provenance
+        </button>
+
+        {/* Quick Actions - visible on hover */}
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {/* Open Source */}
+          {!!result.metadata.source && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-white/40 hover:text-white/70 hover:bg-white/10"
+              onClick={handleOpenSource}
+              title="Open source"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </Button>
+          )}
+
+          {/* Copy */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn(
+              'h-7 w-7 hover:bg-white/10 transition-colors',
+              copySuccess ? 'text-white' : 'text-white/40 hover:text-white/70'
+            )}
+            onClick={handleCopy}
+            title={copySuccess ? 'Copied!' : 'Copy content'}
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </Button>
+
+          {/* Save (placeholder) */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-white/40 hover:text-white/70 hover:bg-white/10"
+            onClick={(e) => e.stopPropagation()}
+            title="Save (coming soon)"
+          >
+            <Bookmark className="h-3.5 w-3.5" />
+          </Button>
+
+          {/* Share (placeholder) */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-white/40 hover:text-white/70 hover:bg-white/10"
+            onClick={(e) => e.stopPropagation()}
+            title="Share (coming soon)"
+          >
+            <Share2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Provenance Panel (collapsible) */}
+      {showProvenance && (
+        <ProvenancePanel metadata={result.metadata} className="mt-3" />
+      )}
+    </div>
+  );
+}

@@ -121,3 +121,18 @@ a:hover {
 .animate-scale-in {
   animation: scale-in 0.15s ease-out;
 }
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.2s ease-out;
+}

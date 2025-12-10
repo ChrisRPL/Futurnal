@@ -119,3 +119,82 @@ export function debounce<T extends (...args: unknown[]) => unknown>(
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+/**
+ * Highlight query terms in content by wrapping them in <mark> tags.
+ * Returns HTML string to be used with dangerouslySetInnerHTML.
+ *
+ * @param content - The text content to highlight
+ * @param query - The search query containing terms to highlight
+ * @returns HTML string with highlighted terms
+ */
+export function highlightTerms(content: string, query: string): string {
+  if (!query || !content) return escapeHtml(content);
+
+  // Split query into individual terms, filter empty strings
+  const terms = query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((term) => term.length > 0);
+
+  if (terms.length === 0) return escapeHtml(content);
+
+  // Escape HTML first to prevent XSS
+  let result = escapeHtml(content);
+
+  // Create a regex that matches any of the terms (case insensitive)
+  // Escape special regex characters in terms
+  const escapedTerms = terms.map((term) =>
+    term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  );
+  const regex = new RegExp(`(${escapedTerms.join('|')})`, 'gi');
+
+  // Replace matches with highlighted version
+  result = result.replace(
+    regex,
+    '<mark class="bg-white/20 rounded px-0.5">$1</mark>'
+  );
+
+  return result;
+}
+
+/**
+ * Escape HTML special characters to prevent XSS.
+ */
+function escapeHtml(text: string): string {
+  const htmlEscapes: Record<string, string> = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  };
+  return text.replace(/[&<>"']/g, (char) => htmlEscapes[char]);
+}
+
+/**
+ * Format timestamp in human-friendly relative format.
+ * Returns "Today", "Yesterday", "X days ago", or full date for older.
+ *
+ * @param timestamp - ISO timestamp string
+ * @returns Human-friendly date string
+ */
+export function formatTimestampRelative(timestamp: string): string {
+  const date = new Date(timestamp);
+  const now = new Date();
+
+  // Reset time to compare just dates
+  const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const todayOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const diffDays = Math.floor(
+    (todayOnly.getTime() - dateOnly.getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays} days ago`;
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
+
+  return formatDate(date);
+}

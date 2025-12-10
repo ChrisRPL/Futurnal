@@ -41,6 +41,8 @@ interface SearchState {
   recentSearches: string[];
   /** Error message if search failed */
   error: string | null;
+  /** Currently selected result ID for detail panel */
+  selectedResultId: string | null;
 
   /** Set the query string */
   setQuery: (query: string) => void;
@@ -58,6 +60,8 @@ interface SearchState {
   executeSearch: () => Promise<void>;
   /** Clear results and reset state */
   clearResults: () => void;
+  /** Set selected result ID */
+  setSelectedResult: (id: string | null) => void;
 }
 
 const MAX_RECENT_SEARCHES = 50;
@@ -71,6 +75,7 @@ const initialState = {
   filters: [] as SearchFilter[],
   recentSearches: [] as string[],
   error: null as string | null,
+  selectedResultId: null as string | null,
 };
 
 /**
@@ -177,7 +182,10 @@ export const useSearchStore = create<SearchState>()(
           intent: null,
           intentConfidence: 0,
           error: null,
+          selectedResultId: null,
         }),
+
+      setSelectedResult: (id) => set({ selectedResultId: id }),
     }),
     {
       name: 'futurnal-search',

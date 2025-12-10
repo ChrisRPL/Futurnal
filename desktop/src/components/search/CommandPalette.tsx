@@ -3,6 +3,7 @@
  *
  * Global search interface triggered by Cmd+K / Ctrl+K.
  * Combines all search components into a unified experience.
+ * Includes slide-in detail panel for result exploration.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -13,9 +14,10 @@ import { cn } from '@/lib/utils';
 import { useSearchStore } from '@/stores/searchStore';
 import { SearchInput } from './SearchInput';
 import { FilterChips } from './FilterChips';
-import { SearchResults } from './SearchResults';
 import { RecentSearches } from './RecentSearches';
 import { IntentBadge } from './IntentBadge';
+import { ResultsList, ResultDetailPanel } from '@/components/results';
+import type { SearchResult } from '@/types/api';
 
 interface CommandPaletteProps {
   /** Controlled open state */
@@ -28,14 +30,6 @@ export function CommandPalette({
   open: controlledOpen,
   onOpenChange,
 }: CommandPaletteProps) {
-  // Internal state for uncontrolled usage
-  const [internalOpen, setInternalOpen] = useState(false);
-  const open = controlledOpen ?? internalOpen;
-  const setOpen = onOpenChange ?? setInternalOpen;
-
-  // Keyboard navigation state
-  const [selectedIndex, setSelectedIndex] = useState(-1);
-
   // Search store
   const {
     query,
@@ -48,7 +42,20 @@ export function CommandPalette({
     setFilters,
     recentSearches,
     executeSearch,
+    selectedResultId,
+    setSelectedResult,
   } = useSearchStore();
+
+  // Get the selected result object
+  const selectedResult = results.find((r) => r.id === selectedResultId) ?? null;
+
+  // Internal state for uncontrolled dialog usage
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
+
+  // Keyboard navigation state
+  const [selectedIndex, setSelectedIndex] = useState(-1);
 
   // Calculate total navigable items
   const hasResults = results.length > 0;
@@ -82,9 +89,10 @@ export function CommandPalette({
   useEffect(() => {
     if (!open) {
       setSelectedIndex(-1);
+      setSelectedResult(null);
       // Don't clear query/results immediately to avoid flicker
     }
-  }, [open]);
+  }, [open, setSelectedResult]);
 
   // Handle search execution
   const handleSearch = useCallback(async () => {
@@ -104,16 +112,18 @@ export function CommandPalette({
     [setQuery]
   );
 
-  // Handle result selection
+  // Handle result selection - opens detail panel
   const handleResultSelect = useCallback(
-    (result: unknown) => {
-      // For now, just close the palette
-      // In the future, this would navigate to the result or show details
-      setOpen(false);
-      console.log('Selected result:', result);
+    (result: SearchResult) => {
+      setSelectedResult(result.id);
     },
-    [setOpen]
+    [setSelectedResult]
   );
+
+  // Handle closing the detail panel
+  const handleCloseDetailPanel = useCallback(() => {
+    setSelectedResult(null);
+  }, [setSelectedResult]);
 
   // Keyboard navigation within palette
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -165,10 +175,14 @@ export function CommandPalette({
           onKeyDown={handleKeyDown}
           className={cn(
             'fixed z-50 left-1/2 top-[15%] -translate-x-1/2',
-            'w-[min(640px,calc(100%-2rem))]',
             'rounded-xl border border-white/10 bg-black shadow-2xl',
             'data-[state=open]:animate-scale-in',
-            'outline-none'
+            'outline-none overflow-hidden',
+            'transition-all duration-200',
+            // Wider when detail panel is open
+            selectedResult
+              ? 'w-[min(960px,calc(100%-2rem))]'
+              : 'w-[min(640px,calc(100%-2rem))]'
           )}
         >
           {/* Header */}
@@ -206,56 +220,77 @@ export function CommandPalette({
             <FilterChips filters={filters} onChange={setFilters} />
           </div>
 
-          {/* Content */}
-          <div className="max-h-[60vh] overflow-y-auto p-2">
-            {/* Recent searches - show when no query */}
-            {!query && recentSearches.length > 0 && (
-              <RecentSearches
-                searches={recentSearches}
-                onSelect={handleRecentSelect}
-                selectedIndex={selectedIndex}
-              />
-            )}
+          {/* Content - flex layout for side panel */}
+          <div className="flex max-h-[60vh]">
+            {/* Results area */}
+            <div
+              className={cn(
+                'flex-1 overflow-y-auto p-2',
+                selectedResult && 'border-r border-white/10'
+              )}
+            >
+              {/* Recent searches - show when no query */}
+              {!query && recentSearches.length > 0 && (
+                <RecentSearches
+                  searches={recentSearches}
+                  onSelect={handleRecentSelect}
+                  selectedIndex={selectedIndex}
+                />
+              )}
 
-            {/* Search results */}
-            {query && results.length > 0 && (
-              <SearchResults
-                results={results}
-                onSelect={handleResultSelect}
-                selectedIndex={selectedIndex}
-              />
-            )}
+              {/* Search results */}
+              {query && results.length > 0 && (
+                <ResultsList
+                  results={results}
+                  query={query}
+                  selectedId={selectedResultId}
+                  onSelect={handleResultSelect}
+                  selectedIndex={selectedIndex}
+                />
+              )}
 
-            {/* Empty state */}
-            {query && !isLoading && results.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-12 text-white/50">
-                <Search className="h-8 w-8 mb-3 opacity-50" />
-                <p className="text-sm">No results found</p>
-                <p className="text-xs mt-1 text-white/30">
-                  Try different keywords, or connect more data sources
-                </p>
-              </div>
-            )}
+              {/* Empty state */}
+              {query && !isLoading && results.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-12 text-white/50">
+                  <Search className="h-8 w-8 mb-3 opacity-50" />
+                  <p className="text-sm">No results found</p>
+                  <p className="text-xs mt-1 text-white/30">
+                    Try different keywords, or connect more data sources
+                  </p>
+                </div>
+              )}
 
-            {/* Loading skeletons */}
-            {isLoading && (
-              <div className="space-y-2 p-2">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="animate-pulse">
-                    <div className="h-16 rounded bg-white/5" />
-                  </div>
-                ))}
-              </div>
-            )}
+              {/* Loading skeletons */}
+              {isLoading && (
+                <div className="space-y-2 p-2">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="animate-pulse">
+                      <div className="h-16 rounded bg-white/5" />
+                    </div>
+                  ))}
+                </div>
+              )}
 
-            {/* Initial state - no query, no recent searches */}
-            {!query && recentSearches.length === 0 && !isLoading && (
-              <div className="flex flex-col items-center justify-center py-12 text-white/50">
-                <Search className="h-8 w-8 mb-3 opacity-50" />
-                <p className="text-sm">Search your personal knowledge</p>
-                <p className="text-xs mt-1 text-white/30">
-                  Type a query to search across all your connected sources
-                </p>
+              {/* Initial state - no query, no recent searches */}
+              {!query && recentSearches.length === 0 && !isLoading && (
+                <div className="flex flex-col items-center justify-center py-12 text-white/50">
+                  <Search className="h-8 w-8 mb-3 opacity-50" />
+                  <p className="text-sm">Search your personal knowledge</p>
+                  <p className="text-xs mt-1 text-white/30">
+                    Type a query to search across all your connected sources
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Detail panel - slide in from right */}
+            {selectedResult && (
+              <div className="w-[320px] flex-shrink-0 animate-slide-in-right">
+                <ResultDetailPanel
+                  result={selectedResult}
+                  query={query}
+                  onClose={handleCloseDetailPanel}
+                />
               </div>
             )}
           </div>
