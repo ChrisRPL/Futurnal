@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -22,6 +23,7 @@ from .sync_state import ImapSyncStateStore
 
 # Rich console for formatted output
 console = Console()
+error_console = Console(stderr=True)  # For error messages to be captured by Tauri
 
 # Create Typer app for IMAP commands
 imap_app = typer.Typer(help="IMAP email connector commands")
@@ -36,6 +38,9 @@ def add_mailbox(
     auth_mode: str = typer.Option("oauth2", "--auth", "-a", help="Auth mode: oauth2 or app-password"),
     provider: Optional[str] = typer.Option(None, "--provider", help="Provider hint: gmail, office365, generic"),
     folders: Optional[str] = typer.Option("INBOX", "--folders", "-f", help="Comma-separated folder list"),
+    client_id: Optional[str] = typer.Option(None, "--client-id", help="OAuth2 client ID (required for oauth2 auth)"),
+    client_secret: Optional[str] = typer.Option(None, "--client-secret", help="OAuth2 client secret"),
+    password: Optional[str] = typer.Option(None, "--password", help="App password (required for app-password auth)"),
     workspace: Path = typer.Option(
         Path.home() / ".futurnal" / "workspace",
         "--workspace", "-w",
@@ -65,14 +70,17 @@ def add_mailbox(
         elif provider == "office365":
             host = "outlook.office365.com"
         else:
-            host = typer.prompt("IMAP hostname")
+            if sys.stdin.isatty():
+                host = typer.prompt("IMAP hostname")
+            else:
+                error_console.print("Error: IMAP hostname is required. Use --host <hostname> flag.")
+                raise typer.Exit(1)
 
     # Parse auth mode
     try:
         auth_mode_enum = AuthMode(auth_mode.lower().replace("-", "_"))
     except ValueError:
-        console.print(f"[bold red]Invalid auth mode: {auth_mode}[/bold red]")
-        console.print("Valid options: oauth2, app-password")
+        error_console.print(f"Error: Invalid auth mode '{auth_mode}'. Valid options: oauth2, app-password")
         raise typer.Exit(1)
 
     # Parse folders
@@ -98,35 +106,49 @@ def add_mailbox(
         console.print("OAuth2 authentication requires interactive browser flow.")
         console.print(f"Provider: {provider}")
 
-        # Guide user through OAuth2 setup
-        console.print("\n[bold yellow]OAuth2 Setup Required[/bold yellow]")
-        console.print("You need to create OAuth2 credentials from your email provider:")
+        # Get OAuth2 credentials from flags or prompt
+        oauth_client_id = client_id
+        oauth_client_secret = client_secret
 
-        if provider == "gmail":
-            console.print("\n1. Go to: https://console.cloud.google.com/apis/credentials")
-            console.print("2. Create OAuth 2.0 Client ID (Desktop application)")
-            console.print("3. Download credentials and copy Client ID and Client Secret")
-        elif provider == "office365":
-            console.print("\n1. Go to: https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade")
-            console.print("2. Register new application")
-            console.print("3. Add redirect URI: http://localhost:8080/oauth2callback")
-            console.print("4. Create client secret and copy Application (client) ID and secret")
-        else:
-            console.print("\nYou need OAuth2 credentials from your email provider.")
+        if not oauth_client_id or not oauth_client_secret:
+            if sys.stdin.isatty():
+                # Interactive mode - guide user and prompt
+                console.print("\n[bold yellow]OAuth2 Setup Required[/bold yellow]")
+                console.print("You need to create OAuth2 credentials from your email provider:")
 
-        console.print()
+                if provider == "gmail":
+                    console.print("\n1. Go to: https://console.cloud.google.com/apis/credentials")
+                    console.print("2. Create OAuth 2.0 Client ID (Desktop application)")
+                    console.print("3. Download credentials and copy Client ID and Client Secret")
+                elif provider == "office365":
+                    console.print("\n1. Go to: https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade")
+                    console.print("2. Register new application")
+                    console.print("3. Add redirect URI: http://localhost:8080/oauth2callback")
+                    console.print("4. Create client secret and copy Application (client) ID and secret")
+                else:
+                    console.print("\nYou need OAuth2 credentials from your email provider.")
 
-        # Prompt for credentials
-        client_id = typer.prompt("OAuth2 Client ID")
-        client_secret = typer.prompt("OAuth2 Client Secret", hide_input=True)
+                console.print()
+
+                if not oauth_client_id:
+                    oauth_client_id = typer.prompt("OAuth2 Client ID")
+                if not oauth_client_secret:
+                    oauth_client_secret = typer.prompt("OAuth2 Client Secret", hide_input=True)
+            else:
+                # Non-interactive mode - require flags
+                error_console.print(
+                    "Error: OAuth2 requires --client-id and --client-secret flags in non-interactive mode."
+                )
+                raise typer.Exit(1)
 
         # Get provider config
         try:
-            config = get_provider_config(provider, client_id, client_secret)
+            config = get_provider_config(provider, oauth_client_id, oauth_client_secret)
         except ValueError as e:
-            console.print(f"[bold red]Error: {e}[/bold red]")
-            console.print("\nSupported providers: gmail, office365, outlook")
-            console.print("For other providers, use --auth app-password")
+            error_console.print(
+                f"Error: {e}. Supported providers: gmail, office365, outlook. "
+                "For other providers, use --auth app-password"
+            )
             raise typer.Exit(1)
 
         # Run OAuth2 flow
@@ -137,7 +159,7 @@ def add_mailbox(
             tokens = oauth_flow.run_local_server_flow()
             console.print("[bold green]✓ OAuth2 authentication successful![/bold green]")
         except Exception as e:
-            console.print(f"\n[bold red]✗ OAuth2 authentication failed: {e}[/bold red]")
+            error_console.print(f"Error: OAuth2 authentication failed: {e}")
             raise typer.Exit(1)
 
         # Store tokens
@@ -151,13 +173,20 @@ def add_mailbox(
         )
 
     elif auth_mode_enum == AuthMode.APP_PASSWORD:
-        password = typer.prompt("App password", hide_input=True)
+        app_password = password
+
+        if not app_password:
+            if sys.stdin.isatty():
+                app_password = typer.prompt("App password", hide_input=True)
+            else:
+                error_console.print("Error: App password required. Use --password <password> flag.")
+                raise typer.Exit(1)
 
         # Store credentials
         credential_id = credential_manager.store_app_password(
             email=email,
             host=host,
-            password=password,
+            password=app_password,
         )
 
     # Register mailbox
@@ -196,7 +225,7 @@ def add_mailbox(
         console.print(f"[bold green]✓ Connection test passed[/bold green]")
 
     except Exception as e:
-        console.print(f"[bold red]✗ Failed to register mailbox: {e}[/bold red]")
+        error_console.print(f"Error: Failed to register mailbox: {e}")
         raise typer.Exit(1)
 
 
@@ -287,14 +316,14 @@ def sync_mailbox(
             # Treat as email address
             mailboxes = [m for m in mailbox_registry.list() if m.email_address == mailbox_id]
             if not mailboxes:
-                console.print(f"[bold red]Mailbox not found: {mailbox_id}[/bold red]")
+                error_console.print(f"Error: Mailbox not found: {mailbox_id}")
                 raise typer.Exit(1)
             mailbox_id = mailboxes[0].id
         else:
             # Validate mailbox exists
             mailbox_registry.get(mailbox_id)
     except FileNotFoundError:
-        console.print(f"[bold red]Mailbox not found: {mailbox_id}[/bold red]")
+        error_console.print(f"Error: Mailbox not found: {mailbox_id}")
         raise typer.Exit(1)
 
     # Run sync
@@ -335,7 +364,7 @@ def sync_mailbox(
             console.print(f"Deleted messages: {total_deleted}")
 
     except Exception as e:
-        console.print(f"\n[bold red]✗ Sync failed: {e}[/bold red]")
+        error_console.print(f"Error: Sync failed: {e}")
         raise typer.Exit(1)
 
 
@@ -360,13 +389,13 @@ def mailbox_status(
         if "@" in mailbox_id:
             mailboxes = [m for m in mailbox_registry.list() if m.email_address == mailbox_id]
             if not mailboxes:
-                console.print(f"[bold red]Mailbox not found: {mailbox_id}[/bold red]")
+                error_console.print(f"Error: Mailbox not found: {mailbox_id}")
                 raise typer.Exit(1)
             descriptor = mailboxes[0]
         else:
             descriptor = mailbox_registry.get(mailbox_id)
     except FileNotFoundError:
-        console.print(f"[bold red]Mailbox not found: {mailbox_id}[/bold red]")
+        error_console.print(f"Error: Mailbox not found: {mailbox_id}")
         raise typer.Exit(1)
 
     # Load sync state
@@ -429,13 +458,13 @@ def remove_mailbox(
         if "@" in mailbox_id:
             mailboxes = [m for m in mailbox_registry.list() if m.email_address == mailbox_id]
             if not mailboxes:
-                console.print(f"[bold red]Mailbox not found: {mailbox_id}[/bold red]")
+                error_console.print(f"Error: Mailbox not found: {mailbox_id}")
                 raise typer.Exit(1)
             descriptor = mailboxes[0]
         else:
             descriptor = mailbox_registry.get(mailbox_id)
     except FileNotFoundError:
-        console.print(f"[bold red]Mailbox not found: {mailbox_id}[/bold red]")
+        error_console.print(f"Error: Mailbox not found: {mailbox_id}")
         raise typer.Exit(1)
 
     # Confirmation
@@ -458,7 +487,7 @@ def remove_mailbox(
             console.print(f"[bold yellow]Data purging not yet implemented[/bold yellow]")
 
     except Exception as e:
-        console.print(f"[bold red]✗ Failed to remove mailbox: {e}[/bold red]")
+        error_console.print(f"Error: Failed to remove mailbox: {e}")
         raise typer.Exit(1)
 
 
@@ -513,13 +542,13 @@ def start_monitor(
         if "@" in mailbox_id:
             mailboxes = [m for m in mailbox_registry.list() if m.email_address == mailbox_id]
             if not mailboxes:
-                console.print(f"[bold red]Mailbox not found: {mailbox_id}[/bold red]")
+                error_console.print(f"Error: Mailbox not found: {mailbox_id}")
                 raise typer.Exit(1)
             mailbox_id = mailboxes[0].id
         else:
             mailbox_registry.get(mailbox_id)
     except FileNotFoundError:
-        console.print(f"[bold red]Mailbox not found: {mailbox_id}[/bold red]")
+        error_console.print(f"Error: Mailbox not found: {mailbox_id}")
         raise typer.Exit(1)
 
     # Start IDLE monitor
@@ -534,15 +563,12 @@ def start_monitor(
             connector.start_idle_monitor(mailbox_id, folder)
         )
     except RuntimeError as e:
-        console.print(f"\n[bold red]IDLE monitoring not supported: {e}[/bold red]")
-        console.print("\nYour IMAP server does not support IDLE (push notifications).")
-        console.print("Use scheduled sync instead:")
-        console.print(f"  futurnal imap sync {mailbox_id}")
+        error_console.print(f"Error: IDLE monitoring not supported: {e}")
         raise typer.Exit(1)
     except KeyboardInterrupt:
         console.print(f"\n\n[bold yellow]IDLE monitor stopped[/bold yellow]")
     except Exception as e:
-        console.print(f"\n[bold red]IDLE monitor failed: {e}[/bold red]")
+        error_console.print(f"Error: IDLE monitor failed: {e}")
         raise typer.Exit(1)
 
 
