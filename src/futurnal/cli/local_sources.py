@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
+import time
 import uuid
 from collections import Counter
 from datetime import datetime, timedelta
@@ -634,6 +637,7 @@ def imap_add(
     name: Optional[str] = typer.Option(None, help="Human-readable mailbox name"),
     icon: Optional[str] = typer.Option(None, help="Emoji or icon"),
     auth: str = typer.Option("oauth2", help="Authentication mode: oauth2|app_password"),
+    password: Optional[str] = typer.Option(None, help="App password for app_password auth mode"),
     credential_id: Optional[str] = typer.Option(None, help="Credential identifier in keychain"),
     folders: Optional[str] = typer.Option(None, help="Comma-separated folder whitelist"),
     folder_patterns: Optional[str] = typer.Option(None, help="Comma-separated folder glob patterns"),
@@ -668,6 +672,25 @@ def imap_add(
     parsed_consent_scopes = _resolve_consent_scopes(_parse_csv(consent))
     sync_from_date = _parse_datetime_option("sync-from", sync_from)
 
+    # Handle credential storage for app_password auth mode
+    actual_credential_id = credential_id
+    if auth_mode == AuthMode.APP_PASSWORD and password:
+        from ..ingestion.imap.credential_manager import CredentialManager
+        from ..privacy.audit import AuditLogger
+
+        workspace_path = workspace_root or DEFAULT_WORKSPACE_PATH
+        audit_logger = AuditLogger(workspace_path / "audit")
+        cred_manager = CredentialManager(audit_logger=audit_logger)
+
+        # Generate credential ID and store credentials in keychain
+        mailbox_id = generate_mailbox_id(email, host)
+        actual_credential_id = create_credential_id(mailbox_id)
+        cred_manager.store_app_password(
+            credential_id=actual_credential_id,
+            email_address=email,
+            password=password,
+        )
+
     descriptor = _construct_mailbox_descriptor(
         email_address=email,
         imap_host=host,
@@ -675,7 +698,7 @@ def imap_add(
         name=name,
         icon=icon,
         auth_mode=auth_mode,
-        credential_id=credential_id,
+        credential_id=actual_credential_id,
         folders=parsed_folders,
         folder_patterns=parsed_folder_patterns,
         exclude_folders=parsed_exclude_folders,
@@ -699,7 +722,14 @@ def imap_add(
     saved = registry.add_or_update(descriptor)
 
     if json_out:
-        typer.echo(json.dumps(saved.model_dump(mode="json"), indent=2))
+        # Output compact JSON format for Tauri IPC
+        typer.echo(json.dumps({
+            "id": saved.id,
+            "name": saved.name or saved.email_address,
+            "email_address": saved.email_address,
+            "imap_host": saved.imap_host,
+            "paused": False,
+        }))
     else:
         typer.echo(f"✅ Registered IMAP mailbox '{saved.name or saved.id[:8]}'")
         _display_mailbox_descriptor(saved)
@@ -718,7 +748,17 @@ def imap_list(
     registry = _load_imap_registry(registry_path)
     items = registry.list()
     if json_out:
-        typer.echo(json.dumps([i.model_dump(mode="json") for i in items], indent=2))
+        # Output compact JSON format for Tauri IPC
+        result = []
+        for i in items:
+            result.append({
+                "id": i.id,
+                "name": i.name or i.email_address,
+                "email_address": i.email_address,
+                "imap_host": i.imap_host,
+                "paused": False,
+            })
+        typer.echo(json.dumps(result))
         return
     if not items:
         typer.echo("No IMAP mailboxes registered")
@@ -735,6 +775,100 @@ def imap_show(
     registry = _load_imap_registry(registry_path)
     descriptor = registry.get(mailbox_id)
     typer.echo(json.dumps(descriptor.model_dump(mode="json"), indent=2))
+
+
+@imap_app.command("test-connection")
+def imap_test_connection(
+    email: str = typer.Option(..., "--email", "-e", help="Email address"),
+    host: str = typer.Option(..., "--host", "-h", help="IMAP hostname"),
+    password: str = typer.Option(..., "--password", "-p", help="Password/App Password"),
+    port: int = typer.Option(993, "--port", help="IMAP port (default: 993 for TLS)"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON for Tauri IPC"),
+) -> None:
+    """Test IMAP connection without registering mailbox.
+
+    This command tests credentials before saving to provide immediate feedback.
+
+    Examples:
+        futurnal sources imap test-connection --email user@gmail.com --host imap.gmail.com --password xxxx
+        futurnal sources imap test-connection --email user@gmail.com --host imap.gmail.com --password xxxx --json
+    """
+    import imaplib
+    import ssl
+
+    if not json_output:
+        typer.echo(f"Testing IMAP connection to {host}...")
+
+    try:
+        # Create SSL context for secure connection
+        context = ssl.create_default_context()
+
+        # Connect to IMAP server
+        imap = imaplib.IMAP4_SSL(host, port, ssl_context=context)
+
+        # Authenticate
+        imap.login(email, password)
+
+        # Get server capabilities and folder list
+        capabilities = imap.capabilities
+        _, folders_data = imap.list()
+        folder_count = len(folders_data) if folders_data else 0
+
+        # Clean up
+        imap.logout()
+
+        if json_output:
+            typer.echo(json.dumps({
+                "success": True,
+                "message": "Connection successful",
+                "folders": folder_count,
+                "capabilities": [str(c) for c in capabilities] if capabilities else []
+            }))
+        else:
+            typer.echo(f"✅ Connection successful!")
+            typer.echo(f"   Folders found: {folder_count}")
+            if capabilities:
+                typer.echo(f"   Server capabilities: {', '.join(str(c) for c in list(capabilities)[:5])}...")
+
+    except imaplib.IMAP4.error as e:
+        error_msg = str(e)
+        # Provide user-friendly error messages
+        if "AUTHENTICATIONFAILED" in error_msg.upper():
+            error_msg = "Authentication failed. Check your password/App Password."
+        elif "Invalid credentials" in error_msg.lower():
+            error_msg = "Invalid credentials. For Gmail, use an App Password instead of your account password."
+        elif "Application-specific password required" in error_msg:
+            error_msg = "App Password required. Go to your Google Account settings to create one."
+
+        if json_output:
+            typer.echo(json.dumps({"success": False, "error": error_msg}))
+        else:
+            typer.echo(f"❌ Connection failed: {error_msg}")
+        raise typer.Exit(1)
+
+    except ssl.SSLError as e:
+        error_msg = f"SSL/TLS error: {e}"
+        if json_output:
+            typer.echo(json.dumps({"success": False, "error": error_msg}))
+        else:
+            typer.echo(f"❌ Connection failed: {error_msg}")
+        raise typer.Exit(1)
+
+    except ConnectionRefusedError:
+        error_msg = f"Connection refused. Check that {host}:{port} is correct."
+        if json_output:
+            typer.echo(json.dumps({"success": False, "error": error_msg}))
+        else:
+            typer.echo(f"❌ Connection failed: {error_msg}")
+        raise typer.Exit(1)
+
+    except Exception as e:
+        error_msg = str(e)
+        if json_output:
+            typer.echo(json.dumps({"success": False, "error": error_msg}))
+        else:
+            typer.echo(f"❌ Connection failed: {error_msg}")
+        raise typer.Exit(1)
 
 
 @imap_app.command("remove")
@@ -784,6 +918,682 @@ def imap_to_local_source(
         priority=priority,
     )
     typer.echo(json.dumps(local_source.model_dump(mode="json"), indent=2))
+
+
+@imap_app.command("sync")
+def imap_sync(
+    mailbox_id: str = typer.Argument(..., help="Mailbox ID or email address"),
+    folder: Optional[str] = typer.Option(None, "--folder", "-f", help="Specific folder to sync"),
+    process: bool = typer.Option(False, "--process", "-p", help="Process synced emails into knowledge graph"),
+    limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Limit number of emails to process (useful for initial sync)"),
+    fast: bool = typer.Option(True, "--fast/--no-fast", help="Use fast sync mode (batch fetch, skip heavy processing)"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON for Tauri IPC"),
+    workspace: Path = typer.Option(
+        Path.home() / ".futurnal" / "workspace",
+        "--workspace", "-w",
+        help="Workspace directory"
+    ),
+    registry_path: Optional[Path] = typer.Option(None, help="Override registry directory"),
+) -> None:
+    """Manually trigger mailbox sync.
+
+    Fast mode (default) uses batch IMAP fetch and simple text extraction for speed.
+    Use --no-fast for full Unstructured.io processing (slower but more thorough).
+
+    Examples:
+        futurnal sources imap sync abc123def                        # Fast sync (default)
+        futurnal sources imap sync abc123def --folder INBOX
+        futurnal sources imap sync abc123def --process --json
+        futurnal sources imap sync abc123def --process --limit 50   # Limit initial sync
+        futurnal sources imap sync abc123def --no-fast              # Full processing
+    """
+    from ..ingestion.imap.connector import ImapEmailConnector
+    from ..ingestion.imap.sync_state import ImapSyncStateStore
+
+    start_time = time.time()
+
+    if not json_output:
+        typer.echo(f"[bold blue]Syncing mailbox {mailbox_id}[/bold blue]")
+
+    workspace_path = Path(workspace).expanduser()
+
+    # Initialize components
+    audit_logger = AuditLogger(workspace_path / "audit")
+    consent_registry = ConsentRegistry(workspace_path / "privacy")
+    mailbox_registry = _load_imap_registry(registry_path)
+
+    # Use IMAP-specific state store (expects a file path, not directory)
+    imap_state_file = workspace_path / "imap" / "state" / "sync_state.db"
+    state_store = ImapSyncStateStore(imap_state_file)
+
+    # Initialize connector
+    connector = ImapEmailConnector(
+        workspace_dir=workspace_path,
+        state_store=state_store,
+        mailbox_registry=mailbox_registry,
+        element_sink=None,  # No sink for manual sync
+        audit_logger=audit_logger,
+        consent_registry=consent_registry,
+    )
+
+    # Resolve mailbox ID and get email address
+    email_address = mailbox_id
+    try:
+        if "@" in mailbox_id:
+            # Treat as email address
+            mailboxes = [m for m in mailbox_registry.list() if m.email_address == mailbox_id]
+            if not mailboxes:
+                if json_output:
+                    print(json.dumps({"status": "failed", "error": f"Mailbox not found: {mailbox_id}"}))
+                else:
+                    typer.echo(f"Error: Mailbox not found: {mailbox_id}")
+                raise typer.Exit(1)
+            email_address = mailbox_id
+            mailbox_id = mailboxes[0].id
+        else:
+            # Validate mailbox exists
+            descriptor = mailbox_registry.get(mailbox_id)
+            email_address = descriptor.email_address
+    except FileNotFoundError:
+        if json_output:
+            print(json.dumps({"status": "failed", "error": f"Mailbox not found: {mailbox_id}"}))
+        else:
+            typer.echo(f"Error: Mailbox not found: {mailbox_id}")
+        raise typer.Exit(1)
+
+    # Run sync
+    try:
+        # Get descriptor for fast mode
+        descriptor = mailbox_registry.get(mailbox_id)
+
+        if fast:
+            # Fast sync mode - batch fetch with simple text extraction
+            if not json_output:
+                typer.echo(f"[bold green]Using fast sync mode...[/bold green]")
+
+            fast_result = _fast_sync_imap(
+                mailbox_id=mailbox_id,
+                email_address=email_address,
+                descriptor=descriptor,
+                folder=folder,
+                limit=limit,
+                workspace_path=workspace_path,
+                json_output=json_output,
+            )
+
+            duration = time.time() - start_time
+            files_processed = fast_result.get("files_processed", 0)
+            files_failed = fast_result.get("files_failed", 0)
+            total_new = fast_result.get("total_new", 0)
+            total_bytes = fast_result.get("total_bytes", 0)
+            folders_synced = fast_result.get("folders_synced", [])
+            errors = fast_result.get("errors", [])
+            status = fast_result.get("status", "completed")
+
+            if json_output:
+                output = {
+                    "repo_id": mailbox_id,
+                    "full_name": email_address,
+                    "status": status,
+                    "files_synced": files_processed,
+                    "bytes_synced": total_bytes,
+                    "bytes_synced_mb": round(total_bytes / (1024 * 1024), 2) if total_bytes else 0.0,
+                    "duration_seconds": round(duration, 2),
+                    "branches_synced": folders_synced,
+                    "error_message": "; ".join(errors) if errors else None,
+                    "files_processed": files_processed,
+                    "files_failed": files_failed,
+                    "new_messages": total_new,
+                    "updated_messages": 0,
+                    "deleted_messages": 0,
+                    "limit_applied": limit,
+                    "limited": limit is not None and total_new > limit if total_new else False,
+                    "fast_mode": True,
+                }
+                print(json.dumps(output))
+            else:
+                typer.echo(f"\n✓ Fast sync completed")
+                typer.echo(f"Folders synced: {len(folders_synced)}")
+                typer.echo(f"Messages processed: {files_processed}")
+                typer.echo(f"Data synced: {total_bytes / 1024:.1f} KB")
+                typer.echo(f"Duration: {duration:.2f}s")
+                if files_failed > 0:
+                    typer.echo(f"Failed: {files_failed} emails")
+                if errors:
+                    typer.echo(f"\nErrors: {len(errors)}")
+
+        else:
+            # Slow sync mode - full Unstructured.io processing
+            if not json_output:
+                typer.echo(f"[bold yellow]Using full processing mode (slower)...[/bold yellow]")
+
+            loop = asyncio.get_event_loop()
+
+            if folder:
+                # Sync specific folder
+                result = loop.run_until_complete(
+                    connector.sync_folder(mailbox_id, folder)
+                )
+                # Convert to dict format for processing
+                results = {folder: result}
+            else:
+                # Sync all folders
+                results = loop.run_until_complete(
+                    connector.sync_mailbox(mailbox_id)
+                )
+
+            # Calculate totals
+            total_new = sum(len(getattr(r, 'new_messages', [])) for r in results.values())
+            total_updated = sum(len(getattr(r, 'updated_messages', [])) for r in results.values())
+            total_deleted = sum(len(getattr(r, 'deleted_messages', [])) for r in results.values())
+            total_errors = sum(len(getattr(r, 'errors', [])) for r in results.values())
+            total_synced = total_new + total_updated
+
+            # Process emails into knowledge graph if requested
+            files_processed = 0
+            files_failed = 0
+            if process and total_new > 0:
+                process_count = min(total_new, limit) if limit else total_new
+                if not json_output:
+                    if limit and total_new > limit:
+                        typer.echo(f"\n[bold blue]Processing {limit} of {total_new} new emails into knowledge graph (limited)...[/bold blue]")
+                    else:
+                        typer.echo(f"\n[bold blue]Processing {total_new} new emails into knowledge graph...[/bold blue]")
+                files_processed, files_failed = _process_synced_emails(
+                    mailbox_id, email_address, results, workspace_path, limit=limit
+                )
+
+            duration = time.time() - start_time
+
+            if json_output:
+                # Output JSON for Tauri IPC
+                output = {
+                    "repo_id": mailbox_id,
+                    "full_name": email_address,
+                    "status": "completed" if total_errors == 0 else "completed_with_errors",
+                    "files_synced": total_synced,
+                    "bytes_synced": 0,
+                    "bytes_synced_mb": 0.0,
+                    "duration_seconds": round(duration, 2),
+                    "branches_synced": list(results.keys()),  # Folders as "branches"
+                    "error_message": None if total_errors == 0 else f"{total_errors} errors during sync",
+                    "files_processed": files_processed if process else None,
+                    "files_failed": files_failed if process else None,
+                    "new_messages": total_new,
+                    "updated_messages": total_updated,
+                    "deleted_messages": total_deleted,
+                    "limit_applied": limit,
+                    "limited": limit is not None and total_new > limit,
+                    "fast_mode": False,
+                }
+                print(json.dumps(output))
+            else:
+                typer.echo(f"\n✓ Sync completed")
+                typer.echo(f"Folders synced: {len(results)}")
+                typer.echo(f"New messages: {total_new}")
+                typer.echo(f"Updated messages: {total_updated}")
+                typer.echo(f"Deleted messages: {total_deleted}")
+                typer.echo(f"Duration: {duration:.2f}s")
+
+                if process:
+                    typer.echo(f"\nProcessed: {files_processed} emails")
+                    if files_failed > 0:
+                        typer.echo(f"Failed: {files_failed} emails")
+
+                if total_errors > 0:
+                    typer.echo(f"\nErrors: {total_errors}")
+
+    except Exception as e:
+        duration = time.time() - start_time
+        if json_output:
+            print(json.dumps({
+                "repo_id": mailbox_id,
+                "full_name": email_address,
+                "status": "failed",
+                "files_synced": 0,
+                "bytes_synced": 0,
+                "bytes_synced_mb": 0.0,
+                "duration_seconds": round(duration, 2),
+                "branches_synced": [],
+                "error_message": str(e),
+                "files_processed": None,
+                "files_failed": None,
+            }))
+        else:
+            typer.echo(f"Error: Sync failed: {e}")
+        raise typer.Exit(1)
+
+
+def _fast_sync_imap(
+    mailbox_id: str,
+    email_address: str,
+    descriptor: ImapMailboxDescriptor,
+    folder: Optional[str],
+    limit: Optional[int],
+    workspace_path: Path,
+    json_output: bool,
+) -> dict:
+    """Fast IMAP sync using batch fetch and simple text extraction.
+
+    This bypasses the heavy Unstructured.io processing and instead:
+    1. Connects directly to IMAP
+    2. Batch-fetches messages in a single command
+    3. Parses with Python's email module (fast)
+    4. Stores as JSON directly
+
+    Returns:
+        Dict with sync results including files_processed, total_new, etc.
+    """
+    import email
+    from email.header import decode_header
+    from email.utils import parsedate_to_datetime
+    import ssl
+
+    from imapclient import IMAPClient
+    from ..ingestion.imap.credential_manager import CredentialManager
+
+    # Write to the main parsed directory so the knowledge graph can find the files
+    parsed_dir = workspace_path / "parsed"
+    parsed_dir.mkdir(parents=True, exist_ok=True)
+
+    source_id = f"imap-{mailbox_id}"
+    files_processed = 0
+    files_failed = 0
+    total_new = 0
+    total_bytes = 0
+    folders_synced = []
+    errors = []
+
+    # Get credentials
+    from ..ingestion.imap.credential_manager import AppPassword, OAuth2Tokens
+
+    credential_manager = CredentialManager()
+    try:
+        credentials = credential_manager.retrieve_credentials(descriptor.credential_id)
+        if not credentials:
+            raise ValueError(f"No credentials found for mailbox {mailbox_id}")
+    except Exception as e:
+        return {
+            "status": "failed",
+            "error": f"Credential error: {e}",
+            "files_processed": 0,
+            "total_new": 0,
+        }
+
+    # Determine folders to sync
+    folders_to_sync = [folder] if folder else descriptor.folders
+
+    try:
+        # Connect to IMAP server
+        ssl_context = ssl.create_default_context()
+        client = IMAPClient(
+            host=descriptor.imap_host,
+            port=descriptor.imap_port,
+            ssl=True,
+            ssl_context=ssl_context,
+        )
+
+        # Login based on credential type
+        if isinstance(credentials, OAuth2Tokens):
+            # OAuth2 authentication
+            client.oauth2_login(email_address, credentials.access_token)
+        elif isinstance(credentials, AppPassword):
+            # App password authentication
+            client.login(email_address, credentials.password)
+        else:
+            raise ValueError(f"Unknown credential type: {type(credentials)}")
+
+        # Process each folder
+        for folder_name in folders_to_sync:
+            if not json_output:
+                typer.echo(f"  Syncing folder: {folder_name}")
+
+            try:
+                select_info = client.select_folder(folder_name)
+
+                # Search for messages
+                # For simplicity, get recent messages (or all if first sync)
+                search_criteria = ["ALL"]
+                uids = client.search(search_criteria)
+
+                if not uids:
+                    folders_synced.append(folder_name)
+                    continue
+
+                # Apply limit to UIDs
+                uids_to_fetch = list(uids)
+                if limit and len(uids_to_fetch) > limit:
+                    uids_to_fetch = uids_to_fetch[-limit:]  # Get most recent
+
+                total_new += len(uids_to_fetch)
+
+                # Batch fetch - get all messages in ONE command (fast!)
+                # Fetch ENVELOPE for headers and BODY[TEXT] for body
+                # Using RFC822 gets the full message which we can parse
+                if not json_output:
+                    typer.echo(f"    Fetching {len(uids_to_fetch)} messages...")
+
+                fetch_data = client.fetch(uids_to_fetch, ['RFC822', 'FLAGS', 'INTERNALDATE'])
+
+                # Process each fetched message
+                for uid, data in fetch_data.items():
+                    try:
+                        raw_message = data.get(b'RFC822', b'')
+                        internal_date = data.get(b'INTERNALDATE')
+                        flags = data.get(b'FLAGS', [])
+
+                        if not raw_message:
+                            continue
+
+                        total_bytes += len(raw_message)
+
+                        # Parse with Python's email module (fast!)
+                        msg = email.message_from_bytes(raw_message)
+
+                        # Extract headers
+                        def decode_header_value(value):
+                            if not value:
+                                return ""
+                            decoded_parts = decode_header(value)
+                            result = []
+                            for part, charset in decoded_parts:
+                                if isinstance(part, bytes):
+                                    try:
+                                        result.append(part.decode(charset or 'utf-8', errors='replace'))
+                                    except:
+                                        result.append(part.decode('utf-8', errors='replace'))
+                                else:
+                                    result.append(str(part))
+                            return ' '.join(result)
+
+                        subject = decode_header_value(msg.get('Subject', ''))
+                        from_addr = decode_header_value(msg.get('From', ''))
+                        to_addr = decode_header_value(msg.get('To', ''))
+                        message_id = msg.get('Message-ID', f'<uid-{uid}@{descriptor.imap_host}>')
+                        date_str = msg.get('Date')
+
+                        # Parse date
+                        date_parsed = None
+                        if internal_date:
+                            date_parsed = internal_date.isoformat()
+                        elif date_str:
+                            try:
+                                date_parsed = parsedate_to_datetime(date_str).isoformat()
+                            except:
+                                pass
+
+                        # Extract body text (fast, simple extraction)
+                        body_text = ""
+                        if msg.is_multipart():
+                            for part in msg.walk():
+                                content_type = part.get_content_type()
+                                if content_type == 'text/plain':
+                                    try:
+                                        payload = part.get_payload(decode=True)
+                                        charset = part.get_content_charset() or 'utf-8'
+                                        body_text = payload.decode(charset, errors='replace')
+                                        break
+                                    except:
+                                        pass
+                                elif content_type == 'text/html' and not body_text:
+                                    try:
+                                        payload = part.get_payload(decode=True)
+                                        charset = part.get_content_charset() or 'utf-8'
+                                        # Simple HTML to text - strip tags
+                                        import re
+                                        html_text = payload.decode(charset, errors='replace')
+                                        body_text = re.sub(r'<[^>]+>', '', html_text)
+                                        body_text = re.sub(r'\s+', ' ', body_text).strip()
+                                    except:
+                                        pass
+                        else:
+                            try:
+                                payload = msg.get_payload(decode=True)
+                                if payload:
+                                    charset = msg.get_content_charset() or 'utf-8'
+                                    body_text = payload.decode(charset, errors='replace')
+                            except:
+                                body_text = str(msg.get_payload())
+
+                        # Create content and hash
+                        content = f"{subject}\n\n{body_text}"
+                        sha = hashlib.sha256(content.encode('utf-8', errors='replace')).hexdigest()
+
+                        # Create element
+                        element = {
+                            "sha256": sha,
+                            "content": content,
+                            "metadata": {
+                                "source_id": source_id,
+                                "source_type": "imap",
+                                "source": f"imap://{email_address}/{folder_name}",
+                                "uid": uid,
+                                "message_id": message_id,
+                                "subject": subject,
+                                "sender": from_addr,
+                                "recipient": to_addr,
+                                "folder": folder_name,
+                                "date": date_parsed,
+                                "flags": [f.decode() if isinstance(f, bytes) else str(f) for f in flags],
+                                "extractionTimestamp": datetime.now().isoformat(),
+                                "schemaVersion": "v2",
+                            }
+                        }
+
+                        # Write to parsed directory
+                        safe_msg_id = str(uid)  # Use UID as safe identifier
+                        output_file = parsed_dir / f"{sha[:16]}_{folder_name}_{safe_msg_id}.json"
+                        with open(output_file, 'w') as f:
+                            json.dump(element, f, indent=2, default=str)
+
+                        files_processed += 1
+
+                    except Exception as e:
+                        files_failed += 1
+                        errors.append(f"UID {uid}: {e}")
+
+                folders_synced.append(folder_name)
+
+            except Exception as e:
+                errors.append(f"Folder {folder_name}: {e}")
+
+        client.logout()
+
+    except Exception as e:
+        return {
+            "status": "failed",
+            "error": str(e),
+            "files_processed": files_processed,
+            "total_new": total_new,
+            "folders_synced": folders_synced,
+            "errors": errors,
+        }
+
+    return {
+        "status": "completed" if not errors else "completed_with_errors",
+        "files_processed": files_processed,
+        "files_failed": files_failed,
+        "total_new": total_new,
+        "total_bytes": total_bytes,
+        "folders_synced": folders_synced,
+        "errors": errors,
+    }
+
+
+def _process_synced_emails(
+    mailbox_id: str,
+    email_address: str,
+    results: dict,
+    workspace_path: Path,
+    limit: Optional[int] = None,
+) -> tuple:
+    """Process synced emails into the knowledge graph.
+
+    Args:
+        mailbox_id: Mailbox ID
+        email_address: Email address for source identification
+        results: Dict of folder -> SyncResult with synced messages
+        workspace_path: Workspace directory
+        limit: Optional limit on number of emails to process
+
+    Returns:
+        Tuple of (files_processed, files_failed)
+    """
+    parsed_dir = workspace_path / "parsed"
+    parsed_dir.mkdir(parents=True, exist_ok=True)
+
+    source_id = f"imap-{mailbox_id}"
+    files_processed = 0
+    files_failed = 0
+    total_processed = 0
+
+    for folder, result in results.items():
+        # Process new messages
+        for msg in getattr(result, 'new_messages', []):
+            # Check limit
+            if limit is not None and total_processed >= limit:
+                break
+            try:
+                # Create element from message
+                msg_id = getattr(msg, 'message_id', None) or getattr(msg, 'uid', str(hash(str(msg))))
+                subject = getattr(msg, 'subject', 'No Subject')
+                body = getattr(msg, 'body', '') or getattr(msg, 'text', '') or ''
+                sender = getattr(msg, 'from_addr', '') or getattr(msg, 'sender', '')
+                date = getattr(msg, 'date', None)
+
+                # Create content hash
+                content = f"{subject}\n\n{body}"
+                sha = hashlib.sha256(content.encode('utf-8', errors='replace')).hexdigest()
+
+                element = {
+                    "sha256": sha,
+                    "content": content,
+                    "metadata": {
+                        "source_id": source_id,
+                        "source_type": "imap",
+                        "source": f"imap://{email_address}/{folder}",
+                        "message_id": str(msg_id),
+                        "subject": subject,
+                        "sender": sender,
+                        "folder": folder,
+                        "date": date.isoformat() if date else None,
+                        "extractionTimestamp": datetime.now().isoformat(),
+                        "schemaVersion": "v2",
+                    }
+                }
+
+                # Write to parsed directory
+                output_file = parsed_dir / f"{sha[:16]}_{source_id}_{msg_id}.json"
+                with open(output_file, 'w') as f:
+                    json.dump(element, f, indent=2, default=str)
+
+                files_processed += 1
+                total_processed += 1
+
+            except Exception as e:
+                typer.echo(f"Warning: Failed to process message: {e}")
+                files_failed += 1
+                total_processed += 1  # Count failed as processed for limit purposes
+
+        # Break outer loop if limit reached
+        if limit is not None and total_processed >= limit:
+            break
+
+    return files_processed, files_failed
+
+
+@imap_app.command("authenticate")
+def imap_authenticate(
+    mailbox_id: str = typer.Argument(..., help="Mailbox ID to authenticate"),
+    client_id: str = typer.Option(..., "--client-id", help="OAuth2 client ID"),
+    client_secret: str = typer.Option(..., "--client-secret", help="OAuth2 client secret"),
+    provider: str = typer.Option("gmail", "--provider", "-p", help="OAuth provider: gmail, office365"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON for Tauri IPC"),
+    registry_path: Optional[Path] = typer.Option(None, help="Override registry directory"),
+) -> None:
+    """Authenticate an IMAP mailbox using OAuth2.
+
+    Opens a browser for OAuth2 authentication and stores the tokens.
+    This command must be run after adding an IMAP source with 'sources imap add'.
+    """
+    from ..ingestion.imap.oauth2_flow import OAuth2Flow, get_provider_config
+    from ..ingestion.imap.credential_manager import CredentialManager
+
+    # Load registry and get mailbox descriptor
+    registry = _load_imap_registry(registry_path)
+
+    try:
+        descriptor = registry.get(mailbox_id)
+    except FileNotFoundError:
+        # Try to find by email address
+        found = None
+        for item in registry.list():
+            if item.id == mailbox_id or item.email_address == mailbox_id:
+                found = item
+                break
+        if not found:
+            if json_output:
+                print(json.dumps({"success": False, "error": f"Mailbox '{mailbox_id}' not found"}))
+            else:
+                typer.echo(f"❌ Mailbox '{mailbox_id}' not found")
+            raise typer.Exit(code=1)
+        descriptor = found
+
+    # Get OAuth2 config for provider
+    try:
+        config = get_provider_config(provider, client_id, client_secret)
+    except ValueError as e:
+        if json_output:
+            print(json.dumps({"success": False, "error": str(e)}))
+        else:
+            typer.echo(f"❌ {e}")
+        raise typer.Exit(code=1)
+
+    if not json_output:
+        typer.echo(f"🔐 Starting OAuth2 authentication for {descriptor.email_address}...")
+        typer.echo(f"   Provider: {provider}")
+        typer.echo("\nA browser window will open for authentication.")
+        typer.echo("Please sign in and grant access.\n")
+
+    # Run OAuth2 flow
+    try:
+        oauth_flow = OAuth2Flow(config)
+        tokens = oauth_flow.run_local_server_flow()
+
+        if not json_output:
+            typer.echo("✓ OAuth2 authentication successful!")
+
+        # Store tokens using credential manager
+        credential_manager = CredentialManager()
+
+        stored_credential = credential_manager.store_oauth_tokens(
+            credential_id=descriptor.credential_id,
+            email_address=descriptor.email_address,
+            tokens=tokens,
+            provider=provider.lower(),
+        )
+        credential_id = stored_credential.credential_id
+
+        if not json_output:
+            typer.echo(f"✓ Tokens stored with credential ID: {credential_id}")
+            typer.echo(f"\n📋 Next Steps:")
+            typer.echo(f"   Run: futurnal sources imap sync {descriptor.id}")
+
+        if json_output:
+            print(json.dumps({
+                "success": True,
+                "mailbox_id": descriptor.id,
+                "email": descriptor.email_address,
+                "credential_id": credential_id,
+                "provider": provider,
+            }))
+
+    except Exception as e:
+        if json_output:
+            print(json.dumps({"success": False, "error": str(e)}))
+        else:
+            typer.echo(f"❌ OAuth2 authentication failed: {e}")
+        raise typer.Exit(code=1)
 
 
 @obsidian_app.command("list")
@@ -1394,6 +2204,94 @@ def trigger_manual_run(
     )
     queue.enqueue(job)
     typer.echo(f"Enqueued manual ingestion job {job.job_id} for {source.name}")
+
+
+@app.command("sync")
+def sync_source(
+    source_name: str = typer.Argument(..., help="Name of the source"),
+    config_path: Path = typer.Option(DEFAULT_CONFIG_PATH, help="Path to sources config"),
+    workspace_path: Optional[Path] = typer.Option(None, help="Path to ingestion workspace"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force full resync (ignore file state)"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Synchronously process files from a local source (does not require orchestrator)."""
+    import time as time_module
+    import sqlite3
+
+    workspace = _resolve_workspace(workspace_path)
+    sources = _load_sources(config_path)
+    if source_name not in sources:
+        raise typer.BadParameter(f"Source '{source_name}' not found")
+
+    source = sources[source_name]
+
+    # If force flag is set, clear the state for files from this source
+    if force:
+        state_db = workspace / "state" / "state.db"
+        if state_db.exists():
+            conn = sqlite3.connect(str(state_db))
+            # Delete state entries for files under this source's root path
+            root_prefix = str(source.root_path)
+            conn.execute("DELETE FROM file_state WHERE path LIKE ?", (f"{root_prefix}%",))
+            conn.commit()
+            conn.close()
+            if not json_output:
+                typer.echo(f"Cleared file state for {source_name}")
+
+    state_store = _load_state_store(workspace)
+    connector = _load_connector(workspace, state_store)
+
+    start_time = time_module.time()
+    files_processed = 0
+    files_failed = 0
+
+    typer.echo(f"Syncing source '{source_name}' from {source.root_path}...")
+
+    try:
+        for element in connector.ingest(source):
+            files_processed += 1
+            if not json_output and files_processed % 10 == 0:
+                typer.echo(f"  Processed {files_processed} elements...")
+    except Exception as exc:
+        files_failed += 1
+        if not json_output:
+            typer.echo(f"Error during sync: {exc}", err=True)
+
+    # Run entity extraction on parsed files
+    entities_extracted = 0
+    if files_processed > 0:
+        if not json_output:
+            typer.echo("Extracting entities from documents...")
+        try:
+            from futurnal.pipeline.entity_extractor import EntityExtractor
+            extractor = EntityExtractor(workspace)
+            entities_extracted = extractor.process_all_parsed()
+            if not json_output:
+                typer.echo(f"  Extracted entities from {entities_extracted} documents")
+        except Exception as exc:
+            if not json_output:
+                typer.echo(f"Warning: Entity extraction failed: {exc}", err=True)
+
+    duration = time_module.time() - start_time
+
+    if json_output:
+        result = {
+            "repo_id": source_name,
+            "full_name": source_name,
+            "status": "completed" if files_failed == 0 else "completed_with_errors",
+            "files_synced": files_processed,
+            "bytes_synced": 0,
+            "bytes_synced_mb": 0.0,
+            "duration_seconds": duration,
+            "branches_synced": [],
+            "error_message": None,
+            "files_processed": files_processed,
+            "files_failed": files_failed,
+            "entities_extracted": entities_extracted,
+        }
+        print(json.dumps(result))
+    else:
+        typer.echo(f"Sync complete: {files_processed} elements in {duration:.1f}s")
 
 
 queue_app = typer.Typer(help="Inspect the job queue")

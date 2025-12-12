@@ -27,6 +27,10 @@ import {
   Bookmark,
   Share2,
   Sparkles,
+  Mail,
+  Inbox,
+  Database,
+  Building,
 } from 'lucide-react';
 import { open } from '@tauri-apps/plugin-shell';
 import { cn, highlightTerms, formatTimestampRelative } from '@/lib/utils';
@@ -57,6 +61,10 @@ const ENTITY_ICONS: Record<EntityType, typeof FileText> = {
   Code: Code,
   Person: User,
   Concept: Lightbulb,
+  Email: Mail,
+  Mailbox: Inbox,
+  Source: Database,
+  Organization: Building,
 };
 
 /** Icon mapping for source types */

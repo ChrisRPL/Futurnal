@@ -38,6 +38,13 @@ export {
   TooltipProvider,
 } from './tooltip';
 
+export {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  PopoverAnchor,
+} from './popover';
+
 export { ScrollArea, ScrollBar } from './scroll-area';
 
 export { Switch } from './switch';

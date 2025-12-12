@@ -36,6 +36,10 @@ pub fn run() {
             commands::connectors::retry_source,
             commands::connectors::pause_all_sources,
             commands::connectors::resume_all_sources,
+            commands::connectors::sync_source,
+            commands::connectors::sync_all_github,
+            commands::connectors::authenticate_imap,
+            commands::connectors::test_imap_connection,
             // Privacy commands
             commands::privacy::get_consent,
             commands::privacy::grant_consent,
@@ -48,6 +52,7 @@ pub fn run() {
             commands::orchestrator::ensure_orchestrator_running,
             // Graph commands
             commands::graph::get_knowledge_graph,
+            commands::graph::open_file,
         ])
         .setup(|app| {
             log::info!("Futurnal Desktop Shell initialized");

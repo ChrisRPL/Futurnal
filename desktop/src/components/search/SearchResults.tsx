@@ -5,7 +5,7 @@
  * Supports arrow key navigation with visual selection state.
  */
 
-import { FileText, Code, User, Calendar, Lightbulb } from 'lucide-react';
+import { FileText, Code, User, Calendar, Lightbulb, Mail, Inbox, Database, Building } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { truncate, formatRelativeTime } from '@/lib/utils';
 import type { SearchResult, EntityType } from '@/types/api';
@@ -30,6 +30,10 @@ const ENTITY_ICONS: Record<EntityType, typeof FileText> = {
   Code: Code,
   Person: User,
   Concept: Lightbulb,
+  Email: Mail,
+  Mailbox: Inbox,
+  Source: Database,
+  Organization: Building,
 };
 
 /**

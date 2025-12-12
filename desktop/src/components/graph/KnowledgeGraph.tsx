@@ -2,19 +2,21 @@
  * KnowledgeGraph - Main force-directed graph visualization component
  *
  * Renders an interactive Personal Knowledge Graph using react-force-graph-2d
- * with monochrome styling (white with opacity variants per node type).
+ * with semantic color coding by node type category.
  *
  * Features:
  * - Force-directed layout with physics simulation
- * - Monochrome node styling (no accent colors)
+ * - Semantic color scheme (origins=purple, content=blue, actors=teal, abstract=amber)
+ * - Link styling by relationship type (contains=dashed, mentions=solid)
  * - Zoom, pan, and click-to-focus interactions
  * - "Breathing" animation for ambient liveness
  * - Level-of-detail based on zoom level
+ * - Interactive legend
  */
 
 import { useCallback, useRef, useEffect, useState, useMemo, forwardRef, useImperativeHandle } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
-import { forceCollide } from 'd3-force';
+import { forceCollide, forceManyBody, forceX, forceY } from 'd3-force';
 import { useKnowledgeGraph } from '@/hooks/useApi';
 import { useGraphStore, isNodeTypeVisible } from '@/stores/graphStore';
 import { cn } from '@/lib/utils';
@@ -41,37 +43,107 @@ interface KnowledgeGraphProps {
   data?: GraphData;
   /** Enable breathing animation (default: true, disabled in mini mode) */
   breathing?: boolean;
+  /** Show legend (default: true in full mode) */
+  showLegend?: boolean;
 }
 
 /**
- * Node opacity based on entity type - MONOCHROME ONLY
- * Brighter nodes = more important entity types
+ * Semantic color scheme for node types (dark-mode optimized)
+ * Grouped by meaning:
+ * - Data Origins (purple): Source, Mailbox - containers that hold content
+ * - Content (blue): Document, Email - main knowledge artifacts
+ * - Actors (teal/green): Person, Organization - human/entity elements
+ * - Abstract (amber/orange): Concept, Event - ideas and happenings
+ * - Technical (cyan): Code - stands out as technical
  */
-const NODE_OPACITIES: Record<EntityType, number> = {
-  Event: 1.0,      // white/100 - brightest (most important)
-  Person: 0.8,     // white/80
-  Document: 0.6,   // white/60
-  Code: 0.5,       // white/50
-  Concept: 0.4,    // white/40 - dimmest
+const NODE_COLORS: Record<EntityType, string> = {
+  // Sources - Purple (anchor points)
+  Source: '#A855F7',      // Purple-500
+  Mailbox: '#A855F7',     // Purple-500 (same as Source)
+
+  // Content - Blue (main content)
+  Document: '#3B82F6',    // Blue-500
+  Email: '#3B82F6',       // Blue-500 (same as Document)
+
+  // Actors - Teal (human/entity elements)
+  Person: '#14B8A6',      // Teal-500
+  Organization: '#14B8A6', // Teal-500 (same as Person)
+
+  // Abstract - Amber (ideas and happenings)
+  Concept: '#F59E0B',     // Amber-500
+  Event: '#F59E0B',       // Amber-500 (same as Concept)
+
+  // Code - Cyan (technical)
+  Code: '#22D3EE',        // Cyan-400
 };
 
 /**
- * Node sizes based on entity type
+ * Node sizes by semantic role
+ * Sources are largest (anchor points), entities are smallest (many of them)
  */
 const NODE_SIZES: Record<EntityType, number> = {
-  Event: 8,
+  // Sources - Largest (22px anchor points)
+  Source: 22,
+  Mailbox: 22,
+
+  // Content - Medium (14px main content)
+  Document: 14,
+  Email: 14,
+
+  // Actors - Small (9-11px extracted knowledge)
   Person: 10,
-  Document: 6,
-  Code: 7,
+  Organization: 11,
+
+  // Abstract - Small (9-11px extracted knowledge)
   Concept: 9,
+  Event: 10,
+
+  // Code - Medium (content type)
+  Code: 14,
 };
+
+/**
+ * Node opacity for monochrome mode
+ */
+const NODE_OPACITIES: Record<EntityType, number> = {
+  Source: 0.95,
+  Mailbox: 0.95,
+  Document: 0.7,
+  Email: 0.65,
+  Person: 0.8,
+  Organization: 0.75,
+  Concept: 0.6,
+  Event: 0.7,
+  Code: 0.65,
+};
+
+/**
+ * Link colors by relationship type
+ */
+const LINK_STYLES: Record<string, { color: string; width: number; dashed: boolean }> = {
+  contains: { color: 'rgba(168, 85, 247, 0.35)', width: 1, dashed: true },   // Purple, structural
+  mentions: { color: 'rgba(59, 130, 246, 0.5)', width: 2, dashed: false },   // Blue, semantic
+  default: { color: 'rgba(255, 255, 255, 0.25)', width: 1.5, dashed: false },
+};
+
+/**
+ * Legend categories for display
+ */
+const LEGEND_CATEGORIES = [
+  { label: 'Sources', types: ['Source', 'Mailbox'] as EntityType[], color: '#A855F7' },
+  { label: 'Content', types: ['Document', 'Email'] as EntityType[], color: '#3B82F6' },
+  { label: 'Actors', types: ['Person', 'Organization'] as EntityType[], color: '#14B8A6' },
+  { label: 'Abstract', types: ['Concept', 'Event'] as EntityType[], color: '#F59E0B' },
+  { label: 'Code', types: ['Code'] as EntityType[], color: '#22D3EE' },
+];
 
 /**
  * Get level of detail based on zoom scale
+ * Thresholds lowered to show more detail at lower zoom levels
  */
 function getLevelOfDetail(scale: number): 'minimal' | 'medium' | 'full' {
-  if (scale < 0.5) return 'minimal';
-  if (scale > 1.5) return 'full';
+  if (scale < 0.2) return 'minimal';  // Only show dots when very zoomed out
+  if (scale > 0.8) return 'full';     // Show labels earlier
   return 'medium';
 }
 
@@ -80,7 +152,8 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
   miniMode = false,
   onExpand,
   data: overrideData,
-  breathing: _breathing = true, // Reserved for future breathing animation
+  breathing = true,
+  showLegend = true,
 }, ref) {
   const graphRef = useRef<ForceGraphRef>(undefined);
 
@@ -99,6 +172,7 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
     selectedNodeId,
     hoveredNodeId,
     visibleNodeTypes,
+    colorMode,
     setSelectedNode,
     setHoveredNode,
   } = useGraphStore();
@@ -112,19 +186,50 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
   const rawData = overrideData ?? fetchedData;
 
   // Filter data based on visible node types
+  // IMPORTANT: Initialize nodes with RANDOM positions spread across canvas
+  // Without this, d3-force places all nodes near center causing clustering
   const filteredData = useMemo(() => {
     if (!rawData) return undefined;
 
-    const nodes = rawData.nodes.filter((node) =>
-      isNodeTypeVisible(node.node_type, visibleNodeTypes)
-    );
+    // Use canvas dimensions or a default spread area
+    const spreadWidth = dimensions?.width || 800;
+    const spreadHeight = dimensions?.height || 600;
+
+    // Create fresh node copies WITH random initial positions
+    // This is critical - nodes must start spread apart for proper force layout
+    const nodes = rawData.nodes
+      .filter((node) => isNodeTypeVisible(node.node_type, visibleNodeTypes))
+      .map((node, index) => {
+        // Use deterministic but spread positions based on index
+        // Distribute in a spiral pattern for even coverage
+        const angle = index * 2.4; // Golden angle for even distribution
+        const radius = Math.sqrt(index) * 30; // Spiral outward
+        return {
+          id: node.id,
+          label: node.label,
+          node_type: node.node_type,
+          timestamp: node.timestamp,
+          metadata: node.metadata,
+          // Initialize with spread positions - CRUCIAL for force layout
+          x: spreadWidth / 2 + radius * Math.cos(angle),
+          y: spreadHeight / 2 + radius * Math.sin(angle),
+        };
+      });
 
     const nodeIds = new Set(nodes.map((n) => n.id));
-    const links = rawData.links.filter(
-      (link) =>
-        nodeIds.has(typeof link.source === 'string' ? link.source : (link.source as GraphNode).id) &&
-        nodeIds.has(typeof link.target === 'string' ? link.target : (link.target as GraphNode).id)
-    );
+    // Create fresh link copies as well
+    const links = rawData.links
+      .filter(
+        (link) =>
+          nodeIds.has(typeof link.source === 'string' ? link.source : (link.source as GraphNode).id) &&
+          nodeIds.has(typeof link.target === 'string' ? link.target : (link.target as GraphNode).id)
+      )
+      .map((link) => ({
+        source: typeof link.source === 'string' ? link.source : (link.source as GraphNode).id,
+        target: typeof link.target === 'string' ? link.target : (link.target as GraphNode).id,
+        relationship: link.relationship,
+        weight: link.weight,
+      }));
 
     return { nodes, links };
   }, [rawData, visibleNodeTypes]);
@@ -156,9 +261,21 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
     return () => observer.disconnect();
   }, []);
 
-  // Reset fit state when filtered data changes
+  // Reset fit state and reheat simulation when filtered data changes
   useEffect(() => {
     setHasInitialFit(false);
+
+    // Reheat the simulation to restart force layout when data changes
+    if (graphRef.current && filteredData && filteredData.nodes.length > 0) {
+      // Small delay to ensure new data is applied first
+      const timeoutId = setTimeout(() => {
+        if (graphRef.current) {
+          // Reheat simulation with high alpha to restart force calculations
+          graphRef.current.d3ReheatSimulation();
+        }
+      }, 100);
+      return () => clearTimeout(timeoutId);
+    }
   }, [filteredData]);
 
   // Fallback timer - if onEngineStop never fires, force fit after 2 seconds
@@ -175,19 +292,44 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
     return () => clearTimeout(timeoutId);
   }, [dimensions, hasInitialFit]);
 
-  // Configure forces after mount
+  // Configure forces after mount - balanced settings for spread without excessive shaking
   useEffect(() => {
     if (!graphRef.current) return;
 
-    // Strengthen repulsion to prevent clumping
-    graphRef.current.d3Force('charge')?.strength(-200);
+    const nodeCount = filteredData?.nodes.length ?? 0;
 
-    // Add collision detection to prevent node overlaps
+    // Moderate repulsion - enough to spread but not shake violently
+    const chargeStrength = nodeCount > 500 ? -800 : nodeCount > 100 ? -500 : -300;
+
+    // Replace default charge force with tuned repulsion
+    graphRef.current.d3Force('charge', forceManyBody()
+      .strength(chargeStrength)
+      .distanceMin(30)    // Larger min distance for smoother transitions
+      .distanceMax(300)   // Reduced max to limit long-range effects
+    );
+
+    // REMOVE default center force - it causes clustering!
+    graphRef.current.d3Force('center', null);
+
+    // Very gentle centering forces
+    const centerX = (dimensions?.width || 800) / 2;
+    const centerY = (dimensions?.height || 600) / 2;
+    graphRef.current.d3Force('x', forceX(centerX).strength(0.01));
+    graphRef.current.d3Force('y', forceY(centerY).strength(0.01));
+
+    // Add collision detection with moderate padding
     graphRef.current.d3Force(
       'collide',
-      forceCollide<GraphNode>((node) => (NODE_SIZES[node.node_type || 'Document'] || 6) + 5).iterations(2)
+      forceCollide<GraphNode>((node) => (NODE_SIZES[node.node_type || 'Document'] || 10) + 12).iterations(2)
     );
-  }, [filteredData]);
+
+    // Moderate link distance for connected nodes
+    const linkDist = nodeCount > 500 ? 120 : nodeCount > 100 ? 100 : 80;
+    graphRef.current.d3Force('link')?.distance(linkDist);
+
+    // Don't reheat - let warmup ticks handle initial positioning
+    // This prevents double-animation on load
+  }, [filteredData, dimensions]);
 
   // Handle engine stop - this is called when the force simulation stabilizes
   const handleEngineStop = useCallback(() => {
@@ -226,7 +368,7 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
     [miniMode, setHoveredNode]
   );
 
-  // Custom node rendering with monochrome styling
+  // Custom node rendering with monochrome or colored styling
   const nodeCanvasObject = useCallback(
     (node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
       const nodeType = node.node_type || 'Document';
@@ -239,23 +381,33 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
       const x = node.x ?? 0;
       const y = node.y ?? 0;
 
+      // Determine node color based on colorMode
+      const isColored = colorMode === 'colored';
+      const nodeColor = isColored
+        ? NODE_COLORS[nodeType] || '#6B7280'
+        : `rgba(255, 255, 255, ${opacity})`;
+
       // Glow effect for selected/hovered nodes
       if ((isSelected || isHovered) && lod !== 'minimal') {
         ctx.beginPath();
         ctx.arc(x, y, size + 4, 0, 2 * Math.PI);
-        ctx.fillStyle = `rgba(255, 255, 255, ${opacity * 0.3})`;
+        if (isColored) {
+          ctx.fillStyle = `${NODE_COLORS[nodeType] || '#6B7280'}40`; // 25% opacity
+        } else {
+          ctx.fillStyle = `rgba(255, 255, 255, ${opacity * 0.3})`;
+        }
         ctx.fill();
       }
 
       // Main node circle
       ctx.beginPath();
       ctx.arc(x, y, size, 0, 2 * Math.PI);
-      ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+      ctx.fillStyle = nodeColor;
       ctx.fill();
 
       // Border for selected nodes
       if (isSelected) {
-        ctx.strokeStyle = '#FFFFFF';
+        ctx.strokeStyle = isColored ? '#FFFFFF' : '#FFFFFF';
         ctx.lineWidth = 2;
         ctx.stroke();
       }
@@ -268,32 +420,36 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
         ctx.font = `${11 / globalScale}px Inter, system-ui, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+        ctx.fillStyle = isColored
+          ? 'rgba(255, 255, 255, 0.9)'
+          : `rgba(255, 255, 255, ${opacity})`;
         ctx.fillText(label, x, y + size + 4);
       }
     },
-    [selectedNodeId, hoveredNodeId]
+    [selectedNodeId, hoveredNodeId, colorMode]
   );
 
-  // CRITICAL: nodePointerAreaPaint MUST draw the exact same shape as nodeCanvasObject
-  // Using different sizes breaks click detection in react-force-graph-2d
+  // CRITICAL: nodePointerAreaPaint defines the clickable area
+  // Use a larger area than visual size for easier clicking, especially when zoomed out
   const nodePointerAreaPaint = useCallback(
     (node: GraphNode, color: string, ctx: CanvasRenderingContext2D) => {
       const nodeType = node.node_type || 'Document';
-      const size = NODE_SIZES[nodeType] || 6;
+      const visualSize = NODE_SIZES[nodeType] || 6;
+      // Make hit area larger for easier clicking (minimum 12px radius)
+      const hitSize = Math.max(visualSize, 12);
       const x = node.x ?? 0;
       const y = node.y ?? 0;
 
-      // Draw EXACT same circle as nodeCanvasObject - same radius
+      // Draw larger hit area for better click detection
       ctx.beginPath();
-      ctx.arc(x, y, size, 0, 2 * Math.PI); // MUST match visual size
+      ctx.arc(x, y, hitSize, 0, 2 * Math.PI);
       ctx.fillStyle = color; // MUST use this color parameter for hit detection
       ctx.fill();
     },
     []
   );
 
-  // Custom link rendering
+  // Custom link rendering with relationship-based styling
   const linkCanvasObject = useCallback(
     (link: GraphLink, ctx: CanvasRenderingContext2D, globalScale: number) => {
       // After simulation, source/target become node objects (not strings)
@@ -302,13 +458,33 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
 
       if (!source.x || !source.y || !target.x || !target.y) return;
 
-      // Draw link line - improved visibility
+      // Get link style based on relationship type
+      const style = LINK_STYLES[link.relationship] || LINK_STYLES.default;
+      const isColored = colorMode === 'colored';
+
+      // Calculate line width (scale with zoom but maintain minimum visibility)
+      const baseWidth = style.width * (link.weight || 1);
+      const lineWidth = Math.max(0.5, baseWidth / Math.sqrt(globalScale));
+
       ctx.beginPath();
+
+      // Draw dashed or solid line based on relationship type
+      if (style.dashed) {
+        ctx.setLineDash([4 / globalScale, 4 / globalScale]);
+      } else {
+        ctx.setLineDash([]);
+      }
+
       ctx.moveTo(source.x, source.y);
       ctx.lineTo(target.x, target.y);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)'; // Increased from 0.1
-      ctx.lineWidth = Math.max(1, (link.weight || 1) / globalScale);
+
+      // Use colored styles only in colored mode, otherwise use white with opacity
+      ctx.strokeStyle = isColored ? style.color : 'rgba(255, 255, 255, 0.2)';
+      ctx.lineWidth = lineWidth;
       ctx.stroke();
+
+      // Reset line dash
+      ctx.setLineDash([]);
 
       // Draw relationship label when zoomed in
       if (globalScale > 1.5 && link.relationship) {
@@ -318,11 +494,11 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
         ctx.font = `${10 / globalScale}px Inter, system-ui, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)'; // Increased from 0.3
+        ctx.fillStyle = isColored ? style.color.replace(/[\d.]+\)$/, '0.8)') : 'rgba(255, 255, 255, 0.5)';
         ctx.fillText(link.relationship, midX, midY);
       }
     },
-    []
+    [colorMode]
   );
 
   // Memoized link color to prevent re-initialization on every render
@@ -406,6 +582,7 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
         'relative bg-black overflow-hidden',
         'border border-white/10',
         miniMode && 'cursor-pointer',
+        breathing && !miniMode && 'graph-breathing',
         className
       )}
       onClick={miniMode ? onExpand : undefined}
@@ -426,10 +603,10 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
         onNodeClick={handleNodeClick}
         onNodeHover={handleNodeHover}
         onEngineStop={handleEngineStop}
-        warmupTicks={miniMode ? 50 : 100}
-        cooldownTicks={miniMode ? 150 : 200}
-        d3AlphaDecay={0.02}
-        d3VelocityDecay={0.3}
+        warmupTicks={miniMode ? 100 : 300}
+        cooldownTicks={miniMode ? 200 : 500}
+        d3AlphaDecay={0.03}
+        d3VelocityDecay={0.5}
         enableZoomInteraction={!miniMode}
         enablePanInteraction={!miniMode}
         enableNodeDrag={!miniMode}
@@ -446,6 +623,11 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
       <div className="absolute bottom-2 left-2 text-xs text-white/40">
         {filteredData.nodes.length} memories · {filteredData.links.length} connections
       </div>
+
+      {/* Legend - only in colored mode and full view */}
+      {showLegend && !miniMode && colorMode === 'colored' && (
+        <GraphLegend />
+      )}
     </div>
   );
 });
@@ -472,6 +654,46 @@ function GraphSkeleton() {
       ))}
       <div className="absolute inset-0 flex items-center justify-center">
         <span className="text-white/40 text-sm">Loading knowledge graph...</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Graph legend showing node type categories and link types
+ */
+function GraphLegend() {
+  return (
+    <div className="absolute top-3 right-3 bg-black/80 backdrop-blur-sm border border-white/10 p-3 rounded-lg">
+      {/* Node types */}
+      <div className="text-[10px] text-white/50 uppercase tracking-wider mb-2">
+        Node Types
+      </div>
+      <div className="space-y-1.5 mb-3">
+        {LEGEND_CATEGORIES.map((category) => (
+          <div key={category.label} className="flex items-center gap-2">
+            <div
+              className="w-3 h-3 rounded-full flex-shrink-0"
+              style={{ backgroundColor: category.color }}
+            />
+            <span className="text-xs text-white/70">{category.label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Link types */}
+      <div className="text-[10px] text-white/50 uppercase tracking-wider mb-2 pt-2 border-t border-white/10">
+        Connections
+      </div>
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-2">
+          <div className="w-6 border-t-2 border-dashed" style={{ borderColor: 'rgba(168, 85, 247, 0.6)' }} />
+          <span className="text-xs text-white/70">contains</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-6 border-t-2" style={{ borderColor: 'rgba(59, 130, 246, 0.7)' }} />
+          <span className="text-xs text-white/70">mentions</span>
+        </div>
       </div>
     </div>
   );

@@ -11,6 +11,13 @@ import { persist } from 'zustand/middleware';
 import type { EntityType } from '@/types/api';
 
 /**
+ * Color mode for graph visualization.
+ * - 'monochrome': White/gray nodes with opacity variation (default)
+ * - 'colored': Distinct colors per entity type
+ */
+export type ColorMode = 'monochrome' | 'colored';
+
+/**
  * All available entity types for filtering.
  */
 export const ALL_ENTITY_TYPES: EntityType[] = [
@@ -19,6 +26,10 @@ export const ALL_ENTITY_TYPES: EntityType[] = [
   'Person',
   'Code',
   'Concept',
+  'Email',
+  'Mailbox',
+  'Source',
+  'Organization',
 ];
 
 interface GraphState {
@@ -36,6 +47,8 @@ interface GraphState {
   breathingEnabled: boolean;
   /** Whether the graph is expanded to full-screen */
   isExpanded: boolean;
+  /** Color mode for node visualization */
+  colorMode: ColorMode;
 
   /** Set selected node ID (null to deselect) */
   setSelectedNode: (id: string | null) => void;
@@ -53,6 +66,8 @@ interface GraphState {
   setBreathingEnabled: (enabled: boolean) => void;
   /** Set expanded state */
   setExpanded: (expanded: boolean) => void;
+  /** Toggle color mode */
+  toggleColorMode: () => void;
   /** Reset to initial state */
   reset: () => void;
 }
@@ -65,6 +80,7 @@ const initialState = {
   visibleNodeTypes: [] as EntityType[], // Empty means all visible
   breathingEnabled: true,
   isExpanded: false,
+  colorMode: 'colored' as ColorMode, // Default to colored for semantic visualization
 };
 
 export const useGraphStore = create<GraphState>()(
@@ -116,22 +132,46 @@ export const useGraphStore = create<GraphState>()(
 
       setExpanded: (expanded) => set({ isExpanded: expanded }),
 
+      toggleColorMode: () => {
+        const { colorMode } = get();
+        set({ colorMode: colorMode === 'monochrome' ? 'colored' : 'monochrome' });
+      },
+
       reset: () =>
         set({
           selectedNodeId: null,
           hoveredNodeId: null,
           zoomLevel: 1.0,
           centerPosition: { x: 0, y: 0 },
-          // Keep preferences: visibleNodeTypes, breathingEnabled
+          // Keep preferences: visibleNodeTypes, breathingEnabled, colorMode
         }),
     }),
     {
       name: 'futurnal-graph',
+      version: 2, // Bump version to reset persisted state with new colored default
       // Only persist user preferences, not transient state
       partialize: (state) => ({
         visibleNodeTypes: state.visibleNodeTypes,
         breathingEnabled: state.breathingEnabled,
+        colorMode: state.colorMode,
       }),
+      // Migration from old version - reset to new defaults
+      migrate: (persistedState, version) => {
+        const state = persistedState as { visibleNodeTypes?: EntityType[]; breathingEnabled?: boolean; colorMode?: ColorMode } | null;
+        if (version < 2) {
+          // Reset colorMode to new default when upgrading
+          return {
+            visibleNodeTypes: state?.visibleNodeTypes ?? [],
+            breathingEnabled: state?.breathingEnabled ?? true,
+            colorMode: 'colored' as ColorMode,
+          };
+        }
+        return {
+          visibleNodeTypes: state?.visibleNodeTypes ?? [],
+          breathingEnabled: state?.breathingEnabled ?? true,
+          colorMode: state?.colorMode ?? 'colored',
+        };
+      },
     }
   )
 );

@@ -25,6 +25,9 @@ thiserror = "1"
 log = "0.4"
 env_logger = "0.11"
 uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+dirs = "5"
+regex = "1"
 
 [features]
 default = ["custom-protocol"]

@@ -22,8 +22,12 @@ import {
   Copy,
   Bookmark,
   Share2,
+  Mail,
+  Inbox,
+  Database,
+  Building,
 } from 'lucide-react';
-import { open } from '@tauri-apps/plugin-shell';
+import { invoke } from '@tauri-apps/api/core';
 import { cn, highlightTerms, formatTimestampRelative } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -51,6 +55,10 @@ const ENTITY_ICONS: Record<EntityType, typeof FileText> = {
   Code: Code,
   Person: User,
   Concept: Lightbulb,
+  Email: Mail,
+  Mailbox: Inbox,
+  Source: Database,
+  Organization: Building,
 };
 
 /** Icon mapping for source types */
@@ -90,17 +98,22 @@ export function ResultDetailPanel({
     }
   }, [result.content]);
 
-  // Handle open source action
+  // Handle open source action - try multiple locations for path
   const handleOpenSource = useCallback(async () => {
-    const sourcePath = result.metadata.source as string | undefined;
-    if (sourcePath) {
+    const sourcePath = (
+      result.metadata?.path ||
+      result.metadata?.source
+    ) as string | undefined;
+
+    // Only open if it looks like a valid file path
+    if (sourcePath && sourcePath.startsWith('/')) {
       try {
-        await open(sourcePath);
+        await invoke('open_file', { path: sourcePath });
       } catch (err) {
         console.error('Failed to open source:', err);
       }
     }
-  }, [result.metadata.source]);
+  }, [result.metadata]);
 
   return (
     <div

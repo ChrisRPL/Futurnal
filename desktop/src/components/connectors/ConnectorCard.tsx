@@ -31,6 +31,7 @@ import {
   useResumeConnector,
   useDeleteConnector,
   useRetryConnector,
+  useSyncConnector,
 } from '@/hooks/useApi';
 import { formatDistanceToNow } from '@/lib/utils';
 import type { Connector, ConnectorType, ConnectorStatus } from '@/types/api';
@@ -69,6 +70,7 @@ export function ConnectorCard({ connector, onSettingsClick }: ConnectorCardProps
   const resumeMutation = useResumeConnector();
   const deleteMutation = useDeleteConnector();
   const retryMutation = useRetryConnector();
+  const syncMutation = useSyncConnector();
 
   const Icon = TYPE_ICONS[connector.connector_type] || Folder;
   const isActive = connector.status === 'active' || connector.status === 'syncing';
@@ -86,7 +88,10 @@ export function ConnectorCard({ connector, onSettingsClick }: ConnectorCardProps
 
   const handleDelete = () => {
     if (confirm('Are you sure you want to remove this data source?')) {
-      deleteMutation.mutate(connector.id);
+      deleteMutation.mutate({
+        id: connector.id,
+        connectorType: connector.connector_type,
+      });
     }
   };
 
@@ -250,6 +255,19 @@ export function ConnectorCard({ connector, onSettingsClick }: ConnectorCardProps
 
             {/* Actions */}
             <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => syncMutation.mutate({
+                  id: connector.id,
+                  connectorType: connector.connector_type,
+                })}
+                disabled={syncMutation.isPending || connector.status === 'syncing'}
+                className="border-white/20 text-white/70 hover:bg-white/10"
+              >
+                <RefreshCw className={cn('h-3 w-3 mr-1', syncMutation.isPending && 'animate-spin')} />
+                {syncMutation.isPending ? 'Syncing...' : 'Sync Now'}
+              </Button>
               {onSettingsClick && (
                 <Button
                   variant="outline"

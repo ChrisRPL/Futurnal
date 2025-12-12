@@ -22,8 +22,12 @@ import {
   ExternalLink,
   Link2,
   ArrowRight,
+  Mail,
+  Inbox,
+  Database,
+  Building,
 } from 'lucide-react';
-import { open } from '@tauri-apps/plugin-shell';
+import { invoke } from '@tauri-apps/api/core';
 import { cn, formatTimestampRelative } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -51,6 +55,10 @@ const ENTITY_ICONS: Record<EntityType, typeof FileText> = {
   Code: Code,
   Person: User,
   Concept: Lightbulb,
+  Email: Mail,
+  Mailbox: Inbox,
+  Source: Database,
+  Organization: Building,
 };
 
 /** Opacity mapping for entity type badges */
@@ -60,6 +68,10 @@ const TYPE_OPACITIES: Record<EntityType, string> = {
   Document: 'bg-white/12',
   Code: 'bg-white/10',
   Concept: 'bg-white/8',
+  Email: 'bg-amber-500/15',
+  Mailbox: 'bg-blue-500/15',
+  Source: 'bg-purple-500/15',
+  Organization: 'bg-white/15',
 };
 
 export function NodeDetailPanel({
@@ -97,17 +109,24 @@ export function NodeDetailPanel({
     };
   });
 
-  // Handle open source action
+  // Handle open source action - try multiple locations for path
   const handleOpenSource = useCallback(async () => {
-    const sourcePath = node.metadata?.source as string | undefined;
-    if (sourcePath) {
+    const details = node.metadata?.details as Record<string, unknown> | undefined;
+    const sourcePath = (
+      details?.path ||
+      node.metadata?.path ||
+      node.metadata?.source
+    ) as string | undefined;
+
+    // Only open if it looks like a valid file path
+    if (sourcePath && sourcePath.startsWith('/')) {
       try {
-        await open(sourcePath);
+        await invoke('open_file', { path: sourcePath });
       } catch (err) {
         console.error('Failed to open source:', err);
       }
     }
-  }, [node.metadata?.source]);
+  }, [node.metadata]);
 
   return (
     <div
@@ -221,17 +240,43 @@ export function NodeDetailPanel({
               <div className="text-xs font-medium text-white/50 mb-2">
                 Properties
               </div>
-              <div className="p-3 bg-white/[0.03] border border-white/5 space-y-1">
-                {Object.entries(node.metadata)
-                  .filter(([key]) => key !== 'source')
-                  .map(([key, value]) => (
-                    <div key={key} className="flex items-start gap-2 text-xs">
-                      <span className="text-white/40 flex-shrink-0">{key}:</span>
-                      <span className="text-white/60 break-all">
-                        {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                      </span>
-                    </div>
-                  ))}
+              <div className="p-3 bg-white/[0.03] border border-white/5 space-y-2">
+                {(() => {
+                  // Format and flatten metadata for better display
+                  const formatKey = (key: string) =>
+                    key.replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2')
+                      .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+
+                  const formatValue = (value: unknown): string => {
+                    if (value === null || value === undefined) return '—';
+                    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+                    if (typeof value === 'number') return value.toLocaleString();
+                    if (Array.isArray(value)) return value.join(', ');
+                    if (typeof value === 'object') {
+                      // Flatten simple objects
+                      return Object.entries(value)
+                        .map(([k, v]) => `${formatKey(k)}: ${v}`)
+                        .join(', ');
+                    }
+                    return String(value);
+                  };
+
+                  // Filter out internal/redundant keys
+                  const hiddenKeys = ['source', 'sha256', 'parent_id', 'element_id'];
+
+                  return Object.entries(node.metadata)
+                    .filter(([key]) => !hiddenKeys.includes(key))
+                    .map(([key, value]) => (
+                      <div key={key} className="flex items-start gap-2 text-xs">
+                        <span className="text-white/50 flex-shrink-0 min-w-[80px]">
+                          {formatKey(key)}
+                        </span>
+                        <span className="text-white/70 break-words">
+                          {formatValue(value)}
+                        </span>
+                      </div>
+                    ));
+                })()}
               </div>
             </div>
           )}
@@ -250,7 +295,11 @@ export function NodeDetailPanel({
 
       {/* Actions Footer */}
       <div className="p-4 border-t border-white/10">
-        {node.metadata?.source ? (
+        {(() => {
+          const details = node.metadata?.details as Record<string, unknown> | undefined;
+          const hasPath = details?.path || node.metadata?.path;
+          return hasPath;
+        })() ? (
           <Button
             variant="outline"
             size="sm"

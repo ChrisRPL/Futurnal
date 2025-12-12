@@ -40,7 +40,7 @@ export interface SearchResult {
   metadata: Record<string, unknown>;
 }
 
-export type EntityType = 'Event' | 'Document' | 'Code' | 'Person' | 'Concept';
+export type EntityType = 'Event' | 'Document' | 'Code' | 'Person' | 'Concept' | 'Email' | 'Mailbox' | 'Source' | 'Organization';
 export type SourceType = 'text' | 'ocr' | 'audio' | 'code';
 
 export interface CausalChain {
@@ -112,6 +112,19 @@ export interface AddSourceRequest {
   connector_type: ConnectorType;
   name: string;
   config: Record<string, unknown>;
+}
+
+/** Result of a sync operation (e.g., GitHub clone/pull). */
+export interface SyncResult {
+  repo_id: string;
+  full_name: string;
+  status: 'completed' | 'failed' | 'in_progress' | 'pending';
+  files_synced: number;
+  bytes_synced: number;
+  bytes_synced_mb: number;
+  duration_seconds: number;
+  branches_synced: string[];
+  error_message?: string | null;
 }
 
 // ============================================================================

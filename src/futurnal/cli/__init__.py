@@ -7,6 +7,7 @@ from ..configuration.cli import config_app, health_app
 from ..ingestion.imap.cli import imap_app
 from ..ingestion.github.cli import app as github_app
 from .orchestrator import orchestrator_app
+from .search import search_app
 
 
 cli = Typer(help="Futurnal command line tools")
@@ -16,7 +17,8 @@ cli.add_typer(health_app, name="health")
 cli.add_typer(imap_app, name="imap")
 cli.add_typer(github_app, name="github")
 cli.add_typer(orchestrator_app, name="orchestrator")
+cli.add_typer(search_app, name="search")
 
-__all__ = ["cli", "sources_app", "config_app", "health_app", "imap_app", "github_app", "orchestrator_app"]
+__all__ = ["cli", "sources_app", "config_app", "health_app", "imap_app", "github_app", "orchestrator_app", "search_app"]
 
 

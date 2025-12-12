@@ -72,29 +72,77 @@ const SAMPLE_LABELS: Record<EntityType, string[]> = {
     'Scalability',
     'Testing Strategy',
   ],
+  Email: [
+    'Re: Project Update',
+    'Meeting Follow-up',
+    'Weekly Report',
+    'Feature Request',
+    'Bug Report',
+    'Release Notes',
+    'Team Announcement',
+    'Client Feedback',
+    'Schedule Change',
+    'Review Comments',
+  ],
+  Mailbox: [
+    'Work Inbox',
+    'Personal Inbox',
+    'Project Inbox',
+    'Archive',
+    'Sent Items',
+  ],
+  Source: [
+    'Documents Folder',
+    'Code Repository',
+    'Notes Vault',
+    'Downloads',
+    'Projects',
+  ],
+  Organization: [
+    'Anthropic',
+    'Engineering Team',
+    'Product Team',
+    'Research Lab',
+    'Startup Inc',
+    'DevOps Guild',
+    'Open Source Project',
+    'Partner Company',
+  ],
 };
 
 /**
  * Relationship types between nodes.
+ * Primary relationships used for styling:
+ * - 'contains': Structural (Source/Mailbox -> content) - dashed purple
+ * - 'mentions': Semantic (content -> entities) - solid blue
  */
-const RELATIONSHIPS = [
-  'references',
-  'created_by',
-  'mentions',
-  'relates_to',
-  'depends_on',
-  'implements',
-  'documents',
-  'triggers',
-  'enables',
-  'blocks',
-];
 
 /**
  * Entity types with weighted distribution for realistic variety.
+ * Includes all types for full semantic color visualization.
  */
-const ENTITY_TYPES: EntityType[] = ['Event', 'Document', 'Person', 'Code', 'Concept'];
-const TYPE_WEIGHTS = [0.25, 0.25, 0.15, 0.2, 0.15]; // Sum to 1.0
+const ENTITY_TYPES: EntityType[] = [
+  'Source',       // Purple - anchor points
+  'Mailbox',      // Purple - anchor points
+  'Document',     // Blue - main content
+  'Email',        // Blue - main content
+  'Code',         // Cyan - technical
+  'Person',       // Teal - actors
+  'Organization', // Teal - actors
+  'Concept',      // Amber - abstract
+  'Event',        // Amber - abstract
+];
+const TYPE_WEIGHTS = [
+  0.05,  // Source
+  0.05,  // Mailbox
+  0.20,  // Document
+  0.10,  // Email
+  0.15,  // Code
+  0.15,  // Person
+  0.05,  // Organization
+  0.15,  // Concept
+  0.10,  // Event
+]; // Sum to 1.0
 
 /**
  * Pick a random entity type using weighted distribution.
@@ -147,6 +195,10 @@ export function generateMockGraphData(nodeCount: number = 50): GraphData {
     Person: 0,
     Code: 0,
     Concept: 0,
+    Email: 0,
+    Mailbox: 0,
+    Source: 0,
+    Organization: 0,
   };
 
   // Generate nodes with initial positions near origin (0,0)
@@ -180,6 +232,26 @@ export function generateMockGraphData(nodeCount: number = 50): GraphData {
   const links: GraphLink[] = [];
   const linkSet = new Set<string>(); // Prevent duplicate links
 
+  // Helper to determine relationship type based on node types
+  const getRelationship = (sourceType: EntityType, targetType: EntityType): string => {
+    // Source/Mailbox "contains" content (Document, Email, Code)
+    const sourceContainers: EntityType[] = ['Source', 'Mailbox'];
+    const contentTypes: EntityType[] = ['Document', 'Email', 'Code'];
+
+    if (sourceContainers.includes(sourceType) && contentTypes.includes(targetType)) {
+      return 'contains';
+    }
+
+    // Content "mentions" entities (Person, Organization, Concept, Event)
+    const entityTypes: EntityType[] = ['Person', 'Organization', 'Concept', 'Event'];
+    if (contentTypes.includes(sourceType) && entityTypes.includes(targetType)) {
+      return 'mentions';
+    }
+
+    // Default: 50% mentions, 50% contains for visual variety
+    return Math.random() > 0.5 ? 'mentions' : 'contains';
+  };
+
   for (let i = 0; i < linkCount; i++) {
     const sourceIdx = Math.floor(Math.random() * nodeCount);
     const targetIdx = Math.floor(Math.random() * nodeCount);
@@ -194,10 +266,13 @@ export function generateMockGraphData(nodeCount: number = 50): GraphData {
 
     linkSet.add(linkKey);
 
+    const sourceNode = nodes[sourceIdx];
+    const targetNode = nodes[targetIdx];
+
     links.push({
-      source: nodes[sourceIdx].id,
-      target: nodes[targetIdx].id,
-      relationship: RELATIONSHIPS[Math.floor(Math.random() * RELATIONSHIPS.length)],
+      source: sourceNode.id,
+      target: targetNode.id,
+      relationship: getRelationship(sourceNode.node_type, targetNode.node_type),
       weight: Math.random() * 0.8 + 0.2, // 0.2-1.0
     });
   }

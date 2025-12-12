@@ -295,11 +295,12 @@ class ImapEmailConnector:
         pool = await self._get_connection_pool(descriptor)
 
         # Create sync engine
+        # Note: consent_manager=None because consent is already checked at the connector level
         sync_engine = ImapSyncEngine(
             connection_pool=pool,
             state_store=self._state_store,
             audit_logger=self._audit_logger,
-            consent_manager=self._consent_registry,
+            consent_manager=None,
         )
 
         # Perform incremental sync
@@ -429,10 +430,11 @@ class ImapEmailConnector:
                     flags_str = [f.decode() if isinstance(f, bytes) else str(f) for f in flags]
 
             # Parse email
+            # Note: consent_manager=None because consent is already checked at the connector level
             email_parser = EmailParser(
                 privacy_policy=descriptor.privacy_settings,
                 audit_logger=self._audit_logger,
-                consent_manager=self._consent_registry,
+                consent_manager=None,
             )
 
             email_message = email_parser.parse_message(
@@ -929,7 +931,7 @@ class ImapEmailConnector:
             pool = ImapConnectionPool(
                 descriptor=descriptor,
                 credential_manager=self._credential_manager,
-                pool_size=3,  # Conservative pool size for on-device usage
+                max_connections=3,  # Conservative pool size for on-device usage
             )
             self._connection_pools[descriptor.id] = pool
 

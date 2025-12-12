@@ -90,35 +90,42 @@ pub struct SearchHistoryItem {
 
 /// Execute a search query against the Hybrid Search API.
 ///
-/// This command calls the Python CLI: `futurnal search --json <query>`
+/// This command calls the Python CLI: `futurnal search query --json <query>`
 /// Returns real results from the PKG or empty results if no data indexed.
 #[command]
 pub async fn search_query(query: SearchQuery) -> Result<SearchResponse, String> {
     let start = std::time::Instant::now();
 
-    // For now, return an empty but valid response until CLI is fully wired
-    // This satisfies the "no mockups" rule - it's a real empty response, not fake data
-    let response = SearchResponse {
-        results: vec![],
-        total: 0,
-        query_id: Uuid::new_v4().to_string(),
-        intent: QueryIntent {
-            primary: "exploratory".to_string(),
-            temporal: None,
-            causal: None,
-        },
-        execution_time_ms: start.elapsed().as_millis() as u64,
-    };
+    // Build CLI args
+    let top_k_str = query.top_k.unwrap_or(10).to_string();
+    let args = vec![
+        "search",
+        "query",
+        &query.query,
+        "--top-k",
+        &top_k_str,
+        "--json",
+    ];
 
-    // TODO: Wire to Python CLI when search command is added
-    // let args = vec![
-    //     "search",
-    //     "--json",
-    //     &query.query,
-    //     "--top-k",
-    //     &query.top_k.unwrap_or(10).to_string(),
-    // ];
-    // let response: SearchResponse = crate::python::execute_cli(&args).await?;
+    // Execute Python CLI
+    let response: SearchResponse = match crate::python::execute_cli(&args).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            log::warn!("Search CLI failed, returning empty results: {}", e);
+            // Return empty results on error (graceful degradation)
+            SearchResponse {
+                results: vec![],
+                total: 0,
+                query_id: Uuid::new_v4().to_string(),
+                intent: QueryIntent {
+                    primary: "exploratory".to_string(),
+                    temporal: None,
+                    causal: None,
+                },
+                execution_time_ms: start.elapsed().as_millis() as u64,
+            }
+        }
+    };
 
     log::info!(
         "Search query '{}' returned {} results in {}ms",
@@ -135,20 +142,23 @@ pub async fn search_query(query: SearchQuery) -> Result<SearchResponse, String> 
 /// Returns recent search queries and their result counts.
 #[command]
 pub async fn get_search_history(limit: Option<u32>) -> Result<Vec<SearchHistoryItem>, String> {
-    let _limit = limit.unwrap_or(50);
+    let limit_str = limit.unwrap_or(50).to_string();
 
-    // Return empty history until CLI is wired
-    // This is a real empty response, not mock data
-    Ok(vec![])
+    let args = vec![
+        "search",
+        "history",
+        "--limit",
+        &limit_str,
+        "--json",
+    ];
 
-    // TODO: Wire to Python CLI
-    // let args = vec![
-    //     "search",
-    //     "history",
-    //     "--json",
-    //     "--limit",
-    //     &limit.to_string(),
-    // ];
-    // let history: Vec<SearchHistoryItem> = crate::python::execute_cli(&args).await.unwrap_or_default();
-    // Ok(history)
+    let history: Vec<SearchHistoryItem> = match crate::python::execute_cli(&args).await {
+        Ok(h) => h,
+        Err(e) => {
+            log::warn!("Search history failed: {}", e);
+            vec![]
+        }
+    };
+
+    Ok(history)
 }

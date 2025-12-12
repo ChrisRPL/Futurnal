@@ -532,5 +532,325 @@ def test_connection(
         raise typer.Exit(1)
 
 
+@app.command("sync")
+def sync_repository(
+    repo_id: str = typer.Argument(..., help="Repository ID to sync (or 'all' for all repos)"),
+    shallow: bool = typer.Option(True, "--shallow/--full", help="Use shallow clone (default: shallow)"),
+    depth: int = typer.Option(1, "--depth", "-d", help="Clone depth for shallow clones"),
+    process: bool = typer.Option(False, "--process", "-p", help="Process synced files into knowledge graph"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Sync (clone/update) a GitHub repository to local storage."""
+    import asyncio
+    import json as json_module
+
+    from .git_clone_sync import GitCloneRepositorySync
+    from .sync_models import SyncStrategy, SyncStatus
+
+    registry = _get_registry()
+    cred_manager = _get_credential_manager()
+
+    # Determine which repos to sync
+    if repo_id.lower() == "all":
+        repos_to_sync = registry.list()
+        if not repos_to_sync:
+            if json_output:
+                print(json_module.dumps({"error": "No repositories registered"}))
+            else:
+                error_console.print("Error: No repositories registered")
+            raise typer.Exit(1)
+    else:
+        try:
+            descriptor = registry.get(repo_id)
+            repos_to_sync = [descriptor]
+        except FileNotFoundError:
+            if json_output:
+                print(json_module.dumps({"error": f"Repository '{repo_id}' not found"}))
+            else:
+                error_console.print(f"Error: Repository '{repo_id}' not found")
+            raise typer.Exit(1)
+
+    # Initialize sync infrastructure
+    try:
+        syncer = GitCloneRepositorySync(credential_manager=cred_manager)
+    except RuntimeError as e:
+        if json_output:
+            print(json_module.dumps({"error": str(e)}))
+        else:
+            error_console.print(f"Error: {e}")
+        raise typer.Exit(1)
+
+    # Build sync strategy
+    strategy = SyncStrategy(
+        clone_depth=depth if shallow else None,
+        single_branch=True,
+        include_tags=not shallow,
+    )
+
+    results = []
+
+    async def run_sync():
+        nonlocal results
+        for descriptor in repos_to_sync:
+            if not json_output:
+                console.print(f"\n[bold]Syncing:[/bold] {descriptor.full_name}")
+
+            # Update strategy with repo's branches
+            repo_strategy = strategy.model_copy()
+            repo_strategy.branches = descriptor.branches or ["main"]
+
+            result = await syncer.sync_repository(
+                descriptor=descriptor,
+                strategy=repo_strategy,
+            )
+
+            result_dict = {
+                "repo_id": result.repo_id,
+                "full_name": descriptor.full_name,
+                "status": result.status.value,
+                "files_synced": result.files_synced,
+                "bytes_synced": result.bytes_synced,
+                "bytes_synced_mb": round(result.bytes_synced_mb, 2),
+                "duration_seconds": round(result.duration_seconds or 0, 2),
+                "branches_synced": result.branches_synced,
+                "error_message": result.error_message,
+            }
+            results.append(result_dict)
+
+            if not json_output:
+                if result.status == SyncStatus.COMPLETED:
+                    console.print(f"  [green]✓[/green] Sync completed")
+                    console.print(f"    Files: {result.files_synced}")
+                    console.print(f"    Size: {result.bytes_synced_mb:.2f} MB")
+                    console.print(f"    Duration: {result.duration_seconds:.1f}s")
+                    console.print(f"    Clone path: {syncer.clone_base_dir / descriptor.id}")
+                else:
+                    console.print(f"  [red]✗[/red] Sync failed: {result.error_message}")
+
+    # Run async sync
+    asyncio.run(run_sync())
+
+    # Process files if requested
+    if process:
+        for result_dict in results:
+            if result_dict["status"] == "completed":
+                repo_id_done = result_dict["repo_id"]
+                full_name = result_dict["full_name"]
+                clone_path = syncer.clone_base_dir / repo_id_done
+
+                if clone_path.exists():
+                    files_processed, files_failed = _process_cloned_files(
+                        clone_path=clone_path,
+                        repo_id=repo_id_done,
+                        full_name=full_name,
+                        json_output=json_output,
+                    )
+                    result_dict["files_processed"] = files_processed
+                    result_dict["files_failed"] = files_failed
+
+    if json_output:
+        print(json_module.dumps(results if len(results) > 1 else results[0] if results else {}))
+    else:
+        # Summary for multiple repos
+        if len(repos_to_sync) > 1:
+            succeeded = sum(1 for r in results if r["status"] == "completed")
+            failed = len(results) - succeeded
+            console.print(f"\n[bold]Summary:[/bold] {succeeded} succeeded, {failed} failed")
+
+
+def _process_cloned_files(
+    clone_path: Path,
+    repo_id: str,
+    full_name: str,
+    json_output: bool = False,
+) -> tuple[int, int]:
+    """Process cloned files through the normalization pipeline.
+
+    Args:
+        clone_path: Path to cloned repository
+        repo_id: Repository identifier
+        full_name: Full repository name (owner/repo)
+        json_output: Whether to suppress console output
+
+    Returns:
+        Tuple of (files_processed, files_failed)
+    """
+    import asyncio
+    import hashlib
+    import json as json_module
+    from datetime import datetime, timezone
+
+    workspace_path = Path.home() / ".futurnal" / "workspace"
+    parsed_dir = workspace_path / "parsed"
+    parsed_dir.mkdir(parents=True, exist_ok=True)
+
+    if not json_output:
+        console.print(f"\n[bold]Processing files from:[/bold] {full_name}")
+
+    # Supported file extensions for processing
+    SUPPORTED_EXTENSIONS = {
+        '.md', '.markdown', '.txt', '.rst',  # Documentation
+        '.py', '.js', '.ts', '.tsx', '.jsx',  # Code
+        '.java', '.kt', '.scala', '.go', '.rs', '.c', '.cpp', '.h', '.hpp',
+        '.cs', '.rb', '.php', '.swift', '.m', '.mm',
+        '.json', '.yaml', '.yml', '.toml', '.xml',  # Config
+        '.html', '.css', '.scss', '.less',  # Web
+        '.sh', '.bash', '.zsh', '.fish',  # Shell
+        '.sql', '.graphql',  # Query languages
+        '.dockerfile', '.Dockerfile',  # Containers
+    }
+
+    # Files/directories to skip
+    SKIP_PATTERNS = {
+        '.git', '__pycache__', 'node_modules', '.venv', 'venv',
+        '.idea', '.vscode', '.DS_Store', 'dist', 'build',
+        '.egg-info', '.pytest_cache', '.mypy_cache', '.coverage',
+    }
+
+    files_processed = 0
+    files_failed = 0
+
+    def should_skip(path: Path) -> bool:
+        for part in path.parts:
+            if part in SKIP_PATTERNS:
+                return True
+        return False
+
+    def get_file_hash(file_path: Path) -> str:
+        """Generate SHA256 hash of file content."""
+        hasher = hashlib.sha256()
+        with open(file_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(8192), b''):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    # Walk through the clone directory
+    for file_path in clone_path.rglob('*'):
+        if not file_path.is_file():
+            continue
+
+        if should_skip(file_path):
+            continue
+
+        # Check extension
+        if file_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            continue
+
+        try:
+            # Read file content
+            content = file_path.read_text(encoding='utf-8', errors='ignore')
+            if not content.strip():
+                continue
+
+            # Generate file hash for document ID
+            file_hash = get_file_hash(file_path)
+            relative_path = file_path.relative_to(clone_path)
+
+            # Build source_id that matches "github-{owner}-{repo}" pattern
+            # This ensures files are attributed to the GitHub source
+            owner_repo = full_name.replace('/', '-')
+            source_id = f"github-{owner_repo}"
+
+            # Create parsed document in standard format
+            doc = {
+                "type": "NarrativeText",
+                "element_id": file_hash[:32],
+                "text": content[:50000],  # Truncate very large files
+                "metadata": {
+                    "languages": ["eng"],  # Default to English
+                    "file_directory": str(file_path.parent),
+                    "filename": file_path.name,
+                    "filetype": _get_mimetype(file_path),
+                    "last_modified": datetime.fromtimestamp(
+                        file_path.stat().st_mtime
+                    ).isoformat(),
+                    "source": f"GitHub:{full_name}",
+                    "source_type": "github",
+                    "source_id": source_id,
+                    "path": str(relative_path),
+                    "repo_id": repo_id,
+                    "repo_full_name": full_name,
+                    "sha256": file_hash,
+                    "size_bytes": file_path.stat().st_size,
+                    "modified_at": datetime.fromtimestamp(
+                        file_path.stat().st_mtime
+                    ).isoformat(),
+                    "ingested_at": datetime.now(timezone.utc).isoformat(),
+                },
+            }
+
+            # Write to parsed directory
+            output_path = parsed_dir / f"{file_hash}.json"
+            output_path.write_text(json_module.dumps(doc, indent=2))
+
+            # Extract and save entities
+            try:
+                from futurnal.pipeline.entity_extractor import EntityExtractor
+                extractor = EntityExtractor(workspace_path)
+                doc_entities = extractor.extract_from_element(doc)
+                if doc_entities.entities:
+                    extractor.save_entities(doc_entities)
+            except Exception as entity_err:
+                # Don't fail on entity extraction errors
+                pass
+
+            files_processed += 1
+
+            if not json_output and files_processed % 50 == 0:
+                console.print(f"  Processed {files_processed} files...", style="dim")
+
+        except Exception as e:
+            files_failed += 1
+            if not json_output:
+                console.print(f"  [yellow]Warning:[/yellow] Failed to process {file_path.name}: {e}", style="dim")
+
+    if not json_output:
+        console.print(f"  [green]✓[/green] Processed {files_processed} files ({files_failed} failed)")
+
+    return files_processed, files_failed
+
+
+def _get_mimetype(file_path: Path) -> str:
+    """Get MIME type for a file based on extension."""
+    ext_to_mime = {
+        '.md': 'text/markdown',
+        '.markdown': 'text/markdown',
+        '.txt': 'text/plain',
+        '.rst': 'text/x-rst',
+        '.py': 'text/x-python',
+        '.js': 'application/javascript',
+        '.ts': 'application/typescript',
+        '.tsx': 'application/typescript',
+        '.jsx': 'application/javascript',
+        '.java': 'text/x-java',
+        '.kt': 'text/x-kotlin',
+        '.scala': 'text/x-scala',
+        '.go': 'text/x-go',
+        '.rs': 'text/x-rust',
+        '.c': 'text/x-c',
+        '.cpp': 'text/x-c++',
+        '.h': 'text/x-c',
+        '.hpp': 'text/x-c++',
+        '.cs': 'text/x-csharp',
+        '.rb': 'text/x-ruby',
+        '.php': 'text/x-php',
+        '.swift': 'text/x-swift',
+        '.json': 'application/json',
+        '.yaml': 'text/x-yaml',
+        '.yml': 'text/x-yaml',
+        '.toml': 'text/x-toml',
+        '.xml': 'application/xml',
+        '.html': 'text/html',
+        '.css': 'text/css',
+        '.scss': 'text/x-scss',
+        '.less': 'text/x-less',
+        '.sh': 'application/x-sh',
+        '.bash': 'application/x-sh',
+        '.sql': 'application/sql',
+        '.graphql': 'application/graphql',
+    }
+    return ext_to_mime.get(file_path.suffix.lower(), 'text/plain')
+
+
 if __name__ == "__main__":
     app()

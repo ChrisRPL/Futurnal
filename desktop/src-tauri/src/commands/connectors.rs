@@ -126,23 +126,98 @@ fn imap_to_connector(desc: ImapDescriptor) -> Connector {
     }
 }
 
+/// GitHub sync status information.
+struct GithubSyncStatus {
+    is_synced: bool,
+    files_count: u32,
+    last_sync: Option<String>,
+}
+
+/// Recursively count files in a directory, excluding .git.
+fn count_files_recursive(dir: &std::path::Path) -> u32 {
+    let mut count = 0;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            // Skip .git directory
+            if path.file_name().map_or(false, |n| n == ".git") {
+                continue;
+            }
+            if path.is_file() {
+                count += 1;
+            } else if path.is_dir() {
+                count += count_files_recursive(&path);
+            }
+        }
+    }
+    count
+}
+
+/// Check if a GitHub repo has been synced (cloned) and get stats.
+fn get_github_sync_status(repo_id: &str) -> GithubSyncStatus {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let clone_dir = PathBuf::from(format!("{home}/.futurnal/repositories/github/{repo_id}"));
+
+    if !clone_dir.exists() {
+        return GithubSyncStatus {
+            is_synced: false,
+            files_count: 0,
+            last_sync: None,
+        };
+    }
+
+    // Count files in the clone directory (excluding .git)
+    let file_count = count_files_recursive(&clone_dir);
+
+    // Get last modification time of the directory
+    let last_sync = std::fs::metadata(&clone_dir)
+        .and_then(|m| m.modified())
+        .ok()
+        .map(|t| {
+            // Convert SystemTime to RFC3339 string
+            let duration = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+            let secs = duration.as_secs() as i64;
+            // Simple ISO 8601 format without external deps
+            format!("{}", chrono::DateTime::from_timestamp(secs, 0)
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_else(|| "unknown".to_string()))
+        });
+
+    GithubSyncStatus {
+        is_synced: true,
+        files_count: file_count,
+        last_sync,
+    }
+}
+
 /// Convert GitHub descriptor to Connector.
 fn github_to_connector(desc: GithubDescriptor) -> Connector {
+    let sync_status = get_github_sync_status(&desc.id);
+
     Connector {
         id: desc.id.clone(),
         name: desc.name.unwrap_or_else(|| desc.full_name.clone()),
         connector_type: "github".to_string(),
-        status: "active".to_string(),
-        last_sync: None,
+        status: if sync_status.is_synced { "active" } else { "pending" }.to_string(),
+        last_sync: sync_status.last_sync,
         next_sync: None,
         progress: None,
-        error: None,
+        error: if !sync_status.is_synced {
+            Some("Not synced - click Sync to clone repository".to_string())
+        } else {
+            None
+        },
         config: serde_json::json!({
             "repo": desc.full_name,
             "host": desc.github_host,
-            "visibility": desc.visibility
+            "visibility": desc.visibility,
+            "synced": sync_status.is_synced
         }),
-        stats: ConnectorStats::default(),
+        stats: ConnectorStats {
+            files_processed: sync_status.files_count,
+            entities_extracted: 0,
+            last_duration: None,
+        },
     }
 }
 
@@ -427,14 +502,30 @@ pub async fn add_source(request: AddSourceRequest) -> Result<Connector, String> 
             let server = config.get("server")
                 .and_then(|v| v.as_str())
                 .ok_or("Missing 'server' in config")?;
+            let password = config.get("password")
+                .and_then(|v| v.as_str());
 
-            let result: ImapDescriptor = crate::python::execute_cli(&[
+            // Build command args
+            let mut args = vec![
                 "sources", "imap", "add",
                 "--email", email,
                 "--host", server,
                 "--name", &request.name,
+                "--auth", "app_password",  // Force app_password mode for desktop UI
                 "--json"
-            ]).await?;
+            ];
+
+            // Add password if provided
+            let password_owned: String;
+            if let Some(pwd) = password {
+                if !pwd.is_empty() {
+                    password_owned = pwd.to_string();
+                    args.push("--password");
+                    args.push(&password_owned);
+                }
+            }
+
+            let result: ImapDescriptor = crate::python::execute_cli(&args).await?;
 
             imap_to_connector(result)
         }
@@ -525,9 +616,16 @@ pub async fn resume_source(id: String) -> Result<(), String> {
 /// - IMAP: `sources imap remove <id> --yes`
 /// - GitHub: `github remove <id> --yes`
 /// - Generic: `sources remove <id> --yes`
+/// Also removes parsed files from the knowledge graph.
 #[command]
-pub async fn delete_source(id: String) -> Result<(), String> {
-    log::info!("Deleting source: {}", id);
+pub async fn delete_source(id: String, connector_type: Option<String>) -> Result<(), String> {
+    log::info!("Deleting source: {} (type: {:?})", id, connector_type);
+
+    // First, clean up parsed files from the knowledge graph
+    let cleanup_result = cleanup_parsed_files(&id, connector_type.as_deref()).await;
+    if let Err(e) = &cleanup_result {
+        log::warn!("Failed to cleanup parsed files for source '{}': {}", id, e);
+    }
 
     // Try generic remove first (handles both local sources and can detect type)
     match crate::python::execute_cli_void(&["sources", "remove", &id, "--yes"]).await {
@@ -554,6 +652,108 @@ pub async fn delete_source(id: String) -> Result<(), String> {
             Err(format!("Failed to remove source '{}': {}", id, e))
         }
     }
+}
+
+/// Clean up parsed files from the knowledge graph for a given source.
+/// Scans parsed, imap, and entities directories and removes files matching the source pattern.
+async fn cleanup_parsed_files(id: &str, connector_type: Option<&str>) -> Result<u32, String> {
+    use std::fs;
+
+    let home = dirs::home_dir().ok_or("Failed to get home directory")?;
+    let workspace = home.join(".futurnal").join("workspace");
+    let parsed_dir = workspace.join("parsed");
+    let imap_dir = workspace.join("imap");
+    let entities_dir = workspace.join("entities");
+
+    // Build possible source_id patterns to match
+    let mut patterns: Vec<String> = vec![
+        id.to_string(),  // Direct ID match
+    ];
+
+    // Add type-specific patterns
+    match connector_type {
+        Some("github") => {
+            patterns.push(format!("github-{}", id.replace('/', "-")));
+        }
+        Some("imap") => {
+            patterns.push(format!("imap-{}", id));
+        }
+        Some("obsidian") => {
+            patterns.push(format!("obsidian-{}", id));
+        }
+        Some("local_folder") => {
+            // Local folder sources use the name as source
+            patterns.push(id.to_string());
+        }
+        _ => {
+            // For unknown types, try common patterns
+            patterns.push(format!("github-{}", id.replace('/', "-")));
+            patterns.push(format!("imap-{}", id));
+            patterns.push(format!("obsidian-{}", id));
+        }
+    }
+
+    log::info!("Cleaning up files matching patterns: {:?}", patterns);
+
+    let mut removed_count = 0u32;
+
+    // Helper closure to check if a JSON document matches our patterns
+    let matches_pattern = |doc: &serde_json::Value| -> bool {
+        // Check metadata.source_id
+        if let Some(metadata) = doc.get("metadata") {
+            if let Some(source_id) = metadata.get("source_id").and_then(|v| v.as_str()) {
+                if patterns.iter().any(|p| source_id == p || source_id.contains(p)) {
+                    return true;
+                }
+            }
+            // Check metadata.source
+            if let Some(source) = metadata.get("source").and_then(|v| v.as_str()) {
+                if patterns.iter().any(|p| source == p || source.contains(p)) {
+                    return true;
+                }
+            }
+        }
+        // Check top-level source (IMAP format)
+        if let Some(source) = doc.get("source").and_then(|v| v.as_str()) {
+            if patterns.iter().any(|p| source == p || source.contains(p)) {
+                return true;
+            }
+        }
+        false
+    };
+
+    // Helper to scan a directory and remove matching files
+    let scan_and_remove = |dir: &std::path::Path, removed: &mut u32| {
+        if !dir.exists() {
+            return;
+        }
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                    continue;
+                }
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(doc) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if matches_pattern(&doc) {
+                            if fs::remove_file(&path).is_ok() {
+                                *removed += 1;
+                                log::debug!("Removed file: {:?}", path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+
+    // Scan all relevant directories
+    scan_and_remove(&parsed_dir, &mut removed_count);
+    scan_and_remove(&imap_dir, &mut removed_count);
+    scan_and_remove(&entities_dir, &mut removed_count);
+
+    log::info!("Removed {} files for source '{}'", removed_count, id);
+    Ok(removed_count)
 }
 
 /// Retry a failed source sync.
@@ -616,4 +816,292 @@ pub async fn resume_all_sources() -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+/// Result of a sync operation.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SyncResult {
+    pub repo_id: String,
+    pub full_name: String,
+    pub status: String,
+    pub files_synced: u32,
+    pub bytes_synced: u64,
+    pub bytes_synced_mb: f64,
+    pub duration_seconds: f64,
+    pub branches_synced: Vec<String>,
+    pub error_message: Option<String>,
+    /// Number of files processed into the knowledge graph (when --process flag used)
+    pub files_processed: Option<u32>,
+    /// Number of files that failed processing (when --process flag used)
+    pub files_failed: Option<u32>,
+}
+
+/// Sync a data source (clone/update repository or scan local folder).
+///
+/// Routes by type:
+/// - github: `github sync <id> --process --json` - clones/pulls repository files
+/// - imap: `sources imap sync <id> --process --json` - syncs emails from IMAP server
+/// - local_folder/obsidian: Enqueues job and processes via orchestrator
+#[command]
+pub async fn sync_source(id: String, connector_type: String) -> Result<SyncResult, String> {
+    log::info!("Syncing source: {} (type: {})", id, connector_type);
+    let start = std::time::Instant::now();
+
+    match connector_type.as_str() {
+        "github" => {
+            // Call GitHub sync CLI to clone/update the repository and process files
+            // The --process flag processes cloned files into the knowledge graph
+            let result: SyncResult = crate::python::execute_cli_with_timeout(
+                &["github", "sync", &id, "--process", "--json"],
+                300  // 5 minute timeout for sync
+            ).await?;
+
+            if result.status == "completed" {
+                log::info!(
+                    "GitHub sync completed: {} files ({:.2} MB) in {:.1}s, processed: {:?}, failed: {:?}",
+                    result.files_synced,
+                    result.bytes_synced_mb,
+                    result.duration_seconds,
+                    result.files_processed,
+                    result.files_failed
+                );
+            }
+
+            Ok(result)
+        }
+        "imap" => {
+            // Call IMAP sync CLI to sync emails and process them into the knowledge graph
+            // Fast mode (default) uses batch IMAP fetch and simple text extraction for speed
+            // The --limit flag limits initial sync to 50 emails to prevent long initial syncs
+            let result: SyncResult = crate::python::execute_cli_with_timeout(
+                &["sources", "imap", "sync", &id, "--limit", "50", "--json"],
+                120  // 2 minute timeout for fast IMAP sync (~50 emails in ~10 seconds)
+            ).await?;
+
+            if result.status == "completed" || result.status == "completed_with_errors" {
+                log::info!(
+                    "IMAP sync completed: {} messages in {:.1}s, processed: {:?}, failed: {:?}",
+                    result.files_synced,
+                    result.duration_seconds,
+                    result.files_processed,
+                    result.files_failed
+                );
+            }
+
+            Ok(result)
+        }
+        "local_folder" | "obsidian" => {
+            // For local folder/obsidian sources, use synchronous sync command
+            // This directly processes files without needing the orchestrator daemon
+            // Use --force to ensure files are reprocessed even if already in state store
+            log::info!("Starting synchronous sync for local source: {}", id);
+
+            let result: SyncResult = crate::python::execute_cli_with_timeout(
+                &["sources", "sync", &id, "--force", "--json"],
+                300  // 5 minute timeout for sync
+            ).await?;
+
+            if result.status == "completed" || result.status == "completed_with_errors" {
+                log::info!(
+                    "Local folder sync completed: {} elements in {:.1}s",
+                    result.files_synced,
+                    result.duration_seconds
+                );
+            }
+
+            Ok(result)
+        }
+        "local_folder_async" => {
+            // Legacy async mode - enqueues job for orchestrator (kept for reference)
+            if let Err(e) = super::orchestrator::ensure_orchestrator_running().await {
+                log::warn!("Failed to ensure orchestrator is running: {}", e);
+            }
+
+            let enqueue_result = crate::python::execute_cli_void(&[
+                "sources", "run", &id, "--force"
+            ]).await;
+
+            let duration = start.elapsed().as_secs_f64();
+
+            match enqueue_result {
+                Ok(()) => {
+                    log::info!("Enqueued sync job for local source: {}", id);
+                    Ok(SyncResult {
+                        repo_id: id.clone(),
+                        full_name: id,
+                        status: "enqueued".to_string(),
+                        files_synced: 0,
+                        bytes_synced: 0,
+                        bytes_synced_mb: 0.0,
+                        duration_seconds: duration,
+                        branches_synced: vec![],
+                        error_message: Some("Job enqueued for processing.".to_string()),
+                        files_processed: None,
+                        files_failed: None,
+                    })
+                }
+                Err(e) => {
+                    log::error!("Failed to enqueue sync job for {}: {}", id, e);
+                    Err(format!("Failed to sync: {}", e))
+                }
+            }
+        }
+        _ => {
+            // For unknown types, try the generic run command
+            if let Err(e) = super::orchestrator::ensure_orchestrator_running().await {
+                log::warn!("Failed to ensure orchestrator is running: {}", e);
+            }
+
+            let enqueue_result = crate::python::execute_cli_void(&[
+                "sources", "run", &id, "--force"
+            ]).await;
+
+            let duration = start.elapsed().as_secs_f64();
+
+            match enqueue_result {
+                Ok(()) => {
+                    log::info!("Enqueued sync job for source: {}", id);
+                    Ok(SyncResult {
+                        repo_id: id.clone(),
+                        full_name: id,
+                        status: "enqueued".to_string(),
+                        files_synced: 0,
+                        bytes_synced: 0,
+                        bytes_synced_mb: 0.0,
+                        duration_seconds: duration,
+                        branches_synced: vec![],
+                        error_message: Some("Job enqueued for processing.".to_string()),
+                        files_processed: None,
+                        files_failed: None,
+                    })
+                }
+                Err(e) => {
+                    Err(format!(
+                        "Sync for type '{}' failed. Make sure the orchestrator is running. Error: {}",
+                        connector_type, e
+                    ))
+                }
+            }
+        }
+    }
+}
+
+/// Sync all GitHub sources.
+///
+/// Calls: `github sync all --process --json`
+#[command]
+pub async fn sync_all_github() -> Result<Vec<SyncResult>, String> {
+    log::info!("Syncing all GitHub repositories");
+
+    // Use --process flag to process files into the knowledge graph
+    let result: Vec<SyncResult> = crate::python::execute_cli_with_timeout(
+        &["github", "sync", "all", "--process", "--json"],
+        600  // 10 minute timeout for all syncs
+    ).await?;
+
+    Ok(result)
+}
+
+/// OAuth authentication result.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AuthResult {
+    pub success: bool,
+    pub mailbox_id: Option<String>,
+    pub email: Option<String>,
+    pub credential_id: Option<String>,
+    pub provider: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Authenticate an IMAP mailbox using OAuth2.
+///
+/// This command opens a browser for OAuth2 authentication and stores the tokens.
+/// Must be called after adding an IMAP source with `add_source`.
+///
+/// Calls: `sources imap authenticate <mailbox_id> --client-id <id> --client-secret <secret> --provider <provider> --json`
+#[command]
+pub async fn authenticate_imap(
+    mailbox_id: String,
+    client_id: String,
+    client_secret: String,
+    provider: Option<String>,
+) -> Result<AuthResult, String> {
+    let provider_name = provider.unwrap_or_else(|| "gmail".to_string());
+
+    log::info!(
+        "Authenticating IMAP mailbox: {} with provider: {}",
+        mailbox_id,
+        provider_name
+    );
+
+    let result: AuthResult = crate::python::execute_cli_with_timeout(
+        &[
+            "sources", "imap", "authenticate",
+            &mailbox_id,
+            "--client-id", &client_id,
+            "--client-secret", &client_secret,
+            "--provider", &provider_name,
+            "--json"
+        ],
+        120  // 2 minute timeout for OAuth flow
+    ).await?;
+
+    if result.success {
+        log::info!("IMAP authentication successful for: {}", mailbox_id);
+    } else {
+        log::warn!(
+            "IMAP authentication failed for {}: {:?}",
+            mailbox_id,
+            result.error
+        );
+    }
+
+    Ok(result)
+}
+
+/// Result of an IMAP connection test.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ConnectionTestResult {
+    pub success: bool,
+    pub message: Option<String>,
+    pub error: Option<String>,
+    pub folders: Option<u32>,
+}
+
+/// Test IMAP connection before saving.
+///
+/// Validates that the provided credentials can successfully connect to the IMAP server.
+/// This should be called before `add_source` to give users immediate feedback on credential issues.
+///
+/// Calls: `sources imap test-connection --email <email> --host <host> --password <password> --json`
+#[command]
+pub async fn test_imap_connection(
+    email: String,
+    server: String,
+    password: String,
+) -> Result<ConnectionTestResult, String> {
+    log::info!("Testing IMAP connection for: {}", email);
+
+    let result: ConnectionTestResult = crate::python::execute_cli_with_timeout(
+        &[
+            "sources", "imap", "test-connection",
+            "--email", &email,
+            "--host", &server,
+            "--password", &password,
+            "--json"
+        ],
+        30  // 30 second timeout for connection test
+    ).await?;
+
+    if result.success {
+        log::info!("IMAP connection test successful for: {}", email);
+    } else {
+        log::warn!(
+            "IMAP connection test failed for {}: {:?}",
+            email,
+            result.error
+        );
+    }
+
+    Ok(result)
 }

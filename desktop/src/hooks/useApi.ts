@@ -105,14 +105,19 @@ export function useResumeConnector() {
 
 /**
  * Hook to delete a connector.
+ * Invalidates both connectors and graph caches since deletion removes data from the graph.
  */
 export function useDeleteConnector() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (id: string) => connectorsApi.delete(id),
+    mutationFn: ({ id, connectorType }: { id: string; connectorType?: string }) =>
+      connectorsApi.delete(id, connectorType),
     onSuccess: () => {
+      // Invalidate connectors list
       queryClient.invalidateQueries({ queryKey: queryKeys.connectors });
+      // Also invalidate graph since source data is removed
+      queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGraph() });
     },
   });
 }
@@ -153,6 +158,39 @@ export function useResumeAllConnectors() {
 
   return useMutation({
     mutationFn: () => connectorsApi.resumeAll(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.connectors });
+    },
+  });
+}
+
+/**
+ * Hook to sync a connector (clone/update repository for GitHub sources).
+ * Invalidates both connectors and graph caches since sync adds new data to the graph.
+ */
+export function useSyncConnector() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, connectorType }: { id: string; connectorType: string }) =>
+      connectorsApi.sync(id, connectorType),
+    onSuccess: () => {
+      // Invalidate connectors list
+      queryClient.invalidateQueries({ queryKey: queryKeys.connectors });
+      // Also invalidate graph since new data is added
+      queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGraph() });
+    },
+  });
+}
+
+/**
+ * Hook to sync all GitHub connectors.
+ */
+export function useSyncAllGitHub() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => connectorsApi.syncAllGitHub(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.connectors });
     },

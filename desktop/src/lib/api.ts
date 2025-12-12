@@ -12,6 +12,7 @@ import type {
   SearchHistoryItem,
   Connector,
   AddSourceRequest,
+  SyncResult,
   ConsentRecord,
   GrantConsentRequest,
   AuditLogEntry,
@@ -231,9 +232,11 @@ export const connectorsApi = {
 
   /**
    * Delete a data source.
+   * @param id Source ID to delete
+   * @param connectorType Optional connector type for better cleanup (github, imap, obsidian, local_folder)
    */
-  async delete(id: string): Promise<void> {
-    return invokeWithTimeout('delete_source', { id });
+  async delete(id: string, connectorType?: string): Promise<void> {
+    return invokeWithTimeout('delete_source', { id, connectorType });
   },
 
   /**
@@ -255,6 +258,44 @@ export const connectorsApi = {
    */
   async resumeAll(): Promise<void> {
     return invokeWithTimeout('resume_all_sources');
+  },
+
+  /**
+   * Sync a data source (clone/update repository).
+   * For GitHub sources, this triggers a git clone/pull operation.
+   * Returns sync result with files synced, bytes, and duration.
+   */
+  async sync(id: string, connectorType: string): Promise<SyncResult> {
+    return invokeWithTimeout('sync_source', { id, connectorType }, 300000); // 5 min timeout
+  },
+
+  /**
+   * Sync all GitHub sources.
+   */
+  async syncAllGitHub(): Promise<SyncResult[]> {
+    return invokeWithTimeout('sync_all_github', undefined, 600000); // 10 min timeout
+  },
+
+  /**
+   * Authenticate an IMAP mailbox using OAuth2.
+   * Opens a browser for OAuth2 authentication and stores the tokens.
+   * @param mailboxId The IMAP mailbox ID to authenticate
+   * @param clientId OAuth2 client ID from Google Cloud Console
+   * @param clientSecret OAuth2 client secret
+   * @param provider OAuth provider: 'gmail' or 'office365'
+   */
+  async authenticateImap(
+    mailboxId: string,
+    clientId: string,
+    clientSecret: string,
+    provider?: string
+  ): Promise<{ success: boolean; error?: string; credential_id?: string }> {
+    return invokeWithTimeout('authenticate_imap', {
+      mailboxId,
+      clientId,
+      clientSecret,
+      provider: provider || 'gmail',
+    }, 120000); // 2 min timeout for OAuth flow
   },
 };
 

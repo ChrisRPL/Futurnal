@@ -15,9 +15,11 @@ Option B Compliance:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from futurnal.search.config import SearchConfig
@@ -319,18 +321,140 @@ class HybridSearchAPI:
         top_k: int,
         filters: Optional[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """Execute temporal-aware search."""
-        # Placeholder - integrate with TemporalQueryEngine
-        return [
-            {
-                "id": f"temporal_result_{i}",
-                "content": f"Temporal result for: {query}",
-                "score": 0.9 - (i * 0.05),
-                "timestamp": "2024-01-15",
-                "entity_type": "Event",
-            }
-            for i in range(min(top_k, 5))
-        ]
+        """Execute temporal-aware search.
+
+        Parses temporal expressions like "last week" and filters documents
+        by their timestamps within the specified time range.
+        """
+        from datetime import datetime, timedelta
+        from futurnal.extraction.temporal.markers import TemporalMarkerExtractor
+
+        workspace = Path.home() / ".futurnal" / "workspace"
+        parsed_dir = workspace / "parsed"
+        imap_dir = workspace / "imap"
+
+        # Extract temporal markers from query
+        extractor = TemporalMarkerExtractor()
+        markers = extractor.extract_temporal_markers(query)
+
+        # Determine date range from temporal markers
+        start_date = None
+        end_date = datetime.now()
+
+        if markers:
+            ref_time = markers[0].timestamp
+            query_lower = query.lower()
+
+            if "week" in query_lower:
+                start_date = ref_time - timedelta(days=3)
+                end_date = ref_time + timedelta(days=4)
+            elif "month" in query_lower:
+                start_date = ref_time - timedelta(days=15)
+                end_date = ref_time + timedelta(days=16)
+            elif "year" in query_lower:
+                start_date = ref_time - timedelta(days=180)
+                end_date = ref_time + timedelta(days=180)
+            else:
+                start_date = ref_time - timedelta(days=1)
+                end_date = ref_time + timedelta(days=2)
+
+        results: List[Dict[str, Any]] = []
+        temporal_words = {"yesterday", "today", "tomorrow", "last", "next", "this", "week", "month", "year", "ago"}
+        query_terms = [w for w in query.lower().split() if w not in temporal_words]
+
+        # Search parsed documents
+        if parsed_dir.exists():
+            for json_file in parsed_dir.glob("*.json"):
+                try:
+                    data = json.loads(json_file.read_text())
+                    text = data.get("text", "") or data.get("content", "")
+
+                    doc_timestamp = data.get("ingested_at")
+                    if doc_timestamp and start_date:
+                        try:
+                            if isinstance(doc_timestamp, str):
+                                doc_time = datetime.fromisoformat(doc_timestamp.replace("Z", "+00:00"))
+                                if doc_time.tzinfo:
+                                    doc_time = doc_time.replace(tzinfo=None)
+                            else:
+                                doc_time = doc_timestamp
+
+                            if not (start_date <= doc_time <= end_date):
+                                continue
+                        except Exception:
+                            pass
+
+                    score = 0.5
+                    if query_terms:
+                        text_lower = text.lower()
+                        matches = sum(1 for term in query_terms if term in text_lower)
+                        score += (matches / len(query_terms)) * 0.5
+
+                    if score > 0.4:
+                        metadata = data.get("metadata", {})
+                        snippet = text[:300] + "..." if len(text) > 300 else text
+
+                        results.append({
+                            "id": data.get("element_id", json_file.stem),
+                            "content": snippet,
+                            "score": score,
+                            "confidence": 0.8,
+                            "timestamp": doc_timestamp,
+                            "entity_type": "Event" if "event" in text.lower() else "Document",
+                            "source_type": "text",
+                            "metadata": {
+                                "source": metadata.get("source", ""),
+                                "path": metadata.get("path"),
+                                "temporal_match": True,
+                            },
+                        })
+                except Exception as e:
+                    logger.debug(f"Error reading {json_file}: {e}")
+                    continue
+
+        # Search IMAP emails
+        if imap_dir.exists():
+            for json_file in imap_dir.glob("*.json"):
+                try:
+                    data = json.loads(json_file.read_text())
+                    content = data.get("content", "")
+                    metadata = data.get("metadata", {})
+
+                    doc_date = metadata.get("date")
+                    if doc_date and start_date:
+                        try:
+                            doc_time = datetime.fromisoformat(doc_date.replace("Z", "+00:00"))
+                            if doc_time.tzinfo:
+                                doc_time = doc_time.replace(tzinfo=None)
+                            if not (start_date <= doc_time <= end_date):
+                                continue
+                        except Exception:
+                            pass
+
+                    score = 0.5
+                    if query_terms:
+                        text_lower = content.lower()
+                        matches = sum(1 for term in query_terms if term in text_lower)
+                        score += (matches / len(query_terms)) * 0.5
+
+                    if score > 0.4:
+                        snippet = content[:300] + "..." if len(content) > 300 else content
+                        results.append({
+                            "id": data.get("sha256", json_file.stem),
+                            "content": snippet,
+                            "score": score,
+                            "confidence": 0.8,
+                            "timestamp": doc_date,
+                            "entity_type": "Email",
+                            "source_type": "text",
+                            "metadata": {"source": metadata.get("source", ""), "subject": metadata.get("subject", ""), "temporal_match": True},
+                        })
+                except Exception as e:
+                    logger.debug(f"Error reading {json_file}: {e}")
+                    continue
+
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results[:top_k]
 
     async def _causal_search(
         self,
@@ -379,17 +503,119 @@ class HybridSearchAPI:
         top_k: int,
         filters: Optional[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """Execute general hybrid search."""
-        return [
-            {
-                "id": f"general_result_{i}",
-                "content": f"Result for: {query}",
-                "score": 0.8 - (i * 0.03),
-                "confidence": 0.85,
-                "entity_type": ["Document", "Event", "Project"][i % 3],
-            }
-            for i in range(min(top_k, 5))
-        ]
+        """Execute general hybrid search over workspace documents.
+
+        Performs keyword-based search over parsed documents and emails.
+        Uses term frequency scoring for relevance ranking.
+        """
+        workspace = Path.home() / ".futurnal" / "workspace"
+        parsed_dir = workspace / "parsed"
+        imap_dir = workspace / "imap"
+
+        results: List[Dict[str, Any]] = []
+        query_terms = query.lower().split()
+
+        if not query_terms:
+            return []
+
+        # Search parsed documents (Obsidian, GitHub, etc.)
+        if parsed_dir.exists():
+            for json_file in parsed_dir.glob("*.json"):
+                try:
+                    data = json.loads(json_file.read_text())
+                    text = data.get("text", "") or data.get("content", "")
+                    if not text:
+                        continue
+
+                    # Calculate term frequency score
+                    text_lower = text.lower()
+                    matches = sum(1 for term in query_terms if term in text_lower)
+
+                    if matches > 0:
+                        score = matches / len(query_terms)
+
+                        # Extract metadata
+                        metadata = data.get("metadata", {})
+                        extra = metadata.get("extra", {})
+
+                        # Determine entity type
+                        source = metadata.get("source", "")
+                        entity_type = "Document"
+                        if source.endswith((".py", ".rs", ".ts", ".js", ".tsx", ".jsx")):
+                            entity_type = "Code"
+                        elif source.endswith(".md"):
+                            entity_type = "Document"
+
+                        # Get best label
+                        label = (
+                            extra.get("title")
+                            or metadata.get("filename", "")
+                            or json_file.stem[:50]
+                        )
+
+                        # Truncate content for snippet
+                        snippet = text[:300] + "..." if len(text) > 300 else text
+
+                        results.append({
+                            "id": data.get("element_id", json_file.stem),
+                            "content": snippet,
+                            "score": score,
+                            "confidence": min(0.5 + (score * 0.5), 1.0),
+                            "timestamp": data.get("ingested_at"),
+                            "entity_type": entity_type,
+                            "source_type": "text",
+                            "metadata": {
+                                "source": source,
+                                "label": label,
+                                "path": metadata.get("path"),
+                            },
+                        })
+                except Exception as e:
+                    logger.debug(f"Error reading {json_file}: {e}")
+                    continue
+
+        # Search IMAP emails
+        if imap_dir.exists():
+            for json_file in imap_dir.glob("*.json"):
+                try:
+                    data = json.loads(json_file.read_text())
+                    content = data.get("content", "")
+                    if not content:
+                        continue
+
+                    # Calculate term frequency score
+                    text_lower = content.lower()
+                    matches = sum(1 for term in query_terms if term in text_lower)
+
+                    if matches > 0:
+                        score = matches / len(query_terms)
+                        metadata = data.get("metadata", {})
+
+                        # Truncate content for snippet
+                        snippet = content[:300] + "..." if len(content) > 300 else content
+
+                        results.append({
+                            "id": data.get("sha256", json_file.stem),
+                            "content": snippet,
+                            "score": score,
+                            "confidence": min(0.5 + (score * 0.5), 1.0),
+                            "timestamp": metadata.get("date"),
+                            "entity_type": "Email",
+                            "source_type": "text",
+                            "metadata": {
+                                "source": metadata.get("source", ""),
+                                "label": metadata.get("subject", "Email"),
+                                "sender": metadata.get("sender"),
+                                "recipient": metadata.get("recipient"),
+                            },
+                        })
+                except Exception as e:
+                    logger.debug(f"Error reading {json_file}: {e}")
+                    continue
+
+        # Sort by score descending and limit
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results[:top_k]
 
     async def _basic_search(
         self,

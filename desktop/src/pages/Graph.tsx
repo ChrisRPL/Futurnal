@@ -5,16 +5,16 @@
  * Provides full-screen visualization with controls and detail panel.
  */
 
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Network, Filter } from 'lucide-react';
+import { ArrowLeft, Network, Filter, Eye, EyeOff, Mail, Palette } from 'lucide-react';
 import { KnowledgeGraph, type KnowledgeGraphRef } from '@/components/graph/KnowledgeGraph';
 import { GraphControls } from '@/components/graph/GraphControls';
 import { NodeDetailPanel } from '@/components/graph/NodeDetailPanel';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useKnowledgeGraph } from '@/hooks/useApi';
-import { useGraphStore, ALL_ENTITY_TYPES } from '@/stores/graphStore';
+import { useGraphStore, ALL_ENTITY_TYPES, isNodeTypeVisible } from '@/stores/graphStore';
 import { cn } from '@/lib/utils';
 
 export function GraphPage() {
@@ -28,13 +28,24 @@ export function GraphPage() {
     selectedNodeId,
     visibleNodeTypes,
     breathingEnabled,
+    colorMode,
     setSelectedNode,
     toggleNodeType,
     setBreathingEnabled,
+    toggleColorMode,
+    showAllNodeTypes,
   } = useGraphStore();
 
   // Find selected node
   const selectedNode = data?.nodes.find((n) => n.id === selectedNodeId);
+
+  // Check if emails are visible
+  const emailsVisible = isNodeTypeVisible('Email', visibleNodeTypes);
+
+  // Count emails in data for the badge
+  const emailCount = useMemo(() => {
+    return data?.nodes.filter((n) => n.node_type === 'Email').length ?? 0;
+  }, [data?.nodes]);
 
   // Handle reset
   const handleReset = useCallback(() => {
@@ -81,11 +92,49 @@ export function GraphPage() {
         </div>
 
         {/* Right: Filters */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
+          {/* Quick email toggle - prominent button */}
+          {emailCount > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => toggleNodeType('Email')}
+              className={cn(
+                'h-8 gap-2 transition-colors',
+                emailsVisible
+                  ? 'border-amber-500/50 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'
+                  : 'border-white/20 text-white/60 hover:text-white'
+              )}
+            >
+              <Mail className="h-4 w-4" />
+              {emailsVisible ? (
+                <>
+                  <span>Hide {emailCount} Emails</span>
+                  <EyeOff className="h-3 w-3" />
+                </>
+              ) : (
+                <>
+                  <span>Show Emails</span>
+                  <Eye className="h-3 w-3" />
+                </>
+              )}
+            </Button>
+          )}
+
+          {/* Show all button */}
+          {visibleNodeTypes.length > 0 && (
+            <button
+              onClick={showAllNodeTypes}
+              className="px-2 py-1 text-xs text-white/40 hover:text-white/80 transition-colors"
+            >
+              Show all
+            </button>
+          )}
+
           {/* Node type filters */}
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-white/40" />
-            {ALL_ENTITY_TYPES.map((type) => {
+            {ALL_ENTITY_TYPES.filter((t) => t !== 'Email').map((type) => {
               const isActive =
                 visibleNodeTypes.length === 0 || visibleNodeTypes.includes(type);
               return (
@@ -104,6 +153,21 @@ export function GraphPage() {
               );
             })}
           </div>
+
+          {/* Color mode toggle */}
+          <button
+            onClick={toggleColorMode}
+            className={cn(
+              'px-3 py-1 text-xs border transition-colors flex items-center gap-1.5',
+              colorMode === 'colored'
+                ? 'border-purple-500/50 text-purple-400 bg-purple-500/10'
+                : 'border-white/10 text-white/40'
+            )}
+            title={colorMode === 'colored' ? 'Switch to monochrome' : 'Switch to colored'}
+          >
+            <Palette className="h-3 w-3" />
+            {colorMode === 'colored' ? 'Colored' : 'Mono'}
+          </button>
 
           {/* Breathing toggle */}
           <button
