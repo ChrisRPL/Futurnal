@@ -33,6 +33,7 @@ import Signup from '@/pages/Signup';
 import ForgotPassword from '@/pages/ForgotPassword';
 import GraphPage from '@/pages/Graph';
 import ConnectorsPage from '@/pages/Connectors';
+import SettingsPage from '@/pages/Settings';
 
 /**
  * Get time-based greeting
@@ -292,7 +293,7 @@ function HomePage({ onOpenSearch }: HomePageProps) {
                 title="Settings"
                 description="Configure preferences"
                 icon={<Settings className="w-6 h-6" />}
-                onClick={() => console.log('Settings')}
+                onClick={() => navigate('/settings')}
               />
             </div>
           </div>
@@ -402,6 +403,14 @@ function App() {
           element={
             <ProtectedRoute>
               <ConnectorsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <SettingsPage />
             </ProtectedRoute>
           }
         />

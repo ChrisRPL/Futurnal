@@ -134,17 +134,18 @@ export interface SyncResult {
 export interface ConsentRecord {
   source_id: string;
   source_name: string;
-  consent_type: ConsentType;
+  consent_type: string; // Flexible to support Python backend scope-based types
   granted: boolean;
   granted_at?: string;
   expires_at?: string;
 }
 
-export type ConsentType = 'read' | 'process' | 'store' | 'cloud_backup';
+// Common consent types - the backend supports arbitrary scope strings
+export type ConsentType = 'read' | 'process' | 'store' | 'cloud_backup' | string;
 
 export interface GrantConsentRequest {
   source_id: string;
-  consent_type: ConsentType;
+  consent_type: string; // Flexible to support Python backend scope-based types
   duration_days?: number;
 }
 
