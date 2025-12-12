@@ -40,7 +40,7 @@ export function CommandPalette({
     intentConfidence,
     filters,
     setFilters,
-    recentSearches,
+    searchHistory,
     executeSearch,
     selectedResultId,
     setSelectedResult,
@@ -59,11 +59,11 @@ export function CommandPalette({
 
   // Calculate total navigable items
   const hasResults = results.length > 0;
-  const hasRecentSearches = !query && recentSearches.length > 0;
+  const hasSearchHistory = !query && searchHistory.length > 0;
   const totalItems = hasResults
     ? results.length
-    : hasRecentSearches
-    ? recentSearches.length
+    : hasSearchHistory
+    ? searchHistory.length
     : 0;
 
   // Reset selection when results change
@@ -144,8 +144,8 @@ export function CommandPalette({
           // Handle selection based on current view
           if (hasResults && results[selectedIndex]) {
             handleResultSelect(results[selectedIndex]);
-          } else if (hasRecentSearches && recentSearches[selectedIndex]) {
-            handleRecentSelect(recentSearches[selectedIndex]);
+          } else if (hasSearchHistory && searchHistory[selectedIndex]) {
+            handleRecentSelect(searchHistory[selectedIndex].query);
           }
         } else {
           // Execute search
@@ -230,9 +230,9 @@ export function CommandPalette({
               )}
             >
               {/* Recent searches - show when no query */}
-              {!query && recentSearches.length > 0 && (
+              {!query && searchHistory.length > 0 && (
                 <RecentSearches
-                  searches={recentSearches}
+                  searches={searchHistory}
                   onSelect={handleRecentSelect}
                   selectedIndex={selectedIndex}
                 />
@@ -271,8 +271,8 @@ export function CommandPalette({
                 </div>
               )}
 
-              {/* Initial state - no query, no recent searches */}
-              {!query && recentSearches.length === 0 && !isLoading && (
+              {/* Initial state - no query, no search history */}
+              {!query && searchHistory.length === 0 && !isLoading && (
                 <div className="flex flex-col items-center justify-center py-12 text-white/50">
                   <Search className="h-8 w-8 mb-3 opacity-50" />
                   <p className="text-sm">Search your personal knowledge</p>

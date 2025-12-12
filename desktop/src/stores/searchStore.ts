@@ -24,6 +24,24 @@ export interface SearchFilter {
  */
 export type IntentType = 'temporal' | 'causal' | 'exploratory' | 'lookup';
 
+/**
+ * Search history item with metadata
+ */
+export interface SearchHistoryItem {
+  /** Unique ID for the history entry */
+  id: string;
+  /** The search query */
+  query: string;
+  /** When the search was performed */
+  timestamp: string;
+  /** Number of results returned */
+  resultCount: number;
+  /** Detected intent (if any) */
+  intent?: IntentType | null;
+  /** Execution time in milliseconds */
+  executionTimeMs?: number;
+}
+
 interface SearchState {
   /** Current query string */
   query: string;
@@ -37,8 +55,8 @@ interface SearchState {
   intentConfidence: number;
   /** Active filter chips */
   filters: SearchFilter[];
-  /** Recent search queries (persisted) */
-  recentSearches: string[];
+  /** Recent search history with metadata (persisted) */
+  searchHistory: SearchHistoryItem[];
   /** Error message if search failed */
   error: string | null;
   /** Currently selected result ID for detail panel */
@@ -52,10 +70,14 @@ interface SearchState {
   addFilter: (filter: SearchFilter) => void;
   /** Remove a filter */
   removeFilter: (filter: SearchFilter) => void;
-  /** Add a query to recent searches */
-  addRecentSearch: (query: string) => void;
-  /** Clear all recent searches */
-  clearRecentSearches: () => void;
+  /** Add a search to history with metadata */
+  addSearchToHistory: (item: Omit<SearchHistoryItem, 'id'>) => void;
+  /** Remove a search from history by ID */
+  removeSearchFromHistory: (id: string) => void;
+  /** Clear all search history */
+  clearSearchHistory: () => void;
+  /** Get recent queries (for backwards compatibility) */
+  getRecentQueries: () => string[];
   /** Execute the search */
   executeSearch: () => Promise<void>;
   /** Clear results and reset state */
@@ -64,7 +86,14 @@ interface SearchState {
   setSelectedResult: (id: string | null) => void;
 }
 
-const MAX_RECENT_SEARCHES = 50;
+const MAX_SEARCH_HISTORY = 50;
+
+/**
+ * Generate unique ID for search history entries
+ */
+function generateId(): string {
+  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
 
 const initialState = {
   query: '',
@@ -73,7 +102,7 @@ const initialState = {
   intent: null as IntentType | null,
   intentConfidence: 0,
   filters: [] as SearchFilter[],
-  recentSearches: [] as string[],
+  searchHistory: [] as SearchHistoryItem[],
   error: null as string | null,
   selectedResultId: null as string | null,
 };
@@ -127,23 +156,41 @@ export const useSearchStore = create<SearchState>()(
         });
       },
 
-      addRecentSearch: (query) => {
-        const { recentSearches } = get();
-        // Remove if exists, add to front
-        const filtered = recentSearches.filter((q) => q !== query);
-        const updated = [query, ...filtered].slice(0, MAX_RECENT_SEARCHES);
-        set({ recentSearches: updated });
+      addSearchToHistory: (item) => {
+        const { searchHistory } = get();
+        // Create new entry with generated ID
+        const newEntry: SearchHistoryItem = {
+          ...item,
+          id: generateId(),
+        };
+        // Remove duplicates of the same query, add new one at front
+        const filtered = searchHistory.filter((h) => h.query !== item.query);
+        const updated = [newEntry, ...filtered].slice(0, MAX_SEARCH_HISTORY);
+        set({ searchHistory: updated });
       },
 
-      clearRecentSearches: () => set({ recentSearches: [] }),
+      removeSearchFromHistory: (id) => {
+        const { searchHistory } = get();
+        set({
+          searchHistory: searchHistory.filter((h) => h.id !== id),
+        });
+      },
+
+      clearSearchHistory: () => set({ searchHistory: [] }),
+
+      getRecentQueries: () => {
+        const { searchHistory } = get();
+        return searchHistory.map((h) => h.query);
+      },
 
       executeSearch: async () => {
-        const { query, filters, addRecentSearch } = get();
+        const { query, filters, addSearchToHistory } = get();
         const trimmedQuery = query.trim();
 
         if (!trimmedQuery) return;
 
         set({ isLoading: true, error: null });
+        const startTime = Date.now();
 
         try {
           const response = await searchApi.search({
@@ -152,11 +199,19 @@ export const useSearchStore = create<SearchState>()(
             filters: filtersToApiFormat(filters),
           });
 
-          // Add to recent searches
-          addRecentSearch(trimmedQuery);
+          const executionTimeMs = Date.now() - startTime;
 
           // Extract intent from response
           const intentPrimary = response.intent?.primary ?? null;
+
+          // Add to search history with full metadata
+          addSearchToHistory({
+            query: trimmedQuery,
+            timestamp: new Date().toISOString(),
+            resultCount: response.results.length,
+            intent: intentPrimary,
+            executionTimeMs,
+          });
 
           set({
             results: response.results,
@@ -189,8 +244,8 @@ export const useSearchStore = create<SearchState>()(
     }),
     {
       name: 'futurnal-search',
-      // Only persist recentSearches, not query/results/filters
-      partialize: (state) => ({ recentSearches: state.recentSearches }),
+      // Only persist searchHistory, not query/results/filters
+      partialize: (state) => ({ searchHistory: state.searchHistory }),
     }
   )
 );

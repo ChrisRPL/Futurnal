@@ -99,6 +99,57 @@ pub async fn execute_cli_with_timeout<T: DeserializeOwned>(
     Ok(result)
 }
 
+/// Execute a CLI command and return raw string output (for non-JSON commands).
+///
+/// # Arguments
+/// * `args` - Command arguments
+///
+/// # Returns
+/// Raw stdout string or error
+pub async fn execute_cli_raw(args: &[&str]) -> Result<String, PythonError> {
+    execute_cli_raw_with_timeout(args, DEFAULT_TIMEOUT_SECS).await
+}
+
+/// Execute a CLI command and return raw string output with custom timeout.
+pub async fn execute_cli_raw_with_timeout(
+    args: &[&str],
+    timeout_secs: u64,
+) -> Result<String, PythonError> {
+    let mut cmd = Command::new("python3");
+    cmd.arg("-m")
+        .arg("futurnal.cli")
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    // Set working directory to parent of desktop (where src/futurnal is)
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            let futurnal_root = parent.parent().unwrap_or(parent);
+            cmd.current_dir(futurnal_root);
+        }
+    }
+
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(timeout_secs),
+        cmd.output(),
+    )
+    .await
+    .map_err(|_| PythonError::Timeout { timeout_secs })??;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(PythonError::CommandFailed {
+            stderr: stderr.to_string(),
+            exit_code: output.status.code(),
+        });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.to_string())
+}
+
 /// Execute a CLI command that returns empty success (void operations).
 pub async fn execute_cli_void(args: &[&str]) -> Result<(), PythonError> {
     execute_cli_void_with_timeout(args, DEFAULT_TIMEOUT_SECS).await
