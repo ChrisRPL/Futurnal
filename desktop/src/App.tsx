@@ -5,9 +5,8 @@
  * Cinzel for brand headlines, Times New Roman for taglines, black & white aesthetic.
  */
 
-import { useState } from 'react';
 import { Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
-import { useOrchestratorStatus, useConnectors } from '@/hooks/useApi';
+import { useOrchestratorStatus, useConnectors, useGraphStats } from '@/hooks/useApi';
 import { useSubscription } from '@/hooks/useSubscription';
 import { useAuth } from '@/contexts/AuthContext';
 import { openSubscriptionPortal } from '@/lib/subscription';
@@ -15,6 +14,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { CommandPalette } from '@/components/search';
 import { GraphMiniView } from '@/components/graph';
 import { ThemeLogo } from '@/components/ThemeLogo';
+import { useUIStore } from '@/stores/uiStore';
 import {
   Search,
   FolderPlus,
@@ -136,13 +136,19 @@ function HomePage({ onOpenSearch }: HomePageProps) {
   const navigate = useNavigate();
   const { data: orchestratorStatus, isLoading: isLoadingStatus } = useOrchestratorStatus();
   const { data: connectors } = useConnectors();
+  const { data: graphStats } = useGraphStats();
   const { user, logout } = useAuth();
   const { isPro, isLoading: isTierLoading } = useSubscription();
 
   const isActive = orchestratorStatus?.running ?? false;
-  const totalNodes = 0;
+  const totalNodes = graphStats?.total_nodes ?? 0;
   const sourcesConnected = connectors?.length ?? 0;
-  const memoryUsage = '0 MB';
+
+  // Calculate memory usage based on node count (rough estimate: ~1KB per node)
+  const memoryBytes = totalNodes * 1024;
+  const memoryUsage = memoryBytes < 1024 * 1024
+    ? `${Math.round(memoryBytes / 1024)} KB`
+    : `${(memoryBytes / (1024 * 1024)).toFixed(1)} MB`;
 
   const handleLogout = async () => {
     try {
@@ -363,12 +369,23 @@ function RootRedirect() {
  * Main App with routing
  */
 function App() {
-  const [searchOpen, setSearchOpen] = useState(false);
+  // Use UI store for command palette state so it can be closed from anywhere
+  const isCommandPaletteOpen = useUIStore((state) => state.isCommandPaletteOpen);
+  const openCommandPalette = useUIStore((state) => state.openCommandPalette);
+  const closeCommandPalette = useUIStore((state) => state.closeCommandPalette);
+
+  const handleOpenChange = (open: boolean) => {
+    if (open) {
+      openCommandPalette();
+    } else {
+      closeCommandPalette();
+    }
+  };
 
   return (
     <>
       {/* Global Command Palette - available on all pages */}
-      <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
+      <CommandPalette open={isCommandPaletteOpen} onOpenChange={handleOpenChange} />
 
       <Routes>
         <Route path="/" element={<RootRedirect />} />
@@ -379,7 +396,7 @@ function App() {
           path="/dashboard"
           element={
             <ProtectedRoute>
-              <HomePage onOpenSearch={() => setSearchOpen(true)} />
+              <HomePage onOpenSearch={openCommandPalette} />
             </ProtectedRoute>
           }
         />

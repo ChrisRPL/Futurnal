@@ -50,6 +50,7 @@ export const queryKeys = {
 
   // Graph
   knowledgeGraph: (limit?: number) => ['knowledgeGraph', limit] as const,
+  graphStats: ['graphStats'] as const,
 
   // Subscription
   subscription: ['subscription'] as const,

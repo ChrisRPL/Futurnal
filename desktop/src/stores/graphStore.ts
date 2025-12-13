@@ -18,6 +18,27 @@ import type { EntityType } from '@/types/api';
 export type ColorMode = 'monochrome' | 'colored';
 
 /**
+ * Layout mode for graph visualization.
+ * - 'force': Force-directed physics simulation
+ * - 'timeline': Horizontal time-based layout
+ */
+export type LayoutMode = 'force' | 'timeline';
+
+/**
+ * Time granularity for timeline view.
+ * Controls how nodes are grouped/bucketed on the timeline.
+ */
+export type TimeGranularity = 'auto' | 'hour' | 'day' | 'week' | 'month' | 'year';
+
+/**
+ * Time range filter for graph.
+ */
+export interface TimeRange {
+  start: string | null;
+  end: string | null;
+}
+
+/**
  * All available entity types for filtering.
  */
 export const ALL_ENTITY_TYPES: EntityType[] = [
@@ -33,6 +54,7 @@ export const ALL_ENTITY_TYPES: EntityType[] = [
 ];
 
 interface GraphState {
+  // === Core State ===
   /** Currently selected node ID for detail panel */
   selectedNodeId: string | null;
   /** Currently hovered node ID for highlight */
@@ -41,15 +63,38 @@ interface GraphState {
   zoomLevel: number;
   /** Center position for the graph view */
   centerPosition: { x: number; y: number };
+  /** Whether the graph is expanded to full-screen */
+  isExpanded: boolean;
+
+  // === Display Preferences ===
   /** Visible node types (empty = all visible) */
   visibleNodeTypes: EntityType[];
   /** Whether breathing animation is enabled */
   breathingEnabled: boolean;
-  /** Whether the graph is expanded to full-screen */
-  isExpanded: boolean;
   /** Color mode for node visualization */
   colorMode: ColorMode;
+  /** Layout mode (force-directed or timeline) */
+  layoutMode: LayoutMode;
+  /** Time granularity for timeline view */
+  timeGranularity: TimeGranularity;
 
+  // === Advanced Filters ===
+  /** Filter by source identifiers */
+  sourceFilter: string[];
+  /** Confidence range filter [min, max] (0-1) */
+  confidenceRange: [number, number];
+  /** Time range filter */
+  timeRange: TimeRange;
+
+  // === Highlighting (for search integration) ===
+  /** Node IDs highlighted from search results */
+  highlightedNodeIds: string[];
+
+  // === Bookmarks ===
+  /** Bookmarked node IDs (synced with backend) */
+  bookmarkedNodeIds: string[];
+
+  // === Actions ===
   /** Set selected node ID (null to deselect) */
   setSelectedNode: (id: string | null) => void;
   /** Set hovered node ID (null to clear hover) */
@@ -68,19 +113,51 @@ interface GraphState {
   setExpanded: (expanded: boolean) => void;
   /** Toggle color mode */
   toggleColorMode: () => void;
+  /** Set layout mode */
+  setLayoutMode: (mode: LayoutMode) => void;
+  /** Set time granularity for timeline view */
+  setTimeGranularity: (granularity: TimeGranularity) => void;
+  /** Set source filter */
+  setSourceFilter: (sources: string[]) => void;
+  /** Set confidence range */
+  setConfidenceRange: (range: [number, number]) => void;
+  /** Set time range */
+  setTimeRange: (range: TimeRange) => void;
+  /** Clear all advanced filters */
+  clearFilters: () => void;
+  /** Set highlighted nodes (from search) */
+  setHighlightedNodes: (ids: string[]) => void;
+  /** Clear highlighted nodes */
+  clearHighlights: () => void;
+  /** Set bookmarked nodes */
+  setBookmarkedNodes: (ids: string[]) => void;
+  /** Toggle bookmark for a node */
+  toggleBookmark: (id: string) => void;
   /** Reset to initial state */
   reset: () => void;
 }
 
 const initialState = {
+  // Core state
   selectedNodeId: null as string | null,
   hoveredNodeId: null as string | null,
   zoomLevel: 1.0,
   centerPosition: { x: 0, y: 0 },
+  isExpanded: false,
+  // Display preferences
   visibleNodeTypes: [] as EntityType[], // Empty means all visible
   breathingEnabled: true,
-  isExpanded: false,
-  colorMode: 'colored' as ColorMode, // Default to colored for semantic visualization
+  colorMode: 'colored' as ColorMode,
+  layoutMode: 'force' as LayoutMode,
+  timeGranularity: 'auto' as TimeGranularity,
+  // Advanced filters
+  sourceFilter: [] as string[],
+  confidenceRange: [0, 1] as [number, number],
+  timeRange: { start: null, end: null } as TimeRange,
+  // Highlighting
+  highlightedNodeIds: [] as string[],
+  // Bookmarks
+  bookmarkedNodeIds: [] as string[],
 };
 
 export const useGraphStore = create<GraphState>()(
@@ -137,39 +214,95 @@ export const useGraphStore = create<GraphState>()(
         set({ colorMode: colorMode === 'monochrome' ? 'colored' : 'monochrome' });
       },
 
+      setLayoutMode: (mode) => set({ layoutMode: mode }),
+
+      setTimeGranularity: (granularity) => set({ timeGranularity: granularity }),
+
+      setSourceFilter: (sources) => set({ sourceFilter: sources }),
+
+      setConfidenceRange: (range) => set({ confidenceRange: range }),
+
+      setTimeRange: (range) => set({ timeRange: range }),
+
+      clearFilters: () =>
+        set({
+          sourceFilter: [],
+          confidenceRange: [0, 1],
+          timeRange: { start: null, end: null },
+        }),
+
+      setHighlightedNodes: (ids) => set({ highlightedNodeIds: ids }),
+
+      clearHighlights: () => set({ highlightedNodeIds: [] }),
+
+      setBookmarkedNodes: (ids) => set({ bookmarkedNodeIds: ids }),
+
+      toggleBookmark: (id) => {
+        const { bookmarkedNodeIds } = get();
+        if (bookmarkedNodeIds.includes(id)) {
+          set({ bookmarkedNodeIds: bookmarkedNodeIds.filter((bid) => bid !== id) });
+        } else {
+          set({ bookmarkedNodeIds: [...bookmarkedNodeIds, id] });
+        }
+      },
+
       reset: () =>
         set({
           selectedNodeId: null,
           hoveredNodeId: null,
           zoomLevel: 1.0,
           centerPosition: { x: 0, y: 0 },
-          // Keep preferences: visibleNodeTypes, breathingEnabled, colorMode
+          highlightedNodeIds: [],
+          // Keep preferences: visibleNodeTypes, breathingEnabled, colorMode, layoutMode
+          // Keep filters: sourceFilter, confidenceRange, timeRange
+          // Keep bookmarks: bookmarkedNodeIds
         }),
     }),
     {
       name: 'futurnal-graph',
-      version: 2, // Bump version to reset persisted state with new colored default
+      version: 4, // Bump version for time granularity
       // Only persist user preferences, not transient state
       partialize: (state) => ({
         visibleNodeTypes: state.visibleNodeTypes,
         breathingEnabled: state.breathingEnabled,
         colorMode: state.colorMode,
+        layoutMode: state.layoutMode,
+        timeGranularity: state.timeGranularity,
       }),
-      // Migration from old version - reset to new defaults
+      // Migration from old versions
       migrate: (persistedState, version) => {
-        const state = persistedState as { visibleNodeTypes?: EntityType[]; breathingEnabled?: boolean; colorMode?: ColorMode } | null;
-        if (version < 2) {
-          // Reset colorMode to new default when upgrading
+        const state = persistedState as {
+          visibleNodeTypes?: EntityType[];
+          breathingEnabled?: boolean;
+          colorMode?: ColorMode;
+          layoutMode?: LayoutMode;
+          timeGranularity?: TimeGranularity;
+        } | null;
+
+        if (version < 3) {
           return {
             visibleNodeTypes: state?.visibleNodeTypes ?? [],
             breathingEnabled: state?.breathingEnabled ?? true,
-            colorMode: 'colored' as ColorMode,
+            colorMode: state?.colorMode ?? 'colored',
+            layoutMode: 'force' as LayoutMode,
+            timeGranularity: 'auto' as TimeGranularity,
+          };
+        }
+        if (version < 4) {
+          return {
+            visibleNodeTypes: state?.visibleNodeTypes ?? [],
+            breathingEnabled: state?.breathingEnabled ?? true,
+            colorMode: state?.colorMode ?? 'colored',
+            layoutMode: state?.layoutMode ?? 'force',
+            timeGranularity: 'auto' as TimeGranularity,
           };
         }
         return {
           visibleNodeTypes: state?.visibleNodeTypes ?? [],
           breathingEnabled: state?.breathingEnabled ?? true,
           colorMode: state?.colorMode ?? 'colored',
+          layoutMode: state?.layoutMode ?? 'force',
+          timeGranularity: state?.timeGranularity ?? 'auto',
         };
       },
     }

@@ -3,11 +3,12 @@
  *
  * Dedicated route (/graph) for immersive graph exploration.
  * Provides full-screen visualization with controls and detail panel.
+ * Supports highlight params from search results (?highlight=id1,id2).
  */
 
-import { useRef, useCallback, useMemo } from 'react';
-import { Link } from 'react-router-dom';
-import { ArrowLeft, Network, Filter, Eye, EyeOff, Mail, Palette } from 'lucide-react';
+import { useRef, useCallback, useMemo, useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, Network, Filter, Eye, EyeOff, Mail, Palette, X } from 'lucide-react';
 import { KnowledgeGraph, type KnowledgeGraphRef } from '@/components/graph/KnowledgeGraph';
 import { GraphControls } from '@/components/graph/GraphControls';
 import { NodeDetailPanel } from '@/components/graph/NodeDetailPanel';
@@ -19,6 +20,7 @@ import { cn } from '@/lib/utils';
 
 export function GraphPage() {
   const graphRef = useRef<KnowledgeGraphRef>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Get graph data
   const { data } = useKnowledgeGraph();
@@ -29,12 +31,85 @@ export function GraphPage() {
     visibleNodeTypes,
     breathingEnabled,
     colorMode,
+    highlightedNodeIds,
     setSelectedNode,
     toggleNodeType,
     setBreathingEnabled,
     toggleColorMode,
     showAllNodeTypes,
+    setHighlightedNodes,
+    clearHighlights,
   } = useGraphStore();
+
+  // Track if we've already zoomed to highlighted node (to avoid repeating)
+  const hasZoomedToHighlightRef = useRef(false);
+
+  // Parse highlight/select params from URL on mount
+  // ?select=xxx will select the node (open detail panel)
+  // ?highlight=xxx will just highlight without selecting
+  useEffect(() => {
+    const selectParam = searchParams.get('select');
+    const highlightParam = searchParams.get('highlight');
+
+    if (selectParam) {
+      // Decode first, then split by comma for multiple match attempts
+      const decodedParam = decodeURIComponent(selectParam);
+      const nodeIds = decodedParam.split(',').filter(id => id.trim().length > 0);
+      console.log('[Graph] Setting nodes to select:', nodeIds);
+      // Store as highlights temporarily - will be converted to selection when node is found
+      setHighlightedNodes(nodeIds);
+      hasZoomedToHighlightRef.current = false;
+    } else if (highlightParam) {
+      const decodedParam = decodeURIComponent(highlightParam);
+      const nodeIds = decodedParam.split(',').filter(id => id.trim().length > 0);
+      console.log('[Graph] Setting highlighted nodes:', nodeIds);
+      setHighlightedNodes(nodeIds);
+      hasZoomedToHighlightRef.current = false;
+    }
+  }, [searchParams, setHighlightedNodes]);
+
+  // Check if we should select (not just highlight) the node
+  const shouldSelectNode = searchParams.get('select') !== null;
+
+  // Handle when graph is ready with highlighted node coordinates
+  const handleHighlightReady = useCallback(
+    (nodeId: string, x: number, y: number) => {
+      // Only zoom once per highlight
+      if (hasZoomedToHighlightRef.current) return;
+      hasZoomedToHighlightRef.current = true;
+
+      // If using ?select param, select the node (opens detail panel)
+      if (shouldSelectNode) {
+        setSelectedNode(nodeId);
+        // Clear highlights since we're selecting instead
+        clearHighlights();
+        // Remove the select param from URL
+        setSearchParams((params) => {
+          params.delete('select');
+          return params;
+        });
+      } else {
+        // Just highlighting - update store to only contain matched node
+        setHighlightedNodes([nodeId]);
+      }
+
+      if (graphRef.current) {
+        graphRef.current.centerAt(x, y, 500);
+        graphRef.current.zoom(1.5, 500);
+      }
+    },
+    [shouldSelectNode, setSelectedNode, clearHighlights, setHighlightedNodes, setSearchParams]
+  );
+
+  // Clear highlights handler
+  const handleClearHighlights = useCallback(() => {
+    clearHighlights();
+    // Remove highlight param from URL
+    setSearchParams((params) => {
+      params.delete('highlight');
+      return params;
+    });
+  }, [clearHighlights, setSearchParams]);
 
   // Find selected node
   const selectedNode = data?.nodes.find((n) => n.id === selectedNodeId);
@@ -52,7 +127,7 @@ export function GraphPage() {
     setSelectedNode(null);
   }, [setSelectedNode]);
 
-  // Handle navigate to node
+  // Handle navigate to node (selects and focuses)
   const handleNavigateToNode = useCallback(
     (nodeId: string) => {
       setSelectedNode(nodeId);
@@ -65,6 +140,20 @@ export function GraphPage() {
       }
     },
     [data?.nodes, setSelectedNode]
+  );
+
+  // Handle focus on node (centers view without changing selection)
+  const handleFocusNode = useCallback(
+    (nodeId: string) => {
+      if (graphRef.current) {
+        const node = data?.nodes.find((n) => n.id === nodeId);
+        if (node && node.x !== undefined && node.y !== undefined) {
+          graphRef.current.centerAt(node.x, node.y, 500);
+          graphRef.current.zoom(2, 500);
+        }
+      }
+    },
+    [data?.nodes]
   );
 
   return (
@@ -93,6 +182,22 @@ export function GraphPage() {
 
         {/* Right: Filters */}
         <div className="flex items-center gap-4">
+          {/* Highlighted nodes indicator */}
+          {highlightedNodeIds.length > 0 && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/10 border border-blue-500/30 rounded">
+              <span className="text-xs text-blue-400">
+                {highlightedNodeIds.length} highlighted
+              </span>
+              <button
+                onClick={handleClearHighlights}
+                className="text-blue-400/60 hover:text-blue-400 transition-colors"
+                title="Clear highlights"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          )}
+
           {/* Quick email toggle - prominent button */}
           {emailCount > 0 && (
             <Button
@@ -193,6 +298,7 @@ export function GraphPage() {
             ref={graphRef}
             className="h-full w-full"
             breathing={breathingEnabled}
+            onHighlightReady={handleHighlightReady}
           />
 
           {/* Graph controls */}
@@ -225,6 +331,7 @@ export function GraphPage() {
             nodes={data.nodes}
             onClose={() => setSelectedNode(null)}
             onNavigateToNode={handleNavigateToNode}
+            onFocusNode={handleFocusNode}
             className="absolute top-0 right-0 h-full w-80"
           />
         )}

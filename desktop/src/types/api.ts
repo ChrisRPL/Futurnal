@@ -222,11 +222,38 @@ export interface GraphLink {
   target: string;
   relationship: string;
   weight?: number;
+  /** Confidence score for this relationship (0.0 - 1.0) */
+  confidence?: number;
+}
+
+/** Pagination metadata for graph queries */
+export interface PaginationMeta {
+  offset: number;
+  total: number;
+  has_more: boolean;
 }
 
 export interface GraphData {
   nodes: GraphNode[];
   links: GraphLink[];
+  pagination?: PaginationMeta;
+}
+
+/** Filter parameters for subgraph queries */
+export interface GraphFilter {
+  sources?: string[];
+  node_types?: string[];
+  min_confidence?: number;
+  start_date?: string;
+  end_date?: string;
+}
+
+/** Graph statistics */
+export interface GraphStats {
+  total_nodes: number;
+  total_links: number;
+  nodes_by_type: Record<string, number>;
+  nodes_by_source: Record<string, number>;
 }
 
 // ============================================================================

@@ -52,6 +52,12 @@ pub fn run() {
             commands::orchestrator::ensure_orchestrator_running,
             // Graph commands
             commands::graph::get_knowledge_graph,
+            commands::graph::get_filtered_graph,
+            commands::graph::get_node_neighbors,
+            commands::graph::get_graph_stats,
+            commands::graph::get_bookmarked_nodes,
+            commands::graph::bookmark_node,
+            commands::graph::unbookmark_node,
             commands::graph::open_file,
         ])
         .setup(|app| {

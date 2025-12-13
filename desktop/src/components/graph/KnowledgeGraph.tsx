@@ -17,13 +17,14 @@
 import { useCallback, useRef, useEffect, useState, useMemo, forwardRef, useImperativeHandle } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import { forceCollide, forceManyBody, forceX, forceY } from 'd3-force';
-import { useKnowledgeGraph } from '@/hooks/useApi';
+import { useKnowledgeGraph, useGraphStats } from '@/hooks/useApi';
 import { useGraphStore, isNodeTypeVisible } from '@/stores/graphStore';
 import { cn } from '@/lib/utils';
 import type { GraphData, GraphNode, GraphLink, EntityType } from '@/types/api';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ForceGraphRef = any;
+
 
 /** Methods exposed via ref */
 export interface KnowledgeGraphRef {
@@ -45,6 +46,8 @@ interface KnowledgeGraphProps {
   breathing?: boolean;
   /** Show legend (default: true in full mode) */
   showLegend?: boolean;
+  /** Callback when graph is ready to show highlighted nodes (with actual coordinates) */
+  onHighlightReady?: (nodeId: string, x: number, y: number) => void;
 }
 
 /**
@@ -154,6 +157,7 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
   data: overrideData,
   breathing = true,
   showLegend = true,
+  onHighlightReady,
 }, ref) {
   const graphRef = useRef<ForceGraphRef>(undefined);
 
@@ -167,12 +171,22 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
   // Start with null dimensions - only render graph when we have real measurements
   const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
 
+  // Accessibility: track keyboard focus state and announcements
+  const [keyboardFocusIndex, setKeyboardFocusIndex] = useState<number>(-1);
+  const [announcement, setAnnouncement] = useState<string>('');
+  const announcementTimeoutRef = useRef<number | undefined>(undefined);
+
   // Store state
   const {
     selectedNodeId,
     hoveredNodeId,
     visibleNodeTypes,
     colorMode,
+    sourceFilter,
+    confidenceRange,
+    timeRange,
+    highlightedNodeIds,
+    bookmarkedNodeIds,
     setSelectedNode,
     setHoveredNode,
   } = useGraphStore();
@@ -182,23 +196,60 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
     miniMode ? 25 : undefined
   );
 
+  // Fetch total stats for mini mode footer (shows total count, not just what's displayed)
+  const { data: graphStats } = useGraphStats();
+
   // Use override data if provided, otherwise use fetched data
   const rawData = overrideData ?? fetchedData;
 
-  // Filter data based on visible node types
+  // Filter data based on visible node types and advanced filters
   // IMPORTANT: Initialize nodes with RANDOM positions spread across canvas
   // Without this, d3-force places all nodes near center causing clustering
+  // NOTE: We use fixed spread dimensions (not reactive to container size) to prevent
+  // graphData from changing when container resizes (e.g., when detail panel opens).
+  // This avoids resetting hasInitialFit and causing unwanted zoom-out.
   const filteredData = useMemo(() => {
     if (!rawData) return undefined;
 
-    // Use canvas dimensions or a default spread area
-    const spreadWidth = dimensions?.width || 800;
-    const spreadHeight = dimensions?.height || 600;
+    // Use fixed spread area for initial positions - force simulation will handle actual layout
+    // This must NOT depend on dimensions to avoid re-creating graphData on resize
+    const spreadWidth = 800;
+    const spreadHeight = 600;
+
+    // Parse time range dates once
+    const startDate = timeRange.start ? new Date(timeRange.start) : null;
+    const endDate = timeRange.end ? new Date(timeRange.end) : null;
 
     // Create fresh node copies WITH random initial positions
     // This is critical - nodes must start spread apart for proper force layout
     const nodes = rawData.nodes
-      .filter((node) => isNodeTypeVisible(node.node_type, visibleNodeTypes))
+      .filter((node) => {
+        // Node type visibility filter
+        if (!isNodeTypeVisible(node.node_type, visibleNodeTypes)) {
+          return false;
+        }
+
+        // Source filter (if sources selected, only show nodes from those sources)
+        if (sourceFilter.length > 0) {
+          const nodeSource = node.metadata?.source as string | undefined;
+          if (!nodeSource || !sourceFilter.some(s => nodeSource.includes(s))) {
+            return false;
+          }
+        }
+
+        // Time range filter
+        if (node.timestamp) {
+          const nodeDate = new Date(node.timestamp);
+          if (startDate && nodeDate < startDate) return false;
+          if (endDate && nodeDate > endDate) return false;
+        } else if (startDate || endDate) {
+          // If time filter is set but node has no timestamp, exclude it
+          // (unless we want to show undated nodes - could add a toggle for this)
+          return false;
+        }
+
+        return true;
+      })
       .map((node, index) => {
         // Use deterministic but spread positions based on index
         // Distribute in a spiral pattern for even coverage
@@ -217,22 +268,44 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
       });
 
     const nodeIds = new Set(nodes.map((n) => n.id));
-    // Create fresh link copies as well
+
+    // Create fresh link copies and filter by confidence
     const links = rawData.links
-      .filter(
-        (link) =>
-          nodeIds.has(typeof link.source === 'string' ? link.source : (link.source as GraphNode).id) &&
-          nodeIds.has(typeof link.target === 'string' ? link.target : (link.target as GraphNode).id)
-      )
+      .filter((link) => {
+        // Ensure both source and target nodes exist
+        const sourceId = typeof link.source === 'string' ? link.source : (link.source as GraphNode).id;
+        const targetId = typeof link.target === 'string' ? link.target : (link.target as GraphNode).id;
+        if (!nodeIds.has(sourceId) || !nodeIds.has(targetId)) {
+          return false;
+        }
+
+        // Confidence filter (for links that have confidence)
+        if (link.confidence !== undefined) {
+          if (link.confidence < confidenceRange[0] || link.confidence > confidenceRange[1]) {
+            return false;
+          }
+        }
+
+        return true;
+      })
       .map((link) => ({
         source: typeof link.source === 'string' ? link.source : (link.source as GraphNode).id,
         target: typeof link.target === 'string' ? link.target : (link.target as GraphNode).id,
         relationship: link.relationship,
         weight: link.weight,
+        confidence: link.confidence,
       }));
 
     return { nodes, links };
-  }, [rawData, visibleNodeTypes]);
+  }, [rawData, visibleNodeTypes, sourceFilter, confidenceRange, timeRange]);
+
+  // Prepare graph data - use filteredData directly for force layout
+  const graphData = useMemo<GraphData | undefined>(() => {
+    if (!filteredData) {
+      return undefined;
+    }
+    return filteredData;
+  }, [filteredData]);
 
   // Track if initial fit has been done - use state for proper reactivity
   const [hasInitialFit, setHasInitialFit] = useState(false);
@@ -246,13 +319,7 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
       if (entry) {
         const { width, height } = entry.contentRect;
         if (width > 0 && height > 0) {
-          setDimensions((prev) => {
-            // Reset fit state if dimensions changed significantly
-            if (prev && (Math.abs(prev.width - width) > 50 || Math.abs(prev.height - height) > 50)) {
-              setHasInitialFit(false);
-            }
-            return { width, height };
-          });
+          setDimensions({ width, height });
         }
       }
     });
@@ -261,12 +328,11 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
     return () => observer.disconnect();
   }, []);
 
-  // Reset fit state and reheat simulation when filtered data changes
+  // Reset fit state and reheat simulation when data changes
   useEffect(() => {
     setHasInitialFit(false);
 
-    // Reheat the simulation to restart force layout when data changes
-    if (graphRef.current && filteredData && filteredData.nodes.length > 0) {
+    if (graphRef.current && graphData && graphData.nodes.length > 0) {
       // Small delay to ensure new data is applied first
       const timeoutId = setTimeout(() => {
         if (graphRef.current) {
@@ -276,7 +342,7 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
       }, 100);
       return () => clearTimeout(timeoutId);
     }
-  }, [filteredData]);
+  }, [graphData]);
 
   // Fallback timer - if onEngineStop never fires, force fit after 2 seconds
   useEffect(() => {
@@ -284,28 +350,33 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
 
     const timeoutId = setTimeout(() => {
       if (!hasInitialFit && graphRef.current) {
-        graphRef.current.zoomToFit(400, 40);
-        setHasInitialFit(true);
+        const nodes = graphData?.nodes;
+        if (nodes && nodes.length > 0) {
+          // Always use zoomToFit to calculate appropriate zoom for current layout
+          graphRef.current.zoomToFit(400, 50);
+          setHasInitialFit(true);
+        }
       }
     }, 2000);
 
     return () => clearTimeout(timeoutId);
-  }, [dimensions, hasInitialFit]);
+  }, [dimensions, hasInitialFit, graphData]);
 
   // Configure forces after mount - balanced settings for spread without excessive shaking
   useEffect(() => {
     if (!graphRef.current) return;
 
-    const nodeCount = filteredData?.nodes.length ?? 0;
+    // Force layout configuration - increased distances for better readability
+    const nodeCount = graphData?.nodes.length ?? 0;
 
-    // Moderate repulsion - enough to spread but not shake violently
-    const chargeStrength = nodeCount > 500 ? -800 : nodeCount > 100 ? -500 : -300;
+    // Strong repulsion - spread nodes apart significantly
+    const chargeStrength = nodeCount > 500 ? -1500 : nodeCount > 100 ? -1000 : -600;
 
-    // Replace default charge force with tuned repulsion
+    // Replace default charge force with strong repulsion for more spacing
     graphRef.current.d3Force('charge', forceManyBody()
       .strength(chargeStrength)
-      .distanceMin(30)    // Larger min distance for smoother transitions
-      .distanceMax(300)   // Reduced max to limit long-range effects
+      .distanceMin(50)    // Increased min distance
+      .distanceMax(500)   // Extended range for better spread
     );
 
     // REMOVE default center force - it causes clustering!
@@ -314,31 +385,137 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
     // Very gentle centering forces
     const centerX = (dimensions?.width || 800) / 2;
     const centerY = (dimensions?.height || 600) / 2;
-    graphRef.current.d3Force('x', forceX(centerX).strength(0.01));
-    graphRef.current.d3Force('y', forceY(centerY).strength(0.01));
+    graphRef.current.d3Force('x', forceX(centerX).strength(0.008));
+    graphRef.current.d3Force('y', forceY(centerY).strength(0.008));
 
-    // Add collision detection with moderate padding
+    // Add collision detection with larger padding for more spacing
     graphRef.current.d3Force(
       'collide',
-      forceCollide<GraphNode>((node) => (NODE_SIZES[node.node_type || 'Document'] || 10) + 12).iterations(2)
+      forceCollide<GraphNode>((node) => (NODE_SIZES[node.node_type || 'Document'] || 10) + 25).iterations(3)
     );
 
-    // Moderate link distance for connected nodes
-    const linkDist = nodeCount > 500 ? 120 : nodeCount > 100 ? 100 : 80;
+    // Increased link distance for more spread between connected nodes
+    const linkDist = nodeCount > 500 ? 200 : nodeCount > 100 ? 160 : 120;
     graphRef.current.d3Force('link')?.distance(linkDist);
-
-    // Don't reheat - let warmup ticks handle initial positioning
-    // This prevents double-animation on load
-  }, [filteredData, dimensions]);
+  }, [graphData, dimensions]);
 
   // Handle engine stop - this is called when the force simulation stabilizes
   const handleEngineStop = useCallback(() => {
-    if (!graphRef.current || hasInitialFit) return;
+    if (!graphRef.current) return;
 
-    // Fit graph to view - this automatically centers and zooms
-    graphRef.current.zoomToFit(400, 40);
-    setHasInitialFit(true);
-  }, [hasInitialFit]);
+    const graphNodes = graphData?.nodes;
+
+    // Handle highlighted nodes - notify parent with actual coordinates
+    // Use flexible ID matching to handle format differences (raw hash vs prefixed IDs)
+    if (highlightedNodeIds.length > 0 && onHighlightReady && graphNodes) {
+      const firstHighlightedNode = graphNodes.find(n => {
+        if (n.x === undefined || n.y === undefined) return false;
+        if (highlightedNodeIds.includes(n.id)) return true;
+        const nodeIdParts = n.id.split(':');
+        if (nodeIdParts.length === 2 && highlightedNodeIds.includes(nodeIdParts[1])) return true;
+        return highlightedNodeIds.some(hid => n.id.includes(hid) || hid.includes(n.id));
+      });
+      if (firstHighlightedNode && firstHighlightedNode.x !== undefined && firstHighlightedNode.y !== undefined) {
+        onHighlightReady(firstHighlightedNode.id, firstHighlightedNode.x, firstHighlightedNode.y);
+        // Skip zoomToFit when we have highlights - let the highlight handler control zoom
+        setHasInitialFit(true);
+        return;
+      }
+    }
+
+    // Fit graph to view on initial load (only if no highlights)
+    if (!hasInitialFit && graphNodes && graphNodes.length > 0) {
+      graphRef.current.zoomToFit(400, 50);
+      setHasInitialFit(true);
+    }
+  }, [graphData, hasInitialFit, highlightedNodeIds, onHighlightReady]);
+
+  // Handle highlighted nodes changes - zoom to highlighted node when IDs change
+  // This is separate from handleEngineStop because we need to react to highlight changes
+  // even after the simulation has already stopped
+  useEffect(() => {
+    if (!graphRef.current || !graphData?.nodes || highlightedNodeIds.length === 0 || !onHighlightReady) {
+      return;
+    }
+
+    // Debug: Log what we're looking for vs what's available
+    console.log('[KnowledgeGraph] Highlighting - Looking for IDs:', highlightedNodeIds);
+    console.log('[KnowledgeGraph] Available graph nodes (first 5):', graphData.nodes.slice(0, 5).map(n => ({
+      id: n.id,
+      label: n.label,
+      metadata: n.metadata
+    })));
+
+    // Find the first highlighted node with valid coordinates
+    // Handle ID format mismatch: search results use raw hashes, graph uses prefixed IDs (doc:xxx, source:xxx)
+    const highlightedNode = graphData.nodes.find(n => {
+      if (n.x === undefined || n.y === undefined) return false;
+
+      // Check exact match first
+      if (highlightedNodeIds.includes(n.id)) {
+        console.log('[KnowledgeGraph] Found exact match:', n.id);
+        return true;
+      }
+
+      // Check if any highlighted ID matches the hash part of the node ID (after the prefix)
+      // Graph IDs are like "doc:abc123" or "source:xyz789"
+      const nodeIdParts = n.id.split(':');
+      if (nodeIdParts.length === 2) {
+        const nodeHash = nodeIdParts[1];
+        if (highlightedNodeIds.includes(nodeHash)) {
+          console.log('[KnowledgeGraph] Found hash match:', n.id, 'matches', nodeHash);
+          return true;
+        }
+      }
+
+      // Check if highlighted ID matches the node label (partial match for filenames)
+      // Require minimum 4 chars to avoid false matches with short names
+      // Also skip Source/Mailbox nodes for label matching - prefer content nodes
+      if (n.node_type !== 'Source' && n.node_type !== 'Mailbox') {
+        const labelMatch = highlightedNodeIds.some(hid => {
+          if (hid.length < 4) return false; // Skip short search terms
+          const label = n.label.toLowerCase();
+          const searchTerm = hid.toLowerCase();
+          return label.includes(searchTerm) || searchTerm.includes(label);
+        });
+        if (labelMatch) {
+          console.log('[KnowledgeGraph] Found label match:', n.id, n.label);
+          return true;
+        }
+      }
+
+      // Check if highlighted ID matches filename in metadata
+      const nodeFilename = (n.metadata?.details as Record<string, unknown>)?.filename as string | undefined
+        || (n.metadata?.filename as string | undefined);
+      if (nodeFilename) {
+        const filenameMatch = highlightedNodeIds.some(hid => {
+          const fn = nodeFilename.toLowerCase();
+          const searchTerm = hid.toLowerCase();
+          return fn.includes(searchTerm) || searchTerm.includes(fn);
+        });
+        if (filenameMatch) {
+          console.log('[KnowledgeGraph] Found filename match:', n.id, nodeFilename);
+          return true;
+        }
+      }
+
+      return false;
+    });
+
+    if (highlightedNode) {
+      console.log('[KnowledgeGraph] Will highlight node:', highlightedNode.id, highlightedNode.label);
+      // Small delay to ensure graph is rendered
+      const timeoutId = setTimeout(() => {
+        if (graphRef.current && highlightedNode.x !== undefined && highlightedNode.y !== undefined) {
+          onHighlightReady(highlightedNode.id, highlightedNode.x, highlightedNode.y);
+        }
+      }, 300);
+
+      return () => clearTimeout(timeoutId);
+    } else {
+      console.log('[KnowledgeGraph] No matching node found for highlights');
+    }
+  }, [highlightedNodeIds, graphData?.nodes, onHighlightReady]);
 
   // Node click handler
   const handleNodeClick = useCallback(
@@ -350,8 +527,10 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
 
       setSelectedNode(node.id);
 
-      // Zoom to node
-      if (graphRef.current) {
+      // Zoom to node - only if coordinates are valid
+      if (graphRef.current &&
+          node.x !== undefined && Number.isFinite(node.x) &&
+          node.y !== undefined && Number.isFinite(node.y)) {
         graphRef.current.centerAt(node.x, node.y, 500);
         graphRef.current.zoom(2, 500);
       }
@@ -368,6 +547,94 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
     [miniMode, setHoveredNode]
   );
 
+  // Announce to screen readers
+  const announce = useCallback((message: string) => {
+    if (announcementTimeoutRef.current) {
+      clearTimeout(announcementTimeoutRef.current);
+    }
+    setAnnouncement(message);
+    announcementTimeoutRef.current = window.setTimeout(() => {
+      setAnnouncement('');
+    }, 1000);
+  }, []);
+
+  // Keyboard navigation handler
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (miniMode || !graphData || graphData.nodes.length === 0) return;
+
+      const nodes = graphData.nodes;
+      let newIndex = keyboardFocusIndex;
+
+      switch (e.key) {
+        case 'ArrowRight':
+        case 'ArrowDown':
+          e.preventDefault();
+          newIndex = keyboardFocusIndex < 0 ? 0 : Math.min(keyboardFocusIndex + 1, nodes.length - 1);
+          break;
+        case 'ArrowLeft':
+        case 'ArrowUp':
+          e.preventDefault();
+          newIndex = keyboardFocusIndex < 0 ? nodes.length - 1 : Math.max(keyboardFocusIndex - 1, 0);
+          break;
+        case 'Home':
+          e.preventDefault();
+          newIndex = 0;
+          break;
+        case 'End':
+          e.preventDefault();
+          newIndex = nodes.length - 1;
+          break;
+        case 'Enter':
+        case ' ':
+          e.preventDefault();
+          if (keyboardFocusIndex >= 0 && keyboardFocusIndex < nodes.length) {
+            const node = nodes[keyboardFocusIndex];
+            setSelectedNode(node.id);
+            if (graphRef.current && node.x !== undefined && node.y !== undefined) {
+              graphRef.current.centerAt(node.x, node.y, 500);
+              graphRef.current.zoom(2, 500);
+            }
+            announce(`Selected ${node.label}, ${node.node_type}`);
+          }
+          return;
+        case 'Escape':
+          e.preventDefault();
+          setSelectedNode(null);
+          setKeyboardFocusIndex(-1);
+          announce('Selection cleared');
+          return;
+        default:
+          return;
+      }
+
+      if (newIndex !== keyboardFocusIndex && newIndex >= 0 && newIndex < nodes.length) {
+        setKeyboardFocusIndex(newIndex);
+        const node = nodes[newIndex];
+
+        // Center view on keyboard-focused node
+        if (graphRef.current && node.x !== undefined && node.y !== undefined) {
+          graphRef.current.centerAt(node.x, node.y, 300);
+        }
+
+        // Announce to screen reader
+        announce(`${node.label}, ${node.node_type}, ${newIndex + 1} of ${nodes.length}`);
+      }
+    },
+    [miniMode, graphData, keyboardFocusIndex, setSelectedNode, announce]
+  );
+
+  // Reset keyboard focus when data changes
+  useEffect(() => {
+    setKeyboardFocusIndex(-1);
+  }, [graphData]);
+
+  // Get keyboard-focused node
+  const keyboardFocusedNodeId = useMemo(() => {
+    if (keyboardFocusIndex < 0 || !graphData) return null;
+    return graphData.nodes[keyboardFocusIndex]?.id ?? null;
+  }, [keyboardFocusIndex, graphData]);
+
   // Custom node rendering with monochrome or colored styling
   const nodeCanvasObject = useCallback(
     (node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
@@ -376,6 +643,22 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
       const opacity = NODE_OPACITIES[nodeType] || 0.5;
       const isSelected = selectedNodeId === node.id;
       const isHovered = hoveredNodeId === node.id;
+      const isKeyboardFocused = keyboardFocusedNodeId === node.id;
+      const isBookmarked = bookmarkedNodeIds.includes(node.id);
+      // Flexible ID matching for highlighting - handle format differences (raw hash vs prefixed IDs)
+      // Also match by label and filename for better cross-system matching
+      const isHighlighted = highlightedNodeIds.length > 0 && (
+        highlightedNodeIds.includes(node.id) ||
+        (node.id.includes(':') && highlightedNodeIds.includes(node.id.split(':')[1])) ||
+        highlightedNodeIds.some(hid => node.id.includes(hid) || hid.includes(node.id)) ||
+        // Match by label (case-insensitive partial match) - skip Source nodes, require min length
+        (nodeType !== 'Source' && nodeType !== 'Mailbox' && highlightedNodeIds.some(hid => {
+          if (hid.length < 4) return false;
+          const label = node.label.toLowerCase();
+          const searchTerm = hid.toLowerCase();
+          return label.includes(searchTerm) || searchTerm.includes(label);
+        }))
+      );
       const lod = getLevelOfDetail(globalScale);
 
       const x = node.x ?? 0;
@@ -387,8 +670,27 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
         ? NODE_COLORS[nodeType] || '#6B7280'
         : `rgba(255, 255, 255, ${opacity})`;
 
+      // Keyboard focus ring (accessibility)
+      if (isKeyboardFocused && lod !== 'minimal') {
+        ctx.beginPath();
+        ctx.arc(x, y, size + 6, 0, 2 * Math.PI);
+        ctx.strokeStyle = '#FFFFFF'; // White focus ring
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([4, 2]); // Dashed for visibility
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // Highlighted glow effect (from search results)
+      if (isHighlighted && lod !== 'minimal') {
+        ctx.beginPath();
+        ctx.arc(x, y, size + 8, 0, 2 * Math.PI);
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'; // Blue glow
+        ctx.fill();
+      }
+
       // Glow effect for selected/hovered nodes
-      if ((isSelected || isHovered) && lod !== 'minimal') {
+      if ((isSelected || isHovered || isKeyboardFocused) && lod !== 'minimal') {
         ctx.beginPath();
         ctx.arc(x, y, size + 4, 0, 2 * Math.PI);
         if (isColored) {
@@ -412,6 +714,27 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
         ctx.stroke();
       }
 
+      // Bookmark indicator (small star at top-right of node)
+      if (isBookmarked && lod !== 'minimal') {
+        const starX = x + size * 0.7;
+        const starY = y - size * 0.7;
+        const starSize = Math.max(4, size * 0.4);
+
+        // Draw star shape
+        ctx.beginPath();
+        for (let i = 0; i < 5; i++) {
+          const angle = (i * 4 * Math.PI) / 5 - Math.PI / 2;
+          const r = i % 2 === 0 ? starSize : starSize * 0.5;
+          const px = starX + r * Math.cos(angle);
+          const py = starY + r * Math.sin(angle);
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fillStyle = '#FBBF24'; // Amber-400
+        ctx.fill();
+      }
+
       // Label (only when zoomed in enough or hovering)
       if (lod === 'full' || isHovered) {
         const label =
@@ -426,7 +749,7 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
         ctx.fillText(label, x, y + size + 4);
       }
     },
-    [selectedNodeId, hoveredNodeId, colorMode]
+    [selectedNodeId, hoveredNodeId, keyboardFocusedNodeId, colorMode, bookmarkedNodeIds, highlightedNodeIds]
   );
 
   // CRITICAL: nodePointerAreaPaint defines the clickable area
@@ -453,10 +776,17 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
   const linkCanvasObject = useCallback(
     (link: GraphLink, ctx: CanvasRenderingContext2D, globalScale: number) => {
       // After simulation, source/target become node objects (not strings)
+      // But during early simulation ticks, they might still be string IDs
       const source = link.source as unknown as GraphNode;
       const target = link.target as unknown as GraphNode;
 
-      if (!source.x || !source.y || !target.x || !target.y) return;
+      // More robust coordinate check - handle both string IDs and node objects
+      const sourceX = typeof source === 'object' && source !== null ? source.x : undefined;
+      const sourceY = typeof source === 'object' && source !== null ? source.y : undefined;
+      const targetX = typeof target === 'object' && target !== null ? target.x : undefined;
+      const targetY = typeof target === 'object' && target !== null ? target.y : undefined;
+
+      if (sourceX === undefined || sourceY === undefined || targetX === undefined || targetY === undefined) return;
 
       // Get link style based on relationship type
       const style = LINK_STYLES[link.relationship] || LINK_STYLES.default;
@@ -475,8 +805,8 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
         ctx.setLineDash([]);
       }
 
-      ctx.moveTo(source.x, source.y);
-      ctx.lineTo(target.x, target.y);
+      ctx.moveTo(sourceX, sourceY);
+      ctx.lineTo(targetX, targetY);
 
       // Use colored styles only in colored mode, otherwise use white with opacity
       ctx.strokeStyle = isColored ? style.color : 'rgba(255, 255, 255, 0.2)';
@@ -488,8 +818,8 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
 
       // Draw relationship label when zoomed in
       if (globalScale > 1.5 && link.relationship) {
-        const midX = (source.x + target.x) / 2;
-        const midY = (source.y + target.y) / 2;
+        const midX = (sourceX + targetX) / 2;
+        const midY = (sourceY + targetY) / 2;
 
         ctx.font = `${10 / globalScale}px Inter, system-ui, sans-serif`;
         ctx.textAlign = 'center';
@@ -578,21 +908,36 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
       ref={containerRef}
       data-slot="knowledge-graph"
       data-testid="knowledge-graph"
+      role="application"
+      aria-label={`Knowledge graph with ${graphData?.nodes.length ?? 0} nodes and ${graphData?.links.length ?? 0} connections. Use arrow keys to navigate nodes, Enter to select, Escape to clear selection.`}
+      aria-roledescription="interactive knowledge graph"
+      tabIndex={miniMode ? undefined : 0}
       className={cn(
         'relative bg-black overflow-hidden',
         'border border-white/10',
         miniMode && 'cursor-pointer',
         breathing && !miniMode && 'graph-breathing',
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-white/50 focus-visible:ring-inset',
         className
       )}
       onClick={miniMode ? onExpand : undefined}
+      onKeyDown={!miniMode ? handleKeyDown : undefined}
     >
-      {/* Graph Canvas - only rendered when we have valid dimensions */}
+      {/* Screen reader live region for announcements */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {announcement}
+      </div>
+      {/* Graph Canvas - force-directed layout */}
       <ForceGraph2D
         ref={graphRef}
         width={dimensions.width}
         height={dimensions.height}
-        graphData={filteredData}
+        graphData={graphData ?? { nodes: [], links: [] }}
         nodeCanvasObject={nodeCanvasObject}
         nodePointerAreaPaint={nodePointerAreaPaint}
         linkCanvasObject={linkCanvasObject}
@@ -619,9 +964,12 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
         </div>
       )}
 
-      {/* Stats footer */}
+      {/* Stats footer - show total stats in mini mode, displayed stats in full mode */}
       <div className="absolute bottom-2 left-2 text-xs text-white/40">
-        {filteredData.nodes.length} memories · {filteredData.links.length} connections
+        {miniMode
+          ? `${graphStats?.total_nodes ?? 0} memories · ${graphStats?.total_links ?? 0} connections`
+          : `${graphData?.nodes.length ?? 0} memories · ${graphData?.links.length ?? 0} connections`
+        }
       </div>
 
       {/* Legend - only in colored mode and full view */}
@@ -664,7 +1012,7 @@ function GraphSkeleton() {
  */
 function GraphLegend() {
   return (
-    <div className="absolute top-3 right-3 bg-black/80 backdrop-blur-sm border border-white/10 p-3 rounded-lg">
+    <div className="absolute top-3 right-14 bg-black/80 backdrop-blur-sm border border-white/10 p-3 rounded-lg">
       {/* Node types */}
       <div className="text-[10px] text-white/50 uppercase tracking-wider mb-2">
         Node Types

@@ -279,3 +279,14 @@ export function useKnowledgeGraph(limit?: number) {
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
+
+/**
+ * Hook to get graph statistics (node counts, sources, etc.).
+ */
+export function useGraphStats() {
+  return useQuery({
+    queryKey: queryKeys.graphStats,
+    queryFn: () => graphApi.getStats(),
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+}

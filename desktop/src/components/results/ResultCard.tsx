@@ -31,7 +31,9 @@ import {
   Inbox,
   Database,
   Building,
+  Network,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { open } from '@tauri-apps/plugin-shell';
 import { cn, highlightTerms, formatTimestampRelative } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -39,6 +41,7 @@ import { ScoreIndicator } from './ScoreIndicator';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { CausalChainPreview } from './CausalChainPreview';
 import { ProvenancePanel } from './ProvenancePanel';
+import { useUIStore } from '@/stores/uiStore';
 import type { SearchResult, EntityType, SourceType } from '@/types/api';
 
 interface ResultCardProps {
@@ -85,9 +88,85 @@ export function ResultCard({
   onSelect,
   className,
 }: ResultCardProps) {
+  const navigate = useNavigate();
+  const closeCommandPalette = useUIStore((state) => state.closeCommandPalette);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showProvenance, setShowProvenance] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
+
+  // Handle show in knowledge graph
+  // Graph nodes use IDs like "doc:{parent_id}" or "email:{source}:{uid}"
+  // Search results may have different ID schemes, so we try multiple approaches
+  const handleShowInGraph = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    // Priority order for finding the graph node ID:
+    // 1. entityId in metadata (if backend sets it)
+    // 2. graphNodeId in metadata (explicit graph ID)
+    // 3. parent_id in metadata with doc: prefix
+    // 4. source_document_id in metadata with doc: prefix
+    // 5. result.id with doc: prefix (assume it's a document hash)
+    // 6. Raw result.id as fallback
+
+    const entityId = result.metadata?.entityId as string | undefined;
+    const graphNodeId = result.metadata?.graphNodeId as string | undefined;
+    const parentId = result.metadata?.parent_id as string | undefined;
+    const sourceDocId = result.metadata?.source_document_id as string | undefined;
+
+    let highlightId: string;
+
+    if (graphNodeId) {
+      // Explicit graph node ID - use as-is
+      highlightId = graphNodeId;
+    } else if (entityId) {
+      // Entity ID from metadata
+      highlightId = entityId;
+    } else if (parentId) {
+      // Parent ID - prefix with doc:
+      highlightId = `doc:${parentId}`;
+    } else if (sourceDocId) {
+      // Source document ID - prefix with doc:
+      highlightId = `doc:${sourceDocId}`;
+    } else {
+      // Fallback: try both raw ID and doc: prefixed version
+      // Pass comma-separated to try multiple matches
+      highlightId = `${result.id},doc:${result.id}`;
+    }
+
+    // Extract filename from the actual file path (not the source name)
+    // Priority: path field > source field (if it looks like a path)
+    const pathField = result.metadata?.path as string | undefined;
+    const sourceField = result.metadata?.source as string | undefined;
+
+    // Use path if available, otherwise use source only if it contains a slash (is a path)
+    const filePath = pathField || (sourceField?.includes('/') ? sourceField : undefined);
+    const filename = filePath?.split('/').pop()?.replace(/\.\w+$/, ''); // Remove extension
+
+    console.log('[ResultCard] Show in graph:', {
+      resultId: result.id,
+      entityId,
+      graphNodeId,
+      parentId,
+      sourceDocId,
+      pathField,
+      sourceField,
+      filename,
+      highlightId,
+      allMetadata: JSON.stringify(result.metadata, null, 2)
+    });
+
+    // If we extracted a filename (at least 4 chars to avoid false matches), add it
+    let finalHighlightId = highlightId;
+    if (filename && filename.length >= 4 && !highlightId.includes(filename)) {
+      finalHighlightId = `${highlightId},${filename}`;
+    }
+
+    // Close the command palette before navigating
+    closeCommandPalette();
+
+    // Use ?select= to select the node and open detail panel (not just highlight)
+    navigate(`/graph?select=${encodeURIComponent(finalHighlightId)}`);
+  }, [result.id, result.metadata, navigate, closeCommandPalette]);
 
   const EntityIcon = result.entity_type
     ? ENTITY_ICONS[result.entity_type]
@@ -238,8 +317,19 @@ export function ResultCard({
           {showProvenance ? 'Hide' : 'Show'} provenance
         </button>
 
-        {/* Quick Actions - visible on hover */}
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {/* Quick Actions - always visible */}
+        <div className="flex items-center gap-1">
+          {/* Show in Graph - always visible */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-blue-400/70 hover:text-blue-400 hover:bg-blue-500/10 border border-blue-400/30 hover:border-blue-400/50"
+            onClick={handleShowInGraph}
+            title="Show in knowledge graph"
+          >
+            <Network className="h-3.5 w-3.5" />
+          </Button>
+
           {/* Open Source */}
           {!!result.metadata.source && (
             <Button

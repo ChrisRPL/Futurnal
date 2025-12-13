@@ -50,6 +50,10 @@ export function GraphControls({ graphRef, onReset, className }: GraphControlsPro
     <TooltipProvider delayDuration={300}>
       <div
         data-slot="graph-controls"
+        data-testid="graph-controls"
+        role="toolbar"
+        aria-label="Graph controls"
+        aria-orientation="vertical"
         className={cn(
           'flex flex-col gap-1 p-1',
           'bg-black/90 backdrop-blur-sm border border-white/10',

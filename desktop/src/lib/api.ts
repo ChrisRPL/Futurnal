@@ -19,6 +19,8 @@ import type {
   AuditLogQuery,
   OrchestratorStatus,
   GraphData,
+  GraphFilter,
+  GraphStats,
 } from '@/types/api';
 
 /**
@@ -393,5 +395,69 @@ export const graphApi = {
       console.warn('[Graph API] Failed to fetch graph data:', error);
       return { nodes: [], links: [] };
     }
+  },
+
+  /**
+   * Get filtered subgraph based on filter parameters.
+   */
+  async getFilteredGraph(filter: GraphFilter, limit?: number, offset?: number): Promise<GraphData> {
+    try {
+      const result = await invokeWithTimeout<GraphData>('get_filtered_graph', { filter, limit, offset });
+      return result;
+    } catch (error) {
+      console.warn('[Graph API] Failed to fetch filtered graph:', error);
+      return { nodes: [], links: [] };
+    }
+  },
+
+  /**
+   * Get neighbors of a node within specified depth.
+   */
+  async getNodeNeighbors(nodeId: string, depth?: number): Promise<GraphData> {
+    try {
+      const result = await invokeWithTimeout<GraphData>('get_node_neighbors', { node_id: nodeId, depth });
+      return result;
+    } catch (error) {
+      console.warn('[Graph API] Failed to fetch node neighbors:', error);
+      return { nodes: [], links: [] };
+    }
+  },
+
+  /**
+   * Get graph statistics.
+   */
+  async getStats(): Promise<GraphStats> {
+    try {
+      return await invokeWithTimeout<GraphStats>('get_graph_stats');
+    } catch (error) {
+      console.warn('[Graph API] Failed to fetch graph stats:', error);
+      return { total_nodes: 0, total_links: 0, nodes_by_type: {}, nodes_by_source: {} };
+    }
+  },
+
+  /**
+   * Get list of bookmarked node IDs.
+   */
+  async getBookmarks(): Promise<string[]> {
+    try {
+      return await invokeWithTimeout<string[]>('get_bookmarked_nodes');
+    } catch (error) {
+      console.warn('[Graph API] Failed to fetch bookmarks:', error);
+      return [];
+    }
+  },
+
+  /**
+   * Add a node to bookmarks.
+   */
+  async bookmarkNode(nodeId: string): Promise<void> {
+    return invokeWithTimeout('bookmark_node', { node_id: nodeId });
+  },
+
+  /**
+   * Remove a node from bookmarks.
+   */
+  async unbookmarkNode(nodeId: string): Promise<void> {
+    return invokeWithTimeout('unbookmark_node', { node_id: nodeId });
   },
 };

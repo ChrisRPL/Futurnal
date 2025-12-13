@@ -100,12 +100,14 @@ pub struct GraphNode {
 }
 
 /// Graph edge/link for visualization.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphLink {
     pub source: String,
     pub target: String,
     pub relationship: String,
     pub weight: Option<f64>,
+    /// Confidence score for this relationship (0.0 - 1.0)
+    pub confidence: Option<f64>,
 }
 
 /// Complete graph data for react-force-graph.
@@ -113,6 +115,47 @@ pub struct GraphLink {
 pub struct GraphData {
     pub nodes: Vec<GraphNode>,
     pub links: Vec<GraphLink>,
+    /// Pagination metadata
+    pub pagination: Option<PaginationMeta>,
+}
+
+/// Pagination metadata for graph queries.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PaginationMeta {
+    /// Current offset in the result set
+    pub offset: u32,
+    /// Total number of nodes available
+    pub total: u32,
+    /// Whether more results are available
+    pub has_more: bool,
+}
+
+/// Filter parameters for subgraph queries.
+#[derive(Debug, Deserialize)]
+pub struct GraphFilter {
+    /// Filter by source identifiers
+    pub sources: Option<Vec<String>>,
+    /// Filter by node types (entity types)
+    pub node_types: Option<Vec<String>>,
+    /// Minimum confidence threshold (0.0 - 1.0)
+    pub min_confidence: Option<f64>,
+    /// Start of time range (ISO 8601)
+    pub start_date: Option<String>,
+    /// End of time range (ISO 8601)
+    pub end_date: Option<String>,
+}
+
+/// Graph statistics response.
+#[derive(Debug, Serialize)]
+pub struct GraphStats {
+    /// Total number of nodes
+    pub total_nodes: u32,
+    /// Total number of links
+    pub total_links: u32,
+    /// Count of nodes by type
+    pub nodes_by_type: HashMap<String, u32>,
+    /// Count of nodes by source
+    pub nodes_by_source: HashMap<String, u32>,
 }
 
 /// Key for grouping elements by source document.
@@ -325,6 +368,7 @@ fn load_entity_files(
                 target: rel.target,
                 relationship: rel.relationship,
                 weight: Some(rel.confidence),
+                confidence: Some(rel.confidence),
             });
         }
     }
@@ -617,6 +661,7 @@ pub async fn get_knowledge_graph(limit: Option<u32>) -> Result<GraphData, String
                 target: doc.id,
                 relationship: "contains".to_string(),
                 weight: Some(1.0),
+                confidence: Some(1.0),
             });
         }
     }
@@ -647,6 +692,9 @@ pub async fn get_knowledge_graph(limit: Option<u32>) -> Result<GraphData, String
         }
     }
 
+    let total_nodes = nodes.len() as u32;
+    let has_more = total_nodes >= limit as u32;
+
     log::info!(
         "Returning graph with {} nodes and {} links (from {} source documents)",
         nodes.len(),
@@ -654,7 +702,15 @@ pub async fn get_knowledge_graph(limit: Option<u32>) -> Result<GraphData, String
         nodes.len().saturating_sub(source_nodes.len())
     );
 
-    Ok(GraphData { nodes, links })
+    Ok(GraphData {
+        nodes,
+        links,
+        pagination: Some(PaginationMeta {
+            offset: 0,
+            total: total_nodes,
+            has_more,
+        }),
+    })
 }
 
 /// Open a file with the system's default application.
@@ -696,6 +752,283 @@ pub async fn open_file(path: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| format!("Failed to open file: {}", e))?;
     }
+
+    Ok(())
+}
+
+/// Get filtered subgraph based on filter parameters.
+///
+/// Filters nodes by source, type, confidence, and time range.
+/// Returns a subset of the full knowledge graph.
+#[command]
+pub async fn get_filtered_graph(
+    filter: GraphFilter,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<GraphData, String> {
+    log::info!("Getting filtered graph with filter: {:?}", filter);
+
+    // Get the full graph first
+    let full_graph = get_knowledge_graph(Some(10000)).await?;
+
+    let offset = offset.unwrap_or(0) as usize;
+    let limit = limit.unwrap_or(1000) as usize;
+
+    // Filter nodes
+    let filtered_nodes: Vec<GraphNode> = full_graph.nodes.into_iter()
+        .filter(|node| {
+            // Filter by node type
+            if let Some(ref types) = filter.node_types {
+                if !types.is_empty() && !types.contains(&node.node_type) {
+                    return false;
+                }
+            }
+
+            // Filter by source
+            if let Some(ref sources) = filter.sources {
+                if !sources.is_empty() {
+                    let node_source = node.metadata.as_ref()
+                        .and_then(|m| m.get("source"))
+                        .and_then(|s| s.as_str());
+
+                    if let Some(ns) = node_source {
+                        if !sources.iter().any(|s| ns.contains(s)) {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+            }
+
+            // Filter by time range
+            if let Some(ref start) = filter.start_date {
+                if let Some(ref ts) = node.timestamp {
+                    if ts < start {
+                        return false;
+                    }
+                }
+            }
+            if let Some(ref end) = filter.end_date {
+                if let Some(ref ts) = node.timestamp {
+                    if ts > end {
+                        return false;
+                    }
+                }
+            }
+
+            true
+        })
+        .collect();
+
+    // Build set of filtered node IDs for link filtering
+    let node_ids: std::collections::HashSet<String> = filtered_nodes.iter()
+        .map(|n| n.id.clone())
+        .collect();
+
+    // Filter links to only include those between filtered nodes
+    let filtered_links: Vec<GraphLink> = full_graph.links.into_iter()
+        .filter(|link| {
+            // Check both source and target exist in filtered nodes
+            if !node_ids.contains(&link.source) || !node_ids.contains(&link.target) {
+                return false;
+            }
+
+            // Filter by confidence
+            if let Some(min_conf) = filter.min_confidence {
+                if let Some(conf) = link.confidence {
+                    if conf < min_conf {
+                        return false;
+                    }
+                }
+            }
+
+            true
+        })
+        .collect();
+
+    // Apply pagination
+    let total = filtered_nodes.len() as u32;
+    let paginated_nodes: Vec<GraphNode> = filtered_nodes.into_iter()
+        .skip(offset)
+        .take(limit)
+        .collect();
+
+    let has_more = (offset + paginated_nodes.len()) < total as usize;
+
+    Ok(GraphData {
+        nodes: paginated_nodes,
+        links: filtered_links,
+        pagination: Some(PaginationMeta {
+            offset: offset as u32,
+            total,
+            has_more,
+        }),
+    })
+}
+
+/// Get neighbors of a specific node up to a certain depth.
+///
+/// Returns all nodes connected to the specified node within k hops.
+#[command]
+pub async fn get_node_neighbors(
+    node_id: String,
+    depth: Option<u32>,
+) -> Result<GraphData, String> {
+    log::info!("Getting neighbors for node {} with depth {:?}", node_id, depth);
+
+    let depth = depth.unwrap_or(1) as usize;
+
+    // Get the full graph
+    let full_graph = get_knowledge_graph(Some(10000)).await?;
+
+    // Build adjacency list
+    let mut adjacency: HashMap<String, Vec<(String, GraphLink)>> = HashMap::new();
+    for link in &full_graph.links {
+        adjacency.entry(link.source.clone())
+            .or_default()
+            .push((link.target.clone(), link.clone()));
+        adjacency.entry(link.target.clone())
+            .or_default()
+            .push((link.source.clone(), link.clone()));
+    }
+
+    // BFS to find neighbors within depth
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut queue: Vec<(String, usize)> = vec![(node_id.clone(), 0)];
+    let mut neighbor_ids: Vec<String> = Vec::new();
+
+    while let Some((current_id, current_depth)) = queue.pop() {
+        if visited.contains(&current_id) {
+            continue;
+        }
+        visited.insert(current_id.clone());
+        neighbor_ids.push(current_id.clone());
+
+        if current_depth < depth {
+            if let Some(neighbors) = adjacency.get(&current_id) {
+                for (neighbor_id, _) in neighbors {
+                    if !visited.contains(neighbor_id) {
+                        queue.push((neighbor_id.clone(), current_depth + 1));
+                    }
+                }
+            }
+        }
+    }
+
+    // Filter nodes and links to neighborhood
+    let neighbor_set: std::collections::HashSet<String> = neighbor_ids.iter().cloned().collect();
+
+    let nodes: Vec<GraphNode> = full_graph.nodes.into_iter()
+        .filter(|n| neighbor_set.contains(&n.id))
+        .collect();
+
+    let links: Vec<GraphLink> = full_graph.links.into_iter()
+        .filter(|l| neighbor_set.contains(&l.source) && neighbor_set.contains(&l.target))
+        .collect();
+
+    let total = nodes.len() as u32;
+
+    Ok(GraphData {
+        nodes,
+        links,
+        pagination: Some(PaginationMeta {
+            offset: 0,
+            total,
+            has_more: false,
+        }),
+    })
+}
+
+/// Get statistics about the knowledge graph.
+///
+/// Returns counts of nodes by type and source.
+#[command]
+pub async fn get_graph_stats() -> Result<GraphStats, String> {
+    log::info!("Getting graph statistics");
+
+    let graph = get_knowledge_graph(Some(10000)).await?;
+
+    let mut nodes_by_type: HashMap<String, u32> = HashMap::new();
+    let mut nodes_by_source: HashMap<String, u32> = HashMap::new();
+
+    for node in &graph.nodes {
+        *nodes_by_type.entry(node.node_type.clone()).or_insert(0) += 1;
+
+        if let Some(ref metadata) = node.metadata {
+            if let Some(source) = metadata.get("source").and_then(|s| s.as_str()) {
+                *nodes_by_source.entry(source.to_string()).or_insert(0) += 1;
+            }
+        }
+    }
+
+    Ok(GraphStats {
+        total_nodes: graph.nodes.len() as u32,
+        total_links: graph.links.len() as u32,
+        nodes_by_type,
+        nodes_by_source,
+    })
+}
+
+/// Bookmarks file path in workspace
+fn get_bookmarks_path() -> PathBuf {
+    get_workspace_path().join("bookmarks.json")
+}
+
+/// Get list of bookmarked node IDs.
+#[command]
+pub async fn get_bookmarked_nodes() -> Result<Vec<String>, String> {
+    let path = get_bookmarks_path();
+
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read bookmarks: {}", e))?;
+
+    let bookmarks: Vec<String> = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse bookmarks: {}", e))?;
+
+    Ok(bookmarks)
+}
+
+/// Add a node to bookmarks.
+#[command]
+pub async fn bookmark_node(node_id: String) -> Result<(), String> {
+    log::info!("Bookmarking node: {}", node_id);
+
+    let path = get_bookmarks_path();
+    let mut bookmarks = get_bookmarked_nodes().await.unwrap_or_default();
+
+    if !bookmarks.contains(&node_id) {
+        bookmarks.push(node_id);
+
+        let content = serde_json::to_string_pretty(&bookmarks)
+            .map_err(|e| format!("Failed to serialize bookmarks: {}", e))?;
+
+        std::fs::write(&path, content)
+            .map_err(|e| format!("Failed to write bookmarks: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// Remove a node from bookmarks.
+#[command]
+pub async fn unbookmark_node(node_id: String) -> Result<(), String> {
+    log::info!("Unbookmarking node: {}", node_id);
+
+    let path = get_bookmarks_path();
+    let mut bookmarks = get_bookmarked_nodes().await.unwrap_or_default();
+
+    bookmarks.retain(|id| id != &node_id);
+
+    let content = serde_json::to_string_pretty(&bookmarks)
+        .map_err(|e| format!("Failed to serialize bookmarks: {}", e))?;
+
+    std::fs::write(&path, content)
+        .map_err(|e| format!("Failed to write bookmarks: {}", e))?;
 
     Ok(())
 }
