@@ -167,6 +167,161 @@ export interface AuditLogQuery {
 }
 
 // ============================================================================
+// Cloud Sync Types
+// ============================================================================
+
+/**
+ * Cloud sync consent scope values.
+ * These match the Python CloudSyncScope enum.
+ */
+export type CloudSyncScope =
+  | 'cloud:pkg:metadata_backup'
+  | 'cloud:pkg:settings_backup'
+  | 'cloud:search:history_sync';
+
+/**
+ * Cloud sync consent status from the backend.
+ */
+export interface CloudSyncConsentStatus {
+  has_consent: boolean;
+  granted_scopes: CloudSyncScope[];
+  granted_at?: string;
+  is_syncing: boolean;
+  last_sync_at?: string;
+}
+
+/**
+ * Request to grant cloud sync consent.
+ */
+export interface GrantCloudSyncRequest {
+  scopes: CloudSyncScope[];
+  operator?: string;
+}
+
+/**
+ * Cloud sync audit log entry.
+ */
+export interface CloudSyncAuditEntry {
+  id: string;
+  timestamp: string;
+  action: CloudSyncAuditAction;
+  scope?: CloudSyncScope;
+  nodes_affected: number;
+  success: boolean;
+  error_message?: string;
+}
+
+/**
+ * Actions that can be recorded in cloud sync audit logs.
+ */
+export type CloudSyncAuditAction =
+  | 'sync_started'
+  | 'sync_completed'
+  | 'sync_failed'
+  | 'consent_granted'
+  | 'consent_revoked'
+  | 'data_deleted'
+  | 'data_deletion_requested';
+
+/**
+ * Query parameters for cloud sync audit logs.
+ */
+export interface CloudSyncAuditQuery {
+  limit?: number;
+  action_filter?: CloudSyncAuditAction;
+}
+
+/**
+ * Information about a cloud sync scope for UI display.
+ */
+export interface CloudSyncScopeInfo {
+  scope: CloudSyncScope;
+  title: string;
+  description: string;
+  required: boolean;
+  default_enabled: boolean;
+  data_shared?: string[];
+  data_not_shared?: string[];
+}
+
+/**
+ * Default scope information for the consent modal.
+ */
+export const CLOUD_SYNC_SCOPE_INFO: CloudSyncScopeInfo[] = [
+  {
+    scope: 'cloud:pkg:metadata_backup',
+    title: 'Knowledge Graph Structure',
+    description: 'Sync graph node labels, relationships, and timestamps (NOT document content)',
+    required: true,
+    default_enabled: true,
+    data_shared: [
+      'Entity names and types (Person, Organization, Concept, Event)',
+      'Relationship types between entities',
+      'Timestamps (created, modified)',
+      'Source identifiers (which connector created the data)',
+    ],
+    data_not_shared: [
+      'Document content',
+      'Email bodies',
+      'File contents',
+      'Attachment data',
+    ],
+  },
+  {
+    scope: 'cloud:pkg:settings_backup',
+    title: 'App Settings',
+    description: 'Sync your Futurnal preferences and settings across devices',
+    required: false,
+    default_enabled: true,
+    data_shared: [
+      'Privacy level settings',
+      'Connector configurations (without credentials)',
+      'UI preferences',
+      'Theme settings',
+    ],
+    data_not_shared: [
+      'Passwords or API keys',
+      'OAuth tokens',
+      'Local file paths',
+    ],
+  },
+  {
+    scope: 'cloud:search:history_sync',
+    title: 'Search History',
+    description: 'Sync your search queries to continue research across devices',
+    required: false,
+    default_enabled: false,
+    data_shared: [
+      'Search query text',
+      'Search timestamps',
+      'Filter settings used',
+    ],
+    data_not_shared: [
+      'Search results',
+      'Document content from results',
+    ],
+  },
+];
+
+/**
+ * Helper to get default enabled scopes.
+ */
+export function getDefaultEnabledScopes(): CloudSyncScope[] {
+  return CLOUD_SYNC_SCOPE_INFO
+    .filter(info => info.default_enabled)
+    .map(info => info.scope);
+}
+
+/**
+ * Helper to get required scopes.
+ */
+export function getRequiredScopes(): CloudSyncScope[] {
+  return CLOUD_SYNC_SCOPE_INFO
+    .filter(info => info.required)
+    .map(info => info.scope);
+}
+
+// ============================================================================
 // Orchestrator Types
 // ============================================================================
 

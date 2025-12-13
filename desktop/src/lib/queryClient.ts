@@ -54,4 +54,12 @@ export const queryKeys = {
 
   // Subscription
   subscription: ['subscription'] as const,
+
+  // Telemetry
+  telemetry: ['telemetry'] as const,
+  telemetrySnapshot: () => ['telemetry', 'snapshot'] as const,
+  telemetryMetrics: (query: unknown) => ['telemetry', 'metrics', query] as const,
+  telemetryQualityGates: () => ['telemetry', 'quality-gates'] as const,
+  telemetryAlerts: (query?: unknown) => ['telemetry', 'alerts', query] as const,
+  telemetryStorageStats: () => ['telemetry', 'storage-stats'] as const,
 };

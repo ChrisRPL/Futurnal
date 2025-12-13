@@ -10,7 +10,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { Filter, Palette, Calendar, Gauge, FolderTree, RotateCcw } from 'lucide-react';
+import { Filter, Palette, Calendar, Gauge, FolderTree, RotateCcw, Save, Trash2, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Popover,
@@ -48,6 +48,7 @@ export function GraphFilterPanel({ className }: GraphFilterPanelProps) {
     sourceFilter,
     confidenceRange,
     timeRange,
+    savedFilterPresets,
     toggleNodeType,
     showAllNodeTypes,
     toggleColorMode,
@@ -55,11 +56,16 @@ export function GraphFilterPanel({ className }: GraphFilterPanelProps) {
     setConfidenceRange,
     setTimeRange,
     clearFilters,
+    saveFilterPreset,
+    loadFilterPreset,
+    deleteFilterPreset,
   } = useGraphStore();
 
   // Available sources from graph stats
   const [availableSources, setAvailableSources] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [presetName, setPresetName] = useState('');
+  const [showSaveInput, setShowSaveInput] = useState(false);
 
   // Fetch available sources from backend
   useEffect(() => {
@@ -120,6 +126,14 @@ export function GraphFilterPanel({ className }: GraphFilterPanelProps) {
     const value = e.target.value || null;
     setTimeRange({ ...timeRange, end: value });
   }, [timeRange, setTimeRange]);
+
+  // Handle saving preset
+  const handleSavePreset = useCallback(() => {
+    if (!presetName.trim()) return;
+    saveFilterPreset(presetName.trim());
+    setPresetName('');
+    setShowSaveInput(false);
+  }, [presetName, saveFilterPreset]);
 
   return (
     <Popover>
@@ -333,6 +347,91 @@ export function GraphFilterPanel({ className }: GraphFilterPanelProps) {
                 {colorMode === 'colored' ? 'Colored' : 'Monochrome'}
               </button>
             </div>
+          </div>
+
+          {/* Saved Presets Section */}
+          <div className="pt-2 border-t border-white/10 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-white/60 font-medium">Saved Presets</span>
+              {!showSaveInput && (
+                <button
+                  onClick={() => setShowSaveInput(true)}
+                  className="flex items-center gap-1 text-xs text-white/40 hover:text-white/80 transition-colors"
+                >
+                  <Save className="h-3 w-3" />
+                  Save current
+                </button>
+              )}
+            </div>
+
+            {/* Save preset input */}
+            {showSaveInput && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  placeholder="Preset name..."
+                  className={cn(
+                    'flex-1 px-2 py-1.5 text-xs rounded',
+                    'bg-white/5 border border-white/10 text-white/80',
+                    'placeholder:text-white/30',
+                    'focus:outline-none focus:border-white/30'
+                  )}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSavePreset();
+                    if (e.key === 'Escape') {
+                      setShowSaveInput(false);
+                      setPresetName('');
+                    }
+                  }}
+                  autoFocus
+                />
+                <button
+                  onClick={handleSavePreset}
+                  disabled={!presetName.trim()}
+                  className={cn(
+                    'p-1.5 rounded transition-colors',
+                    presetName.trim()
+                      ? 'text-green-400 hover:bg-green-500/20'
+                      : 'text-white/20 cursor-not-allowed'
+                  )}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* Preset list */}
+            {savedFilterPresets.length === 0 ? (
+              <div className="text-xs text-white/30 py-1">
+                No saved presets
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {savedFilterPresets.map((preset) => (
+                  <div
+                    key={preset.id}
+                    className="flex items-center justify-between group"
+                  >
+                    <button
+                      onClick={() => loadFilterPreset(preset.id)}
+                      className="flex-1 text-left px-2 py-1.5 text-xs text-white/60 hover:text-white/90 hover:bg-white/5 rounded transition-colors truncate"
+                      title={`Load "${preset.name}"`}
+                    >
+                      {preset.name}
+                    </button>
+                    <button
+                      onClick={() => deleteFilterPreset(preset.id)}
+                      className="p-1 text-white/20 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+                      title="Delete preset"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Help text */}

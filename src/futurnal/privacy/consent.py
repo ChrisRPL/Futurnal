@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import TYPE_CHECKING, Dict, Iterable, Optional
+
+if TYPE_CHECKING:
+    from .encryption import EncryptionManager
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -35,14 +41,34 @@ class ConsentRequiredError(RuntimeError):
 
 
 class ConsentRegistry:
-    """Filesystem-backed registry for consent decisions."""
+    """Filesystem-backed registry for consent decisions.
 
-    def __init__(self, directory: Path) -> None:
+    Supports optional encryption at rest for privacy-sensitive deployments.
+
+    Attributes:
+        _dir: Directory for consent data
+        _path: Path to consent.json file
+        _encryption_manager: Optional encryption manager
+    """
+
+    def __init__(
+        self,
+        directory: Path,
+        *,
+        encryption_manager: Optional["EncryptionManager"] = None,
+    ) -> None:
+        """Initialize consent registry.
+
+        Args:
+            directory: Directory for consent storage
+            encryption_manager: Optional encryption manager for encrypted storage
+        """
         self._dir = directory
         self._dir.mkdir(parents=True, exist_ok=True)
         self._path = self._dir / "consent.json"
+        self._encryption_manager = encryption_manager
         if not self._path.exists():
-            self._path.write_text(json.dumps({"records": []}, indent=2))
+            self._persist({})
 
     def grant(
         self,
@@ -116,14 +142,88 @@ class ConsentRegistry:
         for payload in data.values():
             yield _dict_to_record(payload)
 
+    def purge_all(self) -> int:
+        """Purge all consent records.
+
+        WARNING: This is irreversible!
+
+        Returns:
+            Number of records purged
+        """
+        data = self._load()
+        count = len(data)
+
+        if count > 0:
+            # Clear all records
+            self._persist({})
+            logger.info(f"Purged {count} consent records")
+
+        return count
+
+    def purge_by_source(self, source: str) -> int:
+        """Purge all consent records for a specific source.
+
+        Args:
+            source: Source identifier to purge
+
+        Returns:
+            Number of records purged
+        """
+        data = self._load()
+        original_count = len(data)
+
+        # Filter out records for the source
+        filtered = {
+            key: record
+            for key, record in data.items()
+            if record.get("source") != source
+        }
+
+        removed_count = original_count - len(filtered)
+
+        if removed_count > 0:
+            self._persist(filtered)
+            logger.info(f"Purged {removed_count} consent records for source '{source}'")
+
+        return removed_count
+
+    def _is_encrypted(self) -> bool:
+        """Check if encryption is enabled."""
+        return (
+            self._encryption_manager is not None
+            and self._encryption_manager.enabled
+        )
+
     def _load(self) -> Dict[str, dict]:
-        raw = json.loads(self._path.read_text())
+        """Load consent records, decrypting if necessary."""
+        content = self._path.read_text()
+
+        if self._is_encrypted():
+            try:
+                # Try to decrypt
+                data = json.loads(content)
+                if "ciphertext" in data:
+                    raw = self._encryption_manager.decrypt_json(content)
+                else:
+                    raw = data
+            except Exception as e:
+                logger.warning(f"Failed to decrypt consent data: {e}")
+                raw = json.loads(content)
+        else:
+            raw = json.loads(content)
+
         return {entry["key"]: entry for entry in raw.get("records", [])}
 
     def _persist(self, records: Dict[str, dict]) -> None:
-        ordered = sorted(records.values(), key=lambda item: item["timestamp"])
+        """Persist consent records, encrypting if enabled."""
+        ordered = sorted(records.values(), key=lambda item: item["timestamp"]) if records else []
         payload = {"records": ordered}
-        self._path.write_text(json.dumps(payload, indent=2))
+
+        if self._is_encrypted():
+            encrypted = self._encryption_manager.encrypt_json(payload)
+            self._path.write_text(encrypted)
+        else:
+            self._path.write_text(json.dumps(payload, indent=2))
 
 
 def _hash_optional(value: Optional[str]) -> Optional[str]:

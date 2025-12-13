@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Iterable, Optional
+from typing import TYPE_CHECKING, Dict, Iterable, Optional
 
 from .redaction import RedactedPath, RedactionPolicy, redact_path
+
+if TYPE_CHECKING:
+    from .encryption import EncryptionManager
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -56,7 +62,21 @@ class AuditEvent:
 
 @dataclass
 class AuditLogger:
-    """Writes append-only tamper-evident audit logs."""
+    """Writes append-only tamper-evident audit logs.
+
+    Supports optional encryption at rest for privacy-sensitive deployments.
+    When encryption is enabled, each log entry is encrypted using AES-256-GCM
+    before being written to disk.
+
+    Attributes:
+        output_dir: Directory for audit log files
+        filename: Name of the main audit log file
+        max_bytes: Maximum log file size before rotation
+        retention_days: Days to retain rotated logs
+        review_dirname: Directory for daily review copies
+        manifest_name: Name of the manifest file
+        encryption_manager: Optional encryption manager for encrypted storage
+    """
 
     output_dir: Path
     filename: str = "audit.log"
@@ -64,6 +84,7 @@ class AuditLogger:
     retention_days: int = 30
     review_dirname: str = "review"
     manifest_name: str = "audit_manifest.json"
+    encryption_manager: Optional["EncryptionManager"] = None
 
     def __post_init__(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -72,7 +93,7 @@ class AuditLogger:
         self._review_dir = self.output_dir / self.review_dirname
         self._review_dir.mkdir(parents=True, exist_ok=True)
         if not self._manifest_path.exists():
-            self._manifest_path.write_text(json.dumps({"last_hash": None, "rotated": []}, indent=2))
+            self._manifest_path.write_text(json.dumps({"last_hash": None, "rotated": [], "encrypted": self._is_encrypted()}, indent=2))
 
     def record(self, event: AuditEvent) -> None:
         payload = event.to_payload()
@@ -135,11 +156,19 @@ class AuditLogger:
         self.record(event)
 
     def verify(self, *, path: Optional[Path] = None) -> bool:
+        """Verify the integrity of the audit log chain.
+
+        Args:
+            path: Optional path to verify (defaults to current log)
+
+        Returns:
+            True if chain is valid, False if tampered
+        """
         target = path or self._path
         if not target.exists():
             return True
         previous_hash = self._load_manifest().get("previous_hash")
-        for entry in _iter_json_lines(target):
+        for entry in self._iter_decrypted_events(target):
             chain_prev = entry.get("chain_prev")
             if chain_prev != previous_hash:
                 return False
@@ -149,6 +178,31 @@ class AuditLogger:
                 return False
             previous_hash = current_hash
         return True
+
+    def iter_events(self, *, path: Optional[Path] = None) -> Iterable[Dict[str, object]]:
+        """Iterate over audit events, decrypting if necessary.
+
+        Args:
+            path: Optional path to read (defaults to current log)
+
+        Yields:
+            Decrypted audit event dictionaries
+        """
+        target = path or self._path
+        if not target.exists():
+            return
+        yield from self._iter_decrypted_events(target)
+
+    def _iter_decrypted_events(self, path: Path) -> Iterable[Dict[str, object]]:
+        """Iterate and decrypt events from a log file."""
+        with path.open("r", encoding="utf-8") as fp:
+            for line in fp:
+                line = line.strip()
+                if not line:
+                    continue
+                entry = self._decrypt_payload(line)
+                if entry:
+                    yield entry
 
     def _augment_with_chain(self, payload: Dict[str, object]) -> Dict[str, object]:
         manifest = self._load_manifest()
@@ -161,14 +215,56 @@ class AuditLogger:
         self._save_manifest(manifest)
         return augmented
 
+    def _is_encrypted(self) -> bool:
+        """Check if encryption is enabled."""
+        return self.encryption_manager is not None and self.encryption_manager.enabled
+
+    def _encrypt_payload(self, payload: Dict[str, object]) -> str:
+        """Encrypt a payload if encryption is enabled.
+
+        Args:
+            payload: The payload to encrypt
+
+        Returns:
+            JSON string, encrypted if enabled
+        """
+        json_str = json.dumps(payload, separators=(",", ":"))
+        if self._is_encrypted():
+            return self.encryption_manager.encrypt_json(payload)
+        return json_str
+
+    def _decrypt_payload(self, line: str) -> Dict[str, object]:
+        """Decrypt a payload line if it's encrypted.
+
+        Args:
+            line: The line to decrypt
+
+        Returns:
+            Decrypted payload dictionary
+        """
+        if not line.strip():
+            return {}
+
+        # Check if line is encrypted (contains 'ciphertext' key)
+        try:
+            data = json.loads(line)
+            if "ciphertext" in data and self.encryption_manager:
+                return self.encryption_manager.decrypt_json(line)
+            return data
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse audit line as JSON")
+            return {}
+
     def _append_line(self, payload: Dict[str, object]) -> None:
         with self._path.open("a", encoding="utf-8") as fp:
-            fp.write(json.dumps(payload, separators=(",", ":")) + "\n")
+            line = self._encrypt_payload(payload) if self._is_encrypted() else json.dumps(payload, separators=(",", ":"))
+            fp.write(line + "\n")
 
     def _emit_review_payload(self, payload: Dict[str, object]) -> None:
         review_file = self._review_dir / f"{datetime.utcnow().date().isoformat()}.log"
         with review_file.open("a", encoding="utf-8") as fp:
-            fp.write(json.dumps(payload, separators=(",", ":")) + "\n")
+            line = self._encrypt_payload(payload) if self._is_encrypted() else json.dumps(payload, separators=(",", ":"))
+            fp.write(line + "\n")
 
     def _rotate_if_needed(self) -> None:
         if not self._path.exists():
@@ -196,6 +292,99 @@ class AuditLogger:
 
     def _save_manifest(self, manifest: Dict[str, object]) -> None:
         self._manifest_path.write_text(json.dumps(manifest, indent=2))
+
+    def purge_all(self) -> int:
+        """Purge all audit log files.
+
+        WARNING: This is irreversible!
+
+        Returns:
+            Number of files deleted
+        """
+        deleted = 0
+
+        # Delete main log
+        if self._path.exists():
+            self._path.unlink()
+            deleted += 1
+
+        # Delete rotated logs
+        for file_path in self.output_dir.glob("audit-*.log"):
+            file_path.unlink()
+            deleted += 1
+
+        # Delete review logs
+        for file_path in self._review_dir.glob("*.log"):
+            file_path.unlink()
+            deleted += 1
+
+        # Reset manifest
+        self._manifest_path.write_text(
+            json.dumps({"last_hash": None, "rotated": [], "encrypted": self._is_encrypted()}, indent=2)
+        )
+
+        logger.info(f"Purged {deleted} audit log files")
+        return deleted
+
+    def purge_by_source(self, source: str) -> int:
+        """Purge audit events from a specific source.
+
+        Note: This creates a new log file without the specified source's events.
+        Chain integrity will be recalculated.
+
+        Args:
+            source: Source identifier to remove
+
+        Returns:
+            Number of events removed
+        """
+        if not self._path.exists():
+            return 0
+
+        # Read all events
+        events = list(self.iter_events())
+        original_count = len(events)
+
+        # Filter out events from source
+        filtered = [e for e in events if e.get("source") != source]
+        removed_count = original_count - len(filtered)
+
+        if removed_count == 0:
+            return 0
+
+        # Rewrite log without source events
+        # First, clear the log
+        self._path.unlink()
+
+        # Reset manifest
+        manifest = {"last_hash": None, "rotated": [], "encrypted": self._is_encrypted()}
+        self._save_manifest(manifest)
+
+        # Re-record filtered events (this will rebuild chain)
+        for event_data in filtered:
+            # Remove chain fields as they'll be recalculated
+            event_data.pop("chain_hash", None)
+            event_data.pop("chain_prev", None)
+
+            # Rebuild as AuditEvent
+            event = AuditEvent(
+                job_id=event_data.get("job_id", "unknown"),
+                source=event_data.get("source", "unknown"),
+                action=event_data.get("action", "unknown"),
+                status=event_data.get("status", "unknown"),
+                timestamp=datetime.fromisoformat(event_data["timestamp"]),
+                sha256=event_data.get("sha256"),
+                redacted_path=event_data.get("redacted_path"),
+                path_hash=event_data.get("path_hash"),
+                attempt=event_data.get("attempt"),
+                operator_action=event_data.get("operator_action"),
+                consent_token_hash=event_data.get("consent_token_hash"),
+                metadata=event_data.get("metadata", {}),
+            )
+            self.record(event)
+
+        logger.info(f"Purged {removed_count} events from source '{source}'")
+        return removed_count
 
 
 def _compute_chain_hash(payload: Dict[str, object]) -> str:

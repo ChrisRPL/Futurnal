@@ -37,6 +37,17 @@ from ..ingestion.local.state import StateStore
 from ..privacy.consent import ConsentRegistry
 from .models import IngestionJob, JobPriority, JobType
 from .audit import AuditEvent, AuditLogger
+from .audit_events import (
+    log_system_start,
+    log_system_shutdown,
+    log_crash_recovery,
+    log_job_enqueued,
+    log_job_started,
+    log_job_completed,
+    log_job_failed,
+    log_retry_scheduled,
+    log_job_quarantined,
+)
 from .metrics import TelemetryRecorder
 from .queue import JobQueue
 from .quarantine import QuarantineStore, classify_failure, quarantine_reason_to_failure_type
@@ -113,6 +124,14 @@ class IngestionOrchestrator:
                         "duration_seconds": recovery_report.recovery_duration_seconds,
                     },
                 )
+
+            # Audit log crash recovery
+            log_crash_recovery(
+                self._audit_logger,
+                jobs_reset=recovery_report.jobs_reset_to_pending,
+                recovery_duration_seconds=recovery_report.recovery_duration_seconds,
+                errors=len(recovery_report.errors) if recovery_report.errors else 0,
+            )
         self._quarantine = quarantine_store or QuarantineStore(
             self._workspace_dir / "quarantine" / "quarantine.db"
         )
@@ -178,6 +197,9 @@ class IngestionOrchestrator:
         self._deadlock_detection_task: Optional[asyncio.Task] = None
         self._invariant_check_task: Optional[asyncio.Task] = None
 
+        # Uptime tracking for audit logging
+        self._start_time: Optional[float] = None
+
     def register_source(self, registration: SourceRegistration) -> None:
         if registration.schedule not in {"@manual", "@interval"} and not is_valid(
             registration.schedule
@@ -237,6 +259,9 @@ class IngestionOrchestrator:
         if self._running:
             return
 
+        # Track start time for uptime calculation
+        self._start_time = time.perf_counter()
+
         # Set recovery marker (cleared on graceful shutdown)
         self._crash_recovery._recovery_tracker.mark_crash()
 
@@ -253,6 +278,14 @@ class IngestionOrchestrator:
         self._invariant_check_task = self._loop.create_task(self._invariant_check_loop())
         self._running = True
         logger.info("Ingestion orchestrator started")
+
+        # Audit log system startup
+        log_system_start(
+            self._audit_logger,
+            workspace_dir=str(self._workspace_dir),
+            configured_workers=self._configured_workers,
+            registered_sources=len(self._sources),
+        )
 
     async def shutdown(self) -> None:
         if not self._running:
@@ -290,7 +323,22 @@ class IngestionOrchestrator:
         # Clear recovery marker (graceful shutdown)
         self._crash_recovery._recovery_tracker.clear_recovery_marker()
 
+        # Calculate uptime for audit logging
+        uptime_seconds = None
+        if self._start_time is not None:
+            uptime_seconds = time.perf_counter() - self._start_time
+
+        # Audit log system shutdown
+        log_system_shutdown(
+            self._audit_logger,
+            jobs_completed=self._job_queue.completed_count(),
+            jobs_failed=self._job_queue.failed_count(),
+            jobs_pending=self._job_queue.pending_count(),
+            uptime_seconds=uptime_seconds,
+        )
+
         self._running = False
+        self._start_time = None
         logger.info("Ingestion orchestrator stopped")
 
     def run_manual_job(self, source_name: str, *, force: bool = False) -> None:
@@ -350,6 +398,16 @@ class IngestionOrchestrator:
                 "ingestion_trigger": trigger,
                 "job_type": job_type.value,
             },
+        )
+
+        # Audit log job enqueue
+        log_job_enqueued(
+            self._audit_logger,
+            job_id=job_id,
+            source_name=source_name,
+            job_type=job_type.value,
+            trigger=trigger,
+            priority=registration.priority.name.lower(),
         )
 
     async def _worker_loop(self) -> None:
@@ -418,6 +476,20 @@ class IngestionOrchestrator:
             },
         )
         self._job_queue.mark_running(job.job_id)
+
+        # Get current attempt count for audit logging
+        job_record = self._job_queue.get_job(job.job_id)
+        attempt = job_record.get("attempts", 1) if job_record else 1
+
+        # Audit log job start
+        log_job_started(
+            self._audit_logger,
+            job_id=job.job_id,
+            source_name=job.payload.get("source_name", "unknown"),
+            job_type=job.job_type.value,
+            attempt=attempt,
+        )
+
         start = time.perf_counter()
         files_processed = 0
         bytes_processed = 0
@@ -833,6 +905,17 @@ class IngestionOrchestrator:
         # Reschedule with calculated delay
         self._job_queue.reschedule(job.job_id, delay_seconds)
 
+        # Audit log retry scheduled
+        log_retry_scheduled(
+            self._audit_logger,
+            job_id=job.job_id,
+            source_name=job.payload.get("source_name", "unknown"),
+            attempt=budget.attempts,
+            delay_seconds=delay_seconds,
+            failure_type=budget.failure_type.value,
+            retry_strategy=policy.strategy.value,
+        )
+
         # Record telemetry
         if self._telemetry:
             self._telemetry.record(
@@ -887,18 +970,12 @@ class IngestionOrchestrator:
         )
 
         # Record audit event
-        self._audit_logger.record(
-            AuditEvent(
-                job_id=job.job_id,
-                source=job.payload.get("source_name", "unknown"),
-                action="quarantine",
-                status="quarantined",
-                timestamp=datetime.utcnow(),
-                metadata={
-                    "reason": reason.value,
-                    "attempts": job.payload.get("attempts", 0),
-                },
-            )
+        log_job_quarantined(
+            self._audit_logger,
+            job_id=job.job_id,
+            source_name=job.payload.get("source_name", "unknown"),
+            reason=reason.value,
+            total_attempts=job.payload.get("attempts", 0),
         )
 
         # Record telemetry

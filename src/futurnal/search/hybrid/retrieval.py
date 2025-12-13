@@ -51,6 +51,8 @@ if TYPE_CHECKING:
     from futurnal.search.causal.retrieval import CausalChainRetrieval
     from futurnal.search.temporal.engine import TemporalQueryEngine
 
+from futurnal.search.audit_events import log_hybrid_search_executed
+
 logger = logging.getLogger(__name__)
 
 
@@ -250,6 +252,8 @@ class SchemaAwareRetrieval:
                 result_count=len(results),
                 vector_count=len(vector_results),
                 graph_count=len(graph_results),
+                vector_weight=adjusted_weights["vector"],
+                graph_weight=adjusted_weights["graph"],
             )
 
             return results
@@ -706,6 +710,8 @@ class SchemaAwareRetrieval:
         result_count: int,
         vector_count: int,
         graph_count: int,
+        vector_weight: float = 0.5,
+        graph_weight: float = 0.5,
     ) -> None:
         """Log search performance and audit if enabled."""
         # Performance warning if exceeds target
@@ -723,11 +729,15 @@ class SchemaAwareRetrieval:
         # Audit logging (without query content for privacy)
         if self._audit is not None:
             try:
-                self._audit.log_search_query(
-                    query_type="hybrid_search",
+                log_hybrid_search_executed(
+                    self._audit,
                     intent=intent,
                     result_count=result_count,
+                    vector_count=vector_count,
+                    graph_count=graph_count,
                     latency_ms=elapsed_ms,
+                    vector_weight=vector_weight,
+                    graph_weight=graph_weight,
                 )
             except Exception as e:
                 logger.debug(f"Audit logging failed: {e}")

@@ -3,12 +3,14 @@
 //! All commands in this module bridge the React frontend to the Python backend
 //! via the futurnal CLI.
 
+pub mod cloud_sync;
 pub mod connectors;
 pub mod graph;
 pub mod orchestrator;
 pub mod privacy;
 pub mod search;
 
+pub use cloud_sync::*;
 pub use connectors::*;
 pub use graph::*;
 pub use orchestrator::*;

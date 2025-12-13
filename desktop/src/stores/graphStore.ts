@@ -39,6 +39,19 @@ export interface TimeRange {
 }
 
 /**
+ * Saved filter preset.
+ */
+export interface FilterPreset {
+  id: string;
+  name: string;
+  createdAt: string;
+  visibleNodeTypes: EntityType[];
+  sourceFilter: string[];
+  confidenceRange: [number, number];
+  timeRange: TimeRange;
+}
+
+/**
  * All available entity types for filtering.
  */
 export const ALL_ENTITY_TYPES: EntityType[] = [
@@ -94,6 +107,10 @@ interface GraphState {
   /** Bookmarked node IDs (synced with backend) */
   bookmarkedNodeIds: string[];
 
+  // === Filter Presets ===
+  /** Saved filter presets */
+  savedFilterPresets: FilterPreset[];
+
   // === Actions ===
   /** Set selected node ID (null to deselect) */
   setSelectedNode: (id: string | null) => void;
@@ -133,6 +150,12 @@ interface GraphState {
   setBookmarkedNodes: (ids: string[]) => void;
   /** Toggle bookmark for a node */
   toggleBookmark: (id: string) => void;
+  /** Save current filter settings as a preset */
+  saveFilterPreset: (name: string) => void;
+  /** Load a saved filter preset */
+  loadFilterPreset: (id: string) => void;
+  /** Delete a saved filter preset */
+  deleteFilterPreset: (id: string) => void;
   /** Reset to initial state */
   reset: () => void;
 }
@@ -158,6 +181,8 @@ const initialState = {
   highlightedNodeIds: [] as string[],
   // Bookmarks
   bookmarkedNodeIds: [] as string[],
+  // Filter presets
+  savedFilterPresets: [] as FilterPreset[],
 };
 
 export const useGraphStore = create<GraphState>()(
@@ -246,6 +271,46 @@ export const useGraphStore = create<GraphState>()(
         }
       },
 
+      saveFilterPreset: (name) => {
+        const {
+          visibleNodeTypes,
+          sourceFilter,
+          confidenceRange,
+          timeRange,
+          savedFilterPresets,
+        } = get();
+
+        const newPreset: FilterPreset = {
+          id: `preset-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          name,
+          createdAt: new Date().toISOString(),
+          visibleNodeTypes: [...visibleNodeTypes],
+          sourceFilter: [...sourceFilter],
+          confidenceRange: [...confidenceRange] as [number, number],
+          timeRange: { ...timeRange },
+        };
+
+        set({ savedFilterPresets: [...savedFilterPresets, newPreset] });
+      },
+
+      loadFilterPreset: (id) => {
+        const { savedFilterPresets } = get();
+        const preset = savedFilterPresets.find((p) => p.id === id);
+        if (!preset) return;
+
+        set({
+          visibleNodeTypes: [...preset.visibleNodeTypes],
+          sourceFilter: [...preset.sourceFilter],
+          confidenceRange: [...preset.confidenceRange] as [number, number],
+          timeRange: { ...preset.timeRange },
+        });
+      },
+
+      deleteFilterPreset: (id) => {
+        const { savedFilterPresets } = get();
+        set({ savedFilterPresets: savedFilterPresets.filter((p) => p.id !== id) });
+      },
+
       reset: () =>
         set({
           selectedNodeId: null,
@@ -260,7 +325,7 @@ export const useGraphStore = create<GraphState>()(
     }),
     {
       name: 'futurnal-graph',
-      version: 4, // Bump version for time granularity
+      version: 5, // Bump version for filter presets
       // Only persist user preferences, not transient state
       partialize: (state) => ({
         visibleNodeTypes: state.visibleNodeTypes,
@@ -268,6 +333,7 @@ export const useGraphStore = create<GraphState>()(
         colorMode: state.colorMode,
         layoutMode: state.layoutMode,
         timeGranularity: state.timeGranularity,
+        savedFilterPresets: state.savedFilterPresets,
       }),
       // Migration from old versions
       migrate: (persistedState, version) => {
@@ -277,6 +343,7 @@ export const useGraphStore = create<GraphState>()(
           colorMode?: ColorMode;
           layoutMode?: LayoutMode;
           timeGranularity?: TimeGranularity;
+          savedFilterPresets?: FilterPreset[];
         } | null;
 
         if (version < 3) {
@@ -286,6 +353,7 @@ export const useGraphStore = create<GraphState>()(
             colorMode: state?.colorMode ?? 'colored',
             layoutMode: 'force' as LayoutMode,
             timeGranularity: 'auto' as TimeGranularity,
+            savedFilterPresets: [] as FilterPreset[],
           };
         }
         if (version < 4) {
@@ -295,6 +363,17 @@ export const useGraphStore = create<GraphState>()(
             colorMode: state?.colorMode ?? 'colored',
             layoutMode: state?.layoutMode ?? 'force',
             timeGranularity: 'auto' as TimeGranularity,
+            savedFilterPresets: [] as FilterPreset[],
+          };
+        }
+        if (version < 5) {
+          return {
+            visibleNodeTypes: state?.visibleNodeTypes ?? [],
+            breathingEnabled: state?.breathingEnabled ?? true,
+            colorMode: state?.colorMode ?? 'colored',
+            layoutMode: state?.layoutMode ?? 'force',
+            timeGranularity: state?.timeGranularity ?? 'auto',
+            savedFilterPresets: [] as FilterPreset[],
           };
         }
         return {
@@ -303,6 +382,7 @@ export const useGraphStore = create<GraphState>()(
           colorMode: state?.colorMode ?? 'colored',
           layoutMode: state?.layoutMode ?? 'force',
           timeGranularity: state?.timeGranularity ?? 'auto',
+          savedFilterPresets: state?.savedFilterPresets ?? [],
         };
       },
     }

@@ -305,6 +305,7 @@ export function GraphPage() {
           <GraphControls
             graphRef={graphRef}
             onReset={handleReset}
+            graphData={data}
             className="absolute top-4 right-4"
           />
 

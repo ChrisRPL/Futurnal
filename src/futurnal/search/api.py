@@ -35,9 +35,19 @@ from futurnal.search.hybrid.performance import (
     CacheLayer,
     PerformanceProfiler,
 )
+from futurnal.search.audit_events import (
+    log_search_executed,
+    log_search_failed,
+    log_content_indexed,
+    log_multimodal_search_executed,
+    log_ocr_content_indexed,
+    log_transcription_indexed,
+    log_feedback_recorded,
+)
 
 if TYPE_CHECKING:
     from futurnal.pkg.client import PKGClient
+    from futurnal.privacy.audit import AuditLogger
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +104,7 @@ class HybridSearchAPI:
         multimodal_enabled: bool = False,
         experiential_learning: bool = False,
         caching_enabled: bool = True,
+        audit_logger: Optional["AuditLogger"] = None,
     ):
         """Initialize HybridSearchAPI.
 
@@ -103,12 +114,14 @@ class HybridSearchAPI:
             multimodal_enabled: Enable multimodal content search
             experiential_learning: Enable GRPO feedback recording
             caching_enabled: Enable multi-layer caching
+            audit_logger: Optional audit logger for search event tracking
         """
         self.config = config or SearchConfig()
         self.pkg = pkg_client
         self.multimodal_enabled = multimodal_enabled
         self.experiential_learning = experiential_learning
         self.caching_enabled = caching_enabled
+        self._audit = audit_logger
 
         # Initialize components
         self._init_components()
@@ -198,11 +211,26 @@ class HybridSearchAPI:
         """
         start_time = time.time()
         intent_type = "exploratory"  # Default
+        cache_hit = False
+        fallback_used = False
 
         # Check cache
         if self.cache:
             cached, hit = self.cache.get(CacheLayer.QUERY_RESULT, query)
             if hit:
+                cache_hit = True
+                # Audit log cache hit
+                if self._audit:
+                    latency_ms = (time.time() - start_time) * 1000
+                    log_search_executed(
+                        self._audit,
+                        search_type="hybrid",
+                        intent=intent_type,
+                        result_count=len(cached) if cached else 0,
+                        latency_ms=latency_ms,
+                        cache_hit=True,
+                        filters_applied=filters,
+                    )
                 return cached
 
         results: List[Dict[str, Any]] = []
@@ -220,6 +248,15 @@ class HybridSearchAPI:
                         # Cache and return multimodal results
                         if self.cache:
                             self.cache.set(CacheLayer.QUERY_RESULT, query, results)
+                        # Audit log multimodal search
+                        if self._audit:
+                            latency_ms = (time.time() - start_time) * 1000
+                            log_multimodal_search_executed(
+                                self._audit,
+                                modalities=list(modality_summary.keys()) if isinstance(modality_summary, dict) else ["text"],
+                                result_count=len(results),
+                                latency_ms=latency_ms,
+                            )
                         return results
 
             # Standard routing
@@ -239,7 +276,19 @@ class HybridSearchAPI:
 
         except Exception as e:
             logger.error(f"Search error: {e}")
+            # Audit log failure
+            if self._audit:
+                latency_ms = (time.time() - start_time) * 1000
+                log_search_failed(
+                    self._audit,
+                    search_type="hybrid",
+                    intent=intent_type,
+                    error_type="search_exception",
+                    latency_ms=latency_ms,
+                    fallback_attempted=True,
+                )
             # Fallback search
+            fallback_used = True
             results = await self._basic_search(query, top_k)
 
         # Cache results
@@ -258,6 +307,19 @@ class HybridSearchAPI:
             )
         except Exception:
             pass  # Profiler recording is optional
+
+        # Audit log successful search (query content is NOT logged)
+        if self._audit:
+            log_search_executed(
+                self._audit,
+                search_type="hybrid",
+                intent=intent_type,
+                result_count=len(results),
+                latency_ms=latency_ms,
+                cache_hit=cache_hit,
+                fallback_used=fallback_used,
+                filters_applied=filters,
+            )
 
         return results
 
@@ -682,6 +744,8 @@ class HybridSearchAPI:
         query: str,
         clicked_result_id: Optional[str],
         feedback_type: str = "click",
+        result_count: int = 0,
+        clicked_position: Optional[int] = None,
     ) -> None:
         """Record search quality feedback for GRPO.
 
@@ -689,6 +753,8 @@ class HybridSearchAPI:
             query: Original query
             clicked_result_id: ID of clicked result
             feedback_type: Type of feedback (click, no_results, refinement)
+            result_count: Number of results in original search
+            clicked_position: Position of clicked result (if applicable)
         """
         if self.quality_feedback:
             # Use record_signal which is the correct method
@@ -698,6 +764,16 @@ class HybridSearchAPI:
                 signal_type=feedback_type,
                 signal_value=signal_value,
                 context={"result_id": clicked_result_id} if clicked_result_id else None,
+            )
+
+        # Audit log feedback (query content is NOT logged)
+        if self._audit:
+            log_feedback_recorded(
+                self._audit,
+                feedback_type=feedback_type,
+                search_type="hybrid",
+                result_count=result_count,
+                clicked_position=clicked_position,
             )
 
     async def index_ocr_content(self, ocr_output: Dict[str, Any]) -> str:
@@ -746,6 +822,20 @@ class HybridSearchAPI:
                 "confidence": source_metadata.get("extraction_confidence"),
             },
         )
+
+        # Audit log OCR indexing (content is NOT logged)
+        if self._audit:
+            from hashlib import sha256
+            source_file = ocr_output.get("source_file", "unknown")
+            source_file_hash = sha256(str(source_file).encode()).hexdigest()[:32]
+            log_ocr_content_indexed(
+                self._audit,
+                content_id=content_id,
+                confidence=ocr_output.get("confidence", 0.0),
+                source_file_hash=source_file_hash,
+                page_count=ocr_output.get("page_count", 1),
+            )
+
         return content_id
 
     async def index_transcription(self, whisper_output: Dict[str, Any]) -> str:
@@ -787,6 +877,16 @@ class HybridSearchAPI:
 
         content_id = f"audio_{hash(content_text)}"
 
+        # Calculate duration from segments
+        duration_seconds = 0.0
+        if segments:
+            last_segment = segments[-1]
+            duration_seconds = last_segment.get("end", 0.0)
+        elif self.transcription_processor:
+            duration_seconds = processed.get("transcription_metadata", {}).get(
+                "duration_seconds", 0.0
+            )
+
         # Store in PKG with source metadata (actual storage is placeholder)
         # In production, this would call self.pkg.store_content() with:
         # - content: content_text
@@ -798,14 +898,21 @@ class HybridSearchAPI:
             f"Indexed transcription: {content_id}",
             extra={
                 "source_type": source_metadata.get("source_type"),
-                "duration": processed.get("transcription_metadata", {}).get(
-                    "duration_seconds"
-                )
-                if self.transcription_processor
-                else None,
+                "duration": duration_seconds,
                 "speaker_count": len(speakers),
             },
         )
+
+        # Audit log transcription indexing (content is NOT logged)
+        if self._audit:
+            log_transcription_indexed(
+                self._audit,
+                content_id=content_id,
+                duration_seconds=duration_seconds,
+                speaker_count=len(speakers),
+                language=whisper_output.get("language", "en"),
+            )
+
         return content_id
 
     async def index_text(self, text: str) -> str:
@@ -819,6 +926,17 @@ class HybridSearchAPI:
         """
         content_id = f"text_{hash(text)}"
         logger.info(f"Indexed text: {content_id}")
+
+        # Audit log text indexing (content is NOT logged)
+        if self._audit:
+            log_content_indexed(
+                self._audit,
+                content_id=content_id,
+                content_type="text",
+                source_type="text",
+                size_bytes=len(text.encode("utf-8")),
+            )
+
         return content_id
 
 
@@ -827,6 +945,7 @@ def create_hybrid_search_api(
     experiential_learning: bool = False,
     caching_enabled: bool = True,
     config: Optional[SearchConfig] = None,
+    audit_logger: Optional["AuditLogger"] = None,
 ) -> HybridSearchAPI:
     """Create HybridSearchAPI instance.
 
@@ -837,6 +956,7 @@ def create_hybrid_search_api(
         experiential_learning: Enable GRPO feedback
         caching_enabled: Enable caching
         config: Optional search config
+        audit_logger: Optional audit logger for search event tracking
 
     Returns:
         Configured HybridSearchAPI instance
@@ -846,4 +966,5 @@ def create_hybrid_search_api(
         multimodal_enabled=multimodal_enabled,
         experiential_learning=experiential_learning,
         caching_enabled=caching_enabled,
+        audit_logger=audit_logger,
     )

@@ -45,6 +45,13 @@ pub fn run() {
             commands::privacy::grant_consent,
             commands::privacy::revoke_consent,
             commands::privacy::get_audit_logs,
+            // Cloud sync consent commands
+            commands::cloud_sync::get_cloud_sync_consent,
+            commands::cloud_sync::grant_cloud_sync_consent,
+            commands::cloud_sync::revoke_cloud_sync_consent,
+            commands::cloud_sync::get_cloud_sync_audit_logs,
+            commands::cloud_sync::log_cloud_sync_audit,
+            commands::cloud_sync::get_cloud_sync_scope_info,
             // Orchestrator commands
             commands::orchestrator::get_orchestrator_status,
             commands::orchestrator::start_orchestrator,
