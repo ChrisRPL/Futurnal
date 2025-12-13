@@ -37,24 +37,24 @@ export function ProfileSection() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-xl font-semibold text-white">Profile</h2>
-        <p className="text-sm text-white/60 mt-1">
+        <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Profile</h2>
+        <p className="text-sm text-[var(--color-text-secondary)] mt-1">
           Manage your account and subscription.
         </p>
       </div>
 
       {/* User Info */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-4">
           <Avatar className="h-16 w-16">
             <AvatarImage src={user?.photoURL || undefined} />
             <AvatarFallback className="text-lg">{initials}</AvatarFallback>
           </Avatar>
           <div>
-            <div className="text-lg font-medium text-white">
+            <div className="text-lg font-medium text-[var(--color-text-primary)]">
               {displayName}
             </div>
-            <div className="flex items-center gap-1 text-sm text-white/60">
+            <div className="flex items-center gap-1 text-sm text-[var(--color-text-secondary)]">
               <Mail className="h-3 w-3" />
               {user?.email}
             </div>
@@ -63,35 +63,35 @@ export function ProfileSection() {
       </div>
 
       {/* Subscription */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-3 mb-4">
-          <Crown className="h-5 w-5 text-white/60" />
-          <h3 className="text-base font-medium text-white">Subscription</h3>
+          <Crown className="h-5 w-5 text-[var(--color-text-tertiary)]" />
+          <h3 className="text-base font-medium text-[var(--color-text-primary)]">Subscription</h3>
         </div>
         {isLoading ? (
-          <div className="animate-pulse h-20 bg-white/5" />
+          <div className="animate-pulse h-20 bg-[var(--color-surface)]" />
         ) : (
           <div className="flex items-center justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-medium text-white">
+                <span className="font-medium text-[var(--color-text-primary)]">
                   {isPro ? 'Futurnal Pro' : 'The Archivist'}
                 </span>
                 <Badge
                   variant={isPro ? 'default' : 'secondary'}
-                  className={isPro ? 'bg-white text-black' : ''}
+                  className={isPro ? 'bg-[var(--color-inverse-bg)] text-[var(--color-inverse-text)]' : ''}
                 >
                   {isPro ? 'Pro' : 'Free'}
                 </Badge>
               </div>
               {isPro && expiresAt && (
-                <div className="flex items-center gap-1 text-xs text-white/50 mt-1">
+                <div className="flex items-center gap-1 text-xs text-[var(--color-text-tertiary)] mt-1">
                   <Calendar className="h-3 w-3" />
                   Renews {format(new Date(expiresAt), 'MMM d, yyyy')}
                 </div>
               )}
               {!isPro && (
-                <div className="text-xs text-white/50 mt-1">
+                <div className="text-xs text-[var(--color-text-tertiary)] mt-1">
                   3 data sources included
                 </div>
               )}
@@ -111,23 +111,23 @@ export function ProfileSection() {
 
       {/* Pro Features */}
       {!isPro && (
-        <div className="p-6 border border-white/10 bg-white/5">
-          <h3 className="text-base font-medium text-white mb-4">Pro Features</h3>
-          <ul className="space-y-2 text-sm text-white/60">
+        <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <h3 className="text-base font-medium text-[var(--color-text-primary)] mb-4">Pro Features</h3>
+          <ul className="space-y-2 text-sm text-[var(--color-text-secondary)]">
             <li className="flex items-center gap-2">
-              <span className="w-1 h-1 bg-white/40 rounded-full" />
+              <span className="w-1 h-1 bg-[var(--color-text-muted)] rounded-full" />
               Unlimited data sources
             </li>
             <li className="flex items-center gap-2">
-              <span className="w-1 h-1 bg-white/40 rounded-full" />
+              <span className="w-1 h-1 bg-[var(--color-text-muted)] rounded-full" />
               Encrypted cloud backup
             </li>
             <li className="flex items-center gap-2">
-              <span className="w-1 h-1 bg-white/40 rounded-full" />
+              <span className="w-1 h-1 bg-[var(--color-text-muted)] rounded-full" />
               Emergent insights (coming soon)
             </li>
             <li className="flex items-center gap-2">
-              <span className="w-1 h-1 bg-white/40 rounded-full" />
+              <span className="w-1 h-1 bg-[var(--color-text-muted)] rounded-full" />
               Causal exploration (coming soon)
             </li>
           </ul>
@@ -135,7 +135,7 @@ export function ProfileSection() {
       )}
 
       {/* Sign Out */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <Button variant="outline" onClick={handleLogout} className="w-full gap-2">
           <LogOut className="h-4 w-4" />
           Sign Out

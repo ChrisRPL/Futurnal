@@ -47,7 +47,7 @@ export function ConsentManager() {
     return (
       <div className="space-y-4">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="h-24 bg-white/5 animate-pulse" />
+          <div key={i} className="h-24 bg-[var(--color-surface)] animate-pulse" />
         ))}
       </div>
     );
@@ -56,8 +56,8 @@ export function ConsentManager() {
   if (!connectors?.length) {
     return (
       <div className="text-center py-8">
-        <p className="text-white/50">No data sources configured.</p>
-        <p className="text-sm text-white/30 mt-1">
+        <p className="text-[var(--color-text-tertiary)]">No data sources configured.</p>
+        <p className="text-sm text-[var(--color-text-muted)] mt-1">
           Add a source to manage its consent.
         </p>
       </div>
@@ -106,15 +106,15 @@ export function ConsentManager() {
         return (
           <div
             key={connector.id}
-            className="border border-white/10 p-4"
+            className="border border-[var(--color-border)] p-4"
           >
             <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 bg-white/5">
-                <Icon className="h-4 w-4 text-white/60" />
+              <div className="p-2 bg-[var(--color-surface)]">
+                <Icon className="h-4 w-4 text-[var(--color-text-secondary)]" />
               </div>
               <div>
-                <div className="font-medium text-white">{connector.name}</div>
-                <div className="text-xs text-white/40 capitalize">
+                <div className="font-medium text-[var(--color-text-primary)]">{connector.name}</div>
+                <div className="text-xs text-[var(--color-text-muted)] capitalize">
                   {connector.connector_type.replace('_', ' ')}
                 </div>
               </div>
@@ -135,21 +135,21 @@ export function ConsentManager() {
                     className="flex items-center justify-between"
                   >
                     <div>
-                      <div className="text-sm text-white flex items-center gap-2">
+                      <div className="text-sm text-[var(--color-text-primary)] flex items-center gap-2">
                         {consentType.label}
                         {isPending ? (
-                          <Loader2 className="h-3 w-3 animate-spin text-white/50" />
+                          <Loader2 className="h-3 w-3 animate-spin text-[var(--color-text-tertiary)]" />
                         ) : isGranted ? (
                           <CheckCircle className="h-3 w-3 text-green-500" />
                         ) : (
-                          <AlertCircle className="h-3 w-3 text-white/30" />
+                          <AlertCircle className="h-3 w-3 text-[var(--color-text-muted)]" />
                         )}
                       </div>
-                      <div className="text-xs text-white/40">
+                      <div className="text-xs text-[var(--color-text-muted)]">
                         {consentType.description}
                       </div>
                       {consent?.granted_at && (
-                        <div className="text-xs text-white/30 mt-1">
+                        <div className="text-xs text-[var(--color-text-muted)] mt-1">
                           Granted {formatDistanceToNow(new Date(consent.granted_at), { addSuffix: true })}
                         </div>
                       )}

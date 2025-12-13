@@ -29,27 +29,27 @@ export function PrivacySection() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-xl font-semibold text-white">Privacy</h2>
-        <p className="text-sm text-white/60 mt-1">
+        <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Privacy</h2>
+        <p className="text-sm text-[var(--color-text-secondary)] mt-1">
           Control how your data is collected, stored, and used.
         </p>
       </div>
 
       {/* Data Collection */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-3 mb-4">
-          <Eye className="h-5 w-5 text-white/60" />
-          <h3 className="text-base font-medium text-white">Data Collection</h3>
+          <Eye className="h-5 w-5 text-[var(--color-text-tertiary)]" />
+          <h3 className="text-base font-medium text-[var(--color-text-primary)]">Data Collection</h3>
         </div>
-        <p className="text-sm text-white/50 mb-4">
+        <p className="text-sm text-[var(--color-text-tertiary)] mb-4">
           Choose what information Futurnal can collect to improve the product.
         </p>
 
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium text-white">Anonymous Telemetry</div>
-              <div className="text-xs text-white/40">
+              <div className="text-sm font-medium text-[var(--color-text-primary)]">Anonymous Telemetry</div>
+              <div className="text-xs text-[var(--color-text-muted)]">
                 Help improve Futurnal by sending anonymous usage statistics
               </div>
             </div>
@@ -63,8 +63,8 @@ export function PrivacySection() {
 
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium text-white">Crash Reports</div>
-              <div className="text-xs text-white/40">
+              <div className="text-sm font-medium text-[var(--color-text-primary)]">Crash Reports</div>
+              <div className="text-xs text-[var(--color-text-muted)]">
                 Automatically send crash reports to help fix bugs
               </div>
             </div>
@@ -78,8 +78,8 @@ export function PrivacySection() {
 
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium text-white">Feature Analytics</div>
-              <div className="text-xs text-white/40">
+              <div className="text-sm font-medium text-[var(--color-text-primary)]">Feature Analytics</div>
+              <div className="text-xs text-[var(--color-text-muted)]">
                 Share feature usage to help prioritize development
               </div>
             </div>
@@ -92,24 +92,24 @@ export function PrivacySection() {
       </div>
 
       {/* Source Consent */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-3 mb-4">
-          <Shield className="h-5 w-5 text-white/60" />
-          <h3 className="text-base font-medium text-white">Data Source Consent</h3>
+          <Shield className="h-5 w-5 text-[var(--color-text-tertiary)]" />
+          <h3 className="text-base font-medium text-[var(--color-text-primary)]">Data Source Consent</h3>
         </div>
-        <p className="text-sm text-white/50 mb-4">
+        <p className="text-sm text-[var(--color-text-tertiary)] mb-4">
           Manage permissions for each connected data source.
         </p>
         <ConsentManager />
       </div>
 
       {/* Audit Log */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-3 mb-4">
-          <FileText className="h-5 w-5 text-white/60" />
-          <h3 className="text-base font-medium text-white">Activity Audit Log</h3>
+          <FileText className="h-5 w-5 text-[var(--color-text-tertiary)]" />
+          <h3 className="text-base font-medium text-[var(--color-text-primary)]">Activity Audit Log</h3>
         </div>
-        <p className="text-sm text-white/50 mb-4">
+        <p className="text-sm text-[var(--color-text-tertiary)] mb-4">
           View a complete history of data access and operations.
         </p>
         <Button
@@ -122,28 +122,28 @@ export function PrivacySection() {
       </div>
 
       {/* Data Retention */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-3 mb-4">
-          <Clock className="h-5 w-5 text-white/60" />
-          <h3 className="text-base font-medium text-white">Data Retention</h3>
+          <Clock className="h-5 w-5 text-[var(--color-text-tertiary)]" />
+          <h3 className="text-base font-medium text-[var(--color-text-primary)]">Data Retention</h3>
         </div>
-        <p className="text-sm text-white/50 mb-4">
+        <p className="text-sm text-[var(--color-text-tertiary)] mb-4">
           Control how long your data is stored locally.
         </p>
 
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium text-white">Search History</div>
-              <div className="text-xs text-white/40">Keep last 50 searches</div>
+              <div className="text-sm font-medium text-[var(--color-text-primary)]">Search History</div>
+              <div className="text-xs text-[var(--color-text-muted)]">Keep last 50 searches</div>
             </div>
             <Badge variant="secondary">50 items</Badge>
           </div>
 
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium text-white">Audit Logs</div>
-              <div className="text-xs text-white/40">Retained for 90 days</div>
+              <div className="text-sm font-medium text-[var(--color-text-primary)]">Audit Logs</div>
+              <div className="text-xs text-[var(--color-text-muted)]">Retained for 90 days</div>
             </div>
             <Badge variant="secondary">90 days</Badge>
           </div>
@@ -151,10 +151,10 @@ export function PrivacySection() {
       </div>
 
       {/* Cloud Backup (Pro) */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-3 mb-4">
-          <Lock className="h-5 w-5 text-white/60" />
-          <h3 className="text-base font-medium text-white">
+          <Lock className="h-5 w-5 text-[var(--color-text-tertiary)]" />
+          <h3 className="text-base font-medium text-[var(--color-text-primary)]">
             Encrypted Cloud Backup
             {!isPro && (
               <Badge variant="outline" className="ml-2 text-xs">
@@ -163,7 +163,7 @@ export function PrivacySection() {
             )}
           </h3>
         </div>
-        <p className="text-sm text-white/50 mb-4">
+        <p className="text-sm text-[var(--color-text-tertiary)] mb-4">
           {isPro
             ? 'Securely backup your data with end-to-end encryption.'
             : 'Upgrade to Pro for encrypted cloud backup.'}
@@ -172,8 +172,8 @@ export function PrivacySection() {
         {isPro ? (
           <div className="flex items-center justify-between">
             <div>
-              <div className="text-sm font-medium text-white">Enable Cloud Backup</div>
-              <div className="text-xs text-white/40">All data encrypted before upload</div>
+              <div className="text-sm font-medium text-[var(--color-text-primary)]">Enable Cloud Backup</div>
+              <div className="text-xs text-[var(--color-text-muted)]">All data encrypted before upload</div>
             </div>
             <Switch />
           </div>

@@ -6,6 +6,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Futurnal</title>
     <meta name="description" content="Privacy-first personal knowledge engine" />
+    <!-- Theme initialization to prevent flash of wrong theme -->
+    <script>
+      (function() {
+        try {
+          var stored = localStorage.getItem('futurnal-settings');
+          if (stored) {
+            var settings = JSON.parse(stored);
+            var theme = settings.state && settings.state.theme;
+            if (theme === 'light') {
+              document.documentElement.classList.add('light');
+            } else if (theme === 'system') {
+              if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+                document.documentElement.classList.add('light');
+              }
+            }
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
 
   <body>

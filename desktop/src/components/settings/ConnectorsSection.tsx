@@ -22,34 +22,34 @@ export function ConnectorsSection() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-xl font-semibold text-white">Data Sources</h2>
-        <p className="text-sm text-white/60 mt-1">
+        <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Data Sources</h2>
+        <p className="text-sm text-[var(--color-text-secondary)] mt-1">
           Manage your connected data sources.
         </p>
       </div>
 
       {/* Quick Status */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-3 mb-4">
-          <Database className="h-5 w-5 text-white/60" />
-          <h3 className="text-base font-medium text-white">Status Overview</h3>
+          <Database className="h-5 w-5 text-[var(--color-text-tertiary)]" />
+          <h3 className="text-base font-medium text-[var(--color-text-primary)]">Status Overview</h3>
         </div>
 
         {isLoading ? (
-          <div className="flex items-center gap-2 text-white/50">
+          <div className="flex items-center gap-2 text-[var(--color-text-tertiary)]">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading connectors...
           </div>
         ) : !connectors?.length ? (
-          <p className="text-sm text-white/50">No data sources configured yet.</p>
+          <p className="text-sm text-[var(--color-text-tertiary)]">No data sources configured yet.</p>
         ) : (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-white/60">Total Sources</span>
+              <span className="text-sm text-[var(--color-text-secondary)]">Total Sources</span>
               <Badge variant="secondary">{connectors.length}</Badge>
             </div>
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm text-white/60">
+              <div className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
                 <CheckCircle className="h-4 w-4 text-green-500" />
                 Active
               </div>
@@ -57,7 +57,7 @@ export function ConnectorsSection() {
             </div>
             {syncingCount > 0 && (
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm text-white/60">
+                <div className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Syncing
                 </div>
@@ -66,7 +66,7 @@ export function ConnectorsSection() {
             )}
             {errorCount > 0 && (
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm text-white/60">
+                <div className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
                   <AlertCircle className="h-4 w-4 text-red-500" />
                   Errors
                 </div>
@@ -78,7 +78,7 @@ export function ConnectorsSection() {
       </div>
 
       {/* Navigation */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <Button
           onClick={() => navigate('/connectors')}
           className="w-full justify-between"
@@ -86,7 +86,7 @@ export function ConnectorsSection() {
           <span>Manage Data Sources</span>
           <ArrowRight className="h-4 w-4" />
         </Button>
-        <p className="text-xs text-white/40 mt-2 text-center">
+        <p className="text-xs text-[var(--color-text-muted)] mt-2 text-center">
           Add, configure, and sync your data sources
         </p>
       </div>

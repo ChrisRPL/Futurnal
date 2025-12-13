@@ -88,19 +88,19 @@ export function DataSection() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-xl font-semibold text-white">Data Management</h2>
-        <p className="text-sm text-white/60 mt-1">
+        <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Data Management</h2>
+        <p className="text-sm text-[var(--color-text-secondary)] mt-1">
           Export, manage, and clear your data.
         </p>
       </div>
 
       {/* Storage Usage */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-3 mb-4">
-          <Database className="h-5 w-5 text-white/60" />
-          <h3 className="text-base font-medium text-white">Local Storage</h3>
+          <Database className="h-5 w-5 text-[var(--color-text-tertiary)]" />
+          <h3 className="text-base font-medium text-[var(--color-text-primary)]">Local Storage</h3>
         </div>
-        <p className="text-sm text-white/50 mb-4">
+        <p className="text-sm text-[var(--color-text-tertiary)] mb-4">
           Your data is stored locally on this device.
         </p>
 
@@ -108,36 +108,36 @@ export function DataSection() {
           {Object.entries(storageInfo).map(([key, { bytes, label }]) => (
             <div key={key}>
               <div className="flex justify-between text-sm mb-2">
-                <span className="text-white/60">{label}</span>
-                <span className="text-white">{formatBytes(bytes)}</span>
+                <span className="text-[var(--color-text-secondary)]">{label}</span>
+                <span className="text-[var(--color-text-primary)]">{formatBytes(bytes)}</span>
               </div>
               <Progress value={(bytes / maxBytes) * 100} />
             </div>
           ))}
 
-          <div className="pt-2 border-t border-white/10">
+          <div className="pt-2 border-t border-[var(--color-border)]">
             <div className="flex justify-between text-sm">
-              <span className="text-white font-medium">Total</span>
-              <span className="text-white font-medium">{formatBytes(totalBytes)}</span>
+              <span className="text-[var(--color-text-primary)] font-medium">Total</span>
+              <span className="text-[var(--color-text-primary)] font-medium">{formatBytes(totalBytes)}</span>
             </div>
           </div>
         </div>
       </div>
 
       {/* Export Data */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-3 mb-4">
-          <Download className="h-5 w-5 text-white/60" />
-          <h3 className="text-base font-medium text-white">Export Your Data</h3>
+          <Download className="h-5 w-5 text-[var(--color-text-tertiary)]" />
+          <h3 className="text-base font-medium text-[var(--color-text-primary)]">Export Your Data</h3>
         </div>
-        <p className="text-sm text-white/50 mb-4">
+        <p className="text-sm text-[var(--color-text-tertiary)] mb-4">
           Download a complete copy of all your data in portable formats.
         </p>
 
         {exportProgress !== null ? (
           <div className="space-y-2">
             <Progress value={exportProgress} />
-            <p className="text-xs text-white/50 text-center flex items-center justify-center gap-2">
+            <p className="text-xs text-[var(--color-text-tertiary)] text-center flex items-center justify-center gap-2">
               <Loader2 className="h-3 w-3 animate-spin" />
               Exporting... {exportProgress}%
             </p>
@@ -155,12 +155,12 @@ export function DataSection() {
       </div>
 
       {/* Search History */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-3 mb-4">
-          <History className="h-5 w-5 text-white/60" />
-          <h3 className="text-base font-medium text-white">Search History</h3>
+          <History className="h-5 w-5 text-[var(--color-text-tertiary)]" />
+          <h3 className="text-base font-medium text-[var(--color-text-primary)]">Search History</h3>
         </div>
-        <p className="text-sm text-white/50 mb-4">
+        <p className="text-sm text-[var(--color-text-tertiary)] mb-4">
           You have {searchHistory.length} searches in your history.
         </p>
         <Button
@@ -178,14 +178,14 @@ export function DataSection() {
           <AlertTriangle className="h-5 w-5 text-red-500" />
           <h3 className="text-base font-medium text-red-500">Danger Zone</h3>
         </div>
-        <p className="text-sm text-white/50 mb-4">
+        <p className="text-sm text-[var(--color-text-tertiary)] mb-4">
           Irreversible actions that permanently delete your data.
         </p>
 
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-sm font-medium text-white">Delete All Data</div>
-            <div className="text-xs text-white/40">
+            <div className="text-sm font-medium text-[var(--color-text-primary)]">Delete All Data</div>
+            <div className="text-xs text-[var(--color-text-muted)]">
               Remove all knowledge graph data, embeddings, and logs.
             </div>
           </div>
@@ -202,10 +202,10 @@ export function DataSection() {
 
       {/* Clear History Confirmation */}
       <AlertDialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
-        <AlertDialogContent className="bg-black border-white/20">
+        <AlertDialogContent className="bg-[var(--color-bg-primary)] border-[var(--color-border)]">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-white">Clear search history?</AlertDialogTitle>
-            <AlertDialogDescription className="text-white/60">
+            <AlertDialogTitle className="text-[var(--color-text-primary)]">Clear search history?</AlertDialogTitle>
+            <AlertDialogDescription className="text-[var(--color-text-secondary)]">
               This will permanently delete {searchHistory.length} search queries from your history.
               This action cannot be undone.
             </AlertDialogDescription>
@@ -226,10 +226,10 @@ export function DataSection() {
 
       {/* Delete All Confirmation */}
       <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-        <AlertDialogContent className="bg-black border-white/20">
+        <AlertDialogContent className="bg-[var(--color-bg-primary)] border-[var(--color-border)]">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-white">Delete all data?</AlertDialogTitle>
-            <AlertDialogDescription className="text-white/60">
+            <AlertDialogTitle className="text-[var(--color-text-primary)]">Delete all data?</AlertDialogTitle>
+            <AlertDialogDescription className="text-[var(--color-text-secondary)]">
               This will permanently delete all your knowledge graph data, vector embeddings,
               and audit logs. This action cannot be undone and you will need to re-sync
               all your data sources.

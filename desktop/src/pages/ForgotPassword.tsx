@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { ThemeLogo } from '@/components/ThemeLogo';
 
 export default function ForgotPassword() {
   const [email, setEmail] = useState('');
@@ -30,19 +31,15 @@ export default function ForgotPassword() {
   };
 
   return (
-    <div className="min-h-screen bg-black flex flex-col">
+    <div className="min-h-screen bg-[var(--color-bg-primary)] flex flex-col">
       {/* Header */}
       <header className="w-full px-8 py-6 flex items-center justify-between">
         <Link to="/">
-          <img
-            src="/logo_dark.png"
-            alt="Futurnal"
-            className="h-10 w-auto"
-          />
+          <ThemeLogo variant="small" className="h-10 w-auto" />
         </Link>
         <Link
           to="/login"
-          className="text-sm text-white/60 hover:text-white transition-colors no-underline"
+          className="text-sm text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition-colors no-underline"
         >
           Back to sign in
         </Link>
@@ -54,16 +51,16 @@ export default function ForgotPassword() {
           {isSuccess ? (
             // Success State
             <div className="text-center">
-              <h1 className="text-3xl font-brand tracking-wide text-white mb-4">
+              <h1 className="text-3xl font-brand tracking-wide text-[var(--color-text-primary)] mb-4">
                 Check Your Email
               </h1>
-              <p className="text-white/60 mb-8">
+              <p className="text-[var(--color-text-tertiary)] mb-8">
                 We've sent password reset instructions to{' '}
-                <span className="text-white">{email}</span>
+                <span className="text-[var(--color-text-primary)]">{email}</span>
               </p>
               <button
                 onClick={() => navigate('/login')}
-                className="px-8 py-3 bg-transparent text-white border border-white/30 font-medium transition-all hover:border-white/60"
+                className="px-8 py-3 bg-transparent text-[var(--color-text-primary)] border border-[var(--color-border-active)] font-medium transition-all hover:border-[var(--color-text-tertiary)]"
               >
                 Back to Sign In
               </button>
@@ -72,17 +69,17 @@ export default function ForgotPassword() {
             // Form State
             <>
               <div className="text-center mb-10">
-                <h1 className="text-3xl font-brand tracking-wide text-white mb-3">
+                <h1 className="text-3xl font-brand tracking-wide text-[var(--color-text-primary)] mb-3">
                   Reset Password
                 </h1>
-                <p className="text-white/60">
+                <p className="text-[var(--color-text-tertiary)]">
                   Enter your email to receive reset instructions
                 </p>
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div>
-                  <label htmlFor="email" className="block text-sm text-white/60 mb-2">
+                  <label htmlFor="email" className="block text-sm text-[var(--color-text-tertiary)] mb-2">
                     Email
                   </label>
                   <input
@@ -93,7 +90,7 @@ export default function ForgotPassword() {
                       setEmail(e.target.value);
                       clearError();
                     }}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-white/30 transition-colors"
+                    className="w-full px-4 py-3 bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-primary)] placeholder-[var(--color-text-faint)] focus:outline-none focus:border-[var(--color-border-active)] transition-colors"
                     placeholder="your@email.com"
                     required
                     autoComplete="email"
@@ -111,15 +108,15 @@ export default function ForgotPassword() {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full py-4 bg-white text-black font-medium text-lg transition-all hover:bg-white/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full py-4 bg-[var(--color-inverse-bg)] text-[var(--color-inverse-text)] font-medium text-lg transition-all hover:bg-[var(--color-inverse-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isLoading ? 'Sending...' : 'Send Reset Link'}
                 </button>
               </form>
 
-              <p className="mt-8 text-center text-sm text-white/40">
+              <p className="mt-8 text-center text-sm text-[var(--color-text-muted)]">
                 Remember your password?{' '}
-                <Link to="/login" className="text-white/60 hover:text-white transition-colors">
+                <Link to="/login" className="text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition-colors">
                   Sign in
                 </Link>
               </p>

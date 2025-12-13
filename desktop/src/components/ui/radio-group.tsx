@@ -2,7 +2,7 @@
  * Radio Group Component
  *
  * Radio group using Radix UI primitives.
- * Follows Futurnal monochrome design system.
+ * Follows Futurnal monochrome design system with theme support.
  */
 
 import * as React from 'react';
@@ -34,16 +34,16 @@ const RadioGroupItem = React.forwardRef<
       ref={ref}
       data-slot="radio-group-item"
       className={cn(
-        'aspect-square h-4 w-4 border border-white/30 text-white',
-        'ring-offset-black focus:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2',
+        'aspect-square h-4 w-4 border border-[var(--color-border-active)] text-[var(--color-text-primary)]',
+        'ring-offset-[var(--color-bg-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)] focus-visible:ring-offset-2',
         'disabled:cursor-not-allowed disabled:opacity-50',
-        'data-[state=checked]:border-white data-[state=checked]:bg-white',
+        'data-[state=checked]:border-[var(--color-inverse-bg)] data-[state=checked]:bg-[var(--color-inverse-bg)]',
         className
       )}
       {...props}
     >
       <RadioGroupPrimitive.Indicator className="flex items-center justify-center">
-        <Circle className="h-2.5 w-2.5 fill-black text-black" />
+        <Circle className="h-2.5 w-2.5 fill-[var(--color-inverse-text)] text-[var(--color-inverse-text)]" />
       </RadioGroupPrimitive.Indicator>
     </RadioGroupPrimitive.Item>
   );

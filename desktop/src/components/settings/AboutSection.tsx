@@ -23,45 +23,45 @@ export function AboutSection() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-xl font-semibold text-white">About</h2>
-        <p className="text-sm text-white/60 mt-1">
+        <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">About</h2>
+        <p className="text-sm text-[var(--color-text-secondary)] mt-1">
           Version information and helpful links.
         </p>
       </div>
 
       {/* Version Info */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-3 mb-4">
-          <Info className="h-5 w-5 text-white/60" />
-          <h3 className="text-base font-medium text-white">Futurnal</h3>
+          <Info className="h-5 w-5 text-[var(--color-text-tertiary)]" />
+          <h3 className="text-base font-medium text-[var(--color-text-primary)]">Futurnal</h3>
         </div>
         <div className="space-y-2 text-sm">
           <div className="flex justify-between">
-            <span className="text-white/60">Version</span>
-            <span className="text-white">{appVersion}</span>
+            <span className="text-[var(--color-text-secondary)]">Version</span>
+            <span className="text-[var(--color-text-primary)]">{appVersion}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-white/60">Build</span>
-            <span className="text-white">Desktop (Tauri)</span>
+            <span className="text-[var(--color-text-secondary)]">Build</span>
+            <span className="text-[var(--color-text-primary)]">Desktop (Tauri)</span>
           </div>
         </div>
-        <p className="text-xs text-white/40 mt-4 font-tagline italic">
+        <p className="text-xs text-[var(--color-text-muted)] mt-4 font-tagline italic">
           "Know Yourself More"
         </p>
       </div>
 
       {/* Links */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-3 mb-4">
-          <ExternalLink className="h-5 w-5 text-white/60" />
-          <h3 className="text-base font-medium text-white">Resources</h3>
+          <ExternalLink className="h-5 w-5 text-[var(--color-text-tertiary)]" />
+          <h3 className="text-base font-medium text-[var(--color-text-primary)]">Resources</h3>
         </div>
         <div className="space-y-3">
           <a
             href="https://futurnal.com/docs"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-between text-sm text-white/80 hover:text-white transition-colors group"
+            className="flex items-center justify-between text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors group"
           >
             <span>Documentation</span>
             <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -70,7 +70,7 @@ export function AboutSection() {
             href="https://futurnal.com/privacy"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-between text-sm text-white/80 hover:text-white transition-colors group"
+            className="flex items-center justify-between text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors group"
           >
             <span>Privacy Policy</span>
             <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -79,7 +79,7 @@ export function AboutSection() {
             href="https://futurnal.com/terms"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-between text-sm text-white/80 hover:text-white transition-colors group"
+            className="flex items-center justify-between text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors group"
           >
             <span>Terms of Service</span>
             <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -88,7 +88,7 @@ export function AboutSection() {
             href="https://github.com/futurnal/futurnal"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-between text-sm text-white/80 hover:text-white transition-colors group"
+            className="flex items-center justify-between text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors group"
           >
             <span>GitHub Repository</span>
             <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -97,22 +97,22 @@ export function AboutSection() {
       </div>
 
       {/* Keyboard Shortcuts */}
-      <div className="p-6 border border-white/10 bg-white/5">
+      <div className="p-6 border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex items-center gap-3 mb-4">
-          <Keyboard className="h-5 w-5 text-white/60" />
-          <h3 className="text-base font-medium text-white">Keyboard Shortcuts</h3>
+          <Keyboard className="h-5 w-5 text-[var(--color-text-tertiary)]" />
+          <h3 className="text-base font-medium text-[var(--color-text-primary)]">Keyboard Shortcuts</h3>
         </div>
         <div className="space-y-2">
           {SHORTCUTS.map(({ keys, description }) => (
             <div key={description} className="flex items-center justify-between">
-              <span className="text-sm text-white/60">{description}</span>
+              <span className="text-sm text-[var(--color-text-secondary)]">{description}</span>
               <div className="flex items-center gap-1">
                 {keys.map((key, idx) => (
                   <span key={idx}>
                     {key === 'then' ? (
-                      <span className="text-white/40 text-xs mx-1">then</span>
+                      <span className="text-[var(--color-text-muted)] text-xs mx-1">then</span>
                     ) : (
-                      <kbd className="px-2 py-0.5 text-xs bg-white/10 border border-white/20 text-white/80">
+                      <kbd className="px-2 py-0.5 text-xs bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-secondary)]">
                         {key}
                       </kbd>
                     )}
@@ -126,8 +126,8 @@ export function AboutSection() {
 
       {/* Credits */}
       <div className="text-center py-4">
-        <p className="text-xs text-white/40 flex items-center justify-center gap-1">
-          Made with <Heart className="h-3 w-3 text-white/40" /> by Futurnal
+        <p className="text-xs text-[var(--color-text-muted)] flex items-center justify-center gap-1">
+          Made with <Heart className="h-3 w-3 text-[var(--color-text-muted)]" /> by Futurnal
         </p>
       </div>
     </div>

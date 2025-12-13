@@ -93,15 +93,15 @@ export function AuditLogViewer({ open, onOpenChange }: AuditLogViewerProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[80vh] bg-black border-white/20">
+      <DialogContent className="max-w-3xl max-h-[80vh] bg-[var(--color-bg-primary)] border-[var(--color-border)]">
         <DialogHeader>
-          <DialogTitle className="text-white">Activity Audit Log</DialogTitle>
+          <DialogTitle className="text-[var(--color-text-primary)]">Activity Audit Log</DialogTitle>
         </DialogHeader>
 
         {/* Filters */}
         <div className="flex items-center gap-3 py-2">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/40" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-text-muted)]" />
             <Input
               placeholder="Search logs..."
               value={filter}
@@ -143,12 +143,12 @@ export function AuditLogViewer({ open, onOpenChange }: AuditLogViewerProps) {
         {/* Log List */}
         <ScrollArea className="h-[500px] pr-4">
           {isLoading ? (
-            <div className="flex items-center justify-center py-8 text-white/50">
+            <div className="flex items-center justify-center py-8 text-[var(--color-text-tertiary)]">
               <Loader2 className="h-5 w-5 animate-spin mr-2" />
               Loading logs...
             </div>
           ) : filteredLogs.length === 0 ? (
-            <div className="text-center py-8 text-white/50">
+            <div className="text-center py-8 text-[var(--color-text-tertiary)]">
               No logs found
             </div>
           ) : (
@@ -156,29 +156,29 @@ export function AuditLogViewer({ open, onOpenChange }: AuditLogViewerProps) {
               {filteredLogs.map((log) => (
                 <div
                   key={log.id}
-                  className="flex items-start gap-4 p-3 bg-white/5"
+                  className="flex items-start gap-4 p-3 bg-[var(--color-surface)]"
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <Badge variant={ACTION_VARIANTS[log.action] || 'secondary'}>
                         {log.action}
                       </Badge>
-                      <span className="text-sm text-white/60">
+                      <span className="text-sm text-[var(--color-text-secondary)]">
                         {log.resource_type}
                       </span>
                     </div>
                     {log.resource_id && (
-                      <div className="text-xs text-white/40 mt-1 truncate">
+                      <div className="text-xs text-[var(--color-text-muted)] mt-1 truncate">
                         {log.resource_id}
                       </div>
                     )}
                     {log.details && Object.keys(log.details).length > 0 && (
-                      <div className="text-xs text-white/30 mt-1 font-mono">
+                      <div className="text-xs text-[var(--color-text-muted)] mt-1 font-mono">
                         {JSON.stringify(log.details)}
                       </div>
                     )}
                   </div>
-                  <div className="text-xs text-white/40 whitespace-nowrap">
+                  <div className="text-xs text-[var(--color-text-muted)] whitespace-nowrap">
                     {formatTimestamp(log.timestamp)}
                   </div>
                 </div>
