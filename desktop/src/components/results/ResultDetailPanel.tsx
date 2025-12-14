@@ -59,6 +59,7 @@ const ENTITY_ICONS: Record<EntityType, typeof FileText> = {
   Mailbox: Inbox,
   Source: Database,
   Organization: Building,
+  Entity: Database,  // Generic entity from knowledge graph
 };
 
 /** Icon mapping for source types */
@@ -77,12 +78,26 @@ export function ResultDetailPanel({
 }: ResultDetailPanelProps) {
   const [copySuccess, setCopySuccess] = useState(false);
 
-  const EntityIcon = result.entity_type
-    ? ENTITY_ICONS[result.entity_type]
-    : FileText;
-  const SourceIcon = result.source_type
-    ? SOURCE_ICONS[result.source_type]
-    : FileText;
+  // Defensive icon lookup with fallback
+  const EntityIcon = (() => {
+    if (!result.entity_type) return FileText;
+    const icon = ENTITY_ICONS[result.entity_type];
+    if (!icon) {
+      console.warn('[ResultDetailPanel] Unknown entity_type:', result.entity_type);
+      return FileText;
+    }
+    return icon;
+  })();
+
+  const SourceIcon = (() => {
+    if (!result.source_type) return FileText;
+    const icon = SOURCE_ICONS[result.source_type];
+    if (!icon) {
+      console.warn('[ResultDetailPanel] Unknown source_type:', result.source_type);
+      return FileText;
+    }
+    return icon;
+  })();
 
   // Highlight query terms in content
   const highlightedContent = highlightTerms(result.content, query);
@@ -105,13 +120,19 @@ export function ResultDetailPanel({
       result.metadata?.source
     ) as string | undefined;
 
+    console.log('[ResultDetailPanel] Opening file:', sourcePath);
+    console.log('[ResultDetailPanel] Metadata:', result.metadata);
+
     // Only open if it looks like a valid file path
     if (sourcePath && sourcePath.startsWith('/')) {
       try {
         await invoke('open_file', { path: sourcePath });
+        console.log('[ResultDetailPanel] File opened successfully');
       } catch (err) {
-        console.error('Failed to open source:', err);
+        console.error('[ResultDetailPanel] Failed to open source:', err);
       }
+    } else {
+      console.warn('[ResultDetailPanel] No valid file path found. sourcePath:', sourcePath);
     }
   }, [result.metadata]);
 
@@ -135,6 +156,14 @@ export function ResultDetailPanel({
               <span className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-white/10 text-white/80 rounded">
                 <EntityIcon className="h-3.5 w-3.5" />
                 {result.entity_type}
+              </span>
+            )}
+
+            {/* Graph Enhanced Badge - shown for GraphRAG results */}
+            {result.metadata?.graph_enhanced && (
+              <span className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-blue-500/20 text-blue-300 rounded border border-blue-500/30">
+                <Database className="h-3.5 w-3.5" />
+                Graph Enhanced
               </span>
             )}
 
@@ -206,26 +235,38 @@ export function ResultDetailPanel({
             <ProvenancePanel metadata={result.metadata} />
           </div>
 
-          {/* Additional Metadata */}
-          {Object.keys(result.metadata).length > 0 && (
-            <div>
-              <div className="text-xs font-medium text-white/50 mb-2">
-                Additional Metadata
-              </div>
-              <div className="p-3 rounded bg-white/[0.03] border border-white/10 space-y-1">
-                {Object.entries(result.metadata)
-                  .filter(([key]) => !['source', 'extractionTimestamp', 'schemaVersion', 'entityId'].includes(key))
-                  .map(([key, value]) => (
+          {/* Additional Metadata - filtered to user-relevant fields */}
+          {(() => {
+            // Technical fields to hide from users
+            const hiddenFields = new Set([
+              'source', 'extractionTimestamp', 'schemaVersion', 'entityId',
+              'graph_score', 'graph_enhanced', 'graphrag', 'vector_score',
+              'indexed_at', 'ingested_at', 'needs_reembedding', 'schema_version',
+              'content', 'document', 'source_type', 'entity_type',
+            ]);
+            const visibleEntries = Object.entries(result.metadata)
+              .filter(([key]) => !hiddenFields.has(key));
+
+            if (visibleEntries.length === 0) return null;
+
+            return (
+              <div>
+                <div className="text-xs font-medium text-white/50 mb-2">
+                  Details
+                </div>
+                <div className="p-3 rounded bg-white/[0.03] border border-white/10 space-y-1">
+                  {visibleEntries.map(([key, value]) => (
                     <div key={key} className="flex items-start gap-2 text-xs">
-                      <span className="text-white/40 flex-shrink-0">{key}:</span>
+                      <span className="text-white/40 flex-shrink-0 capitalize">{key.replace(/_/g, ' ')}:</span>
                       <span className="text-white/60 break-all">
                         {typeof value === 'object' ? JSON.stringify(value) : String(value)}
                       </span>
                     </div>
                   ))}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       </ScrollArea>
 
@@ -233,7 +274,7 @@ export function ResultDetailPanel({
       <div className="p-4 border-t border-white/10 space-y-2">
         {/* Primary Actions */}
         <div className="flex gap-2">
-          {!!result.metadata.source && (
+          {!!(result.metadata?.path || result.metadata?.source) && (
             <Button
               variant="outline"
               size="sm"
@@ -241,7 +282,7 @@ export function ResultDetailPanel({
               onClick={handleOpenSource}
             >
               <ExternalLink className="h-4 w-4" />
-              Open Source
+              Open File
             </Button>
           )}
           <Button

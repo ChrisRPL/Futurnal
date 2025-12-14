@@ -807,6 +807,25 @@ def _process_cloned_files(
     if not json_output:
         console.print(f"  [green]✓[/green] Processed {files_processed} files ({files_failed} failed)")
 
+    # Index processed files to knowledge graph (ChromaDB + Neo4j) for GraphRAG search
+    if files_processed > 0:
+        if not json_output:
+            console.print("  Indexing to knowledge graph (ChromaDB + Neo4j)...")
+        try:
+            from futurnal.pipeline.kg_indexer import KnowledgeGraphIndexer
+            indexer = KnowledgeGraphIndexer(workspace_dir=workspace_path)
+            index_stats = indexer.index_all_parsed()
+            if not json_output:
+                console.print(
+                    f"    Indexed {index_stats.get('chroma_indexed', 0)} to ChromaDB, "
+                    f"{index_stats.get('neo4j_indexed', 0)} to Neo4j",
+                    style="dim"
+                )
+            indexer.close()
+        except Exception as kg_err:
+            if not json_output:
+                console.print(f"    [yellow]Warning:[/yellow] Knowledge graph indexing failed: {kg_err}", style="dim")
+
     return files_processed, files_failed
 
 

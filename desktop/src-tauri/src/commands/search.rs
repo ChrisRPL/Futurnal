@@ -43,6 +43,56 @@ pub struct SearchResult {
     pub source_confidence: Option<f64>,
     pub causal_chain: Option<CausalChain>,
     pub metadata: serde_json::Value,
+    /// Graph context from GraphRAG traversal (per GFM-RAG paper)
+    pub graph_context: Option<GraphContext>,
+    /// Vector similarity score from semantic search (0-1)
+    pub vector_score: Option<f64>,
+    /// Graph traversal score from graph expansion (0-1)
+    pub graph_score: Option<f64>,
+}
+
+/// Graph traversal context for GraphRAG results.
+///
+/// Per GFM-RAG paper (2502.01113v1):
+/// - Shows "why" a result is relevant via graph connections
+/// - Enables path visualization for user understanding
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GraphContext {
+    /// Entities connected via graph traversal
+    #[serde(rename = "related_entities")]
+    pub related_entities: Vec<RelatedEntity>,
+    /// Relationships traversed to reach this result
+    pub relationships: Vec<Relationship>,
+    /// Path from query entity to this result
+    #[serde(rename = "path_to_query")]
+    pub path_to_query: Vec<String>,
+    /// Number of hops from seed entities
+    #[serde(rename = "hop_count")]
+    pub hop_count: u32,
+    /// Confidence score for the traversal path
+    #[serde(rename = "path_confidence")]
+    pub path_confidence: f64,
+}
+
+/// Related entity in graph context.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RelatedEntity {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub entity_type: String,
+    pub name: Option<String>,
+}
+
+/// Relationship in graph context.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Relationship {
+    #[serde(rename = "type")]
+    pub rel_type: String,
+    #[serde(rename = "from_entity")]
+    pub from_entity: Option<String>,
+    #[serde(rename = "to_entity")]
+    pub to_entity: Option<String>,
+    pub confidence: Option<f64>,
 }
 
 /// Causal chain information for causal search results.

@@ -37,6 +37,7 @@ from futurnal.search.hybrid.fusion import ResultFusion
 from futurnal.search.hybrid.query_router import QueryEmbeddingRouter
 from futurnal.search.hybrid.schema_compat import SchemaVersionCompatibility
 from futurnal.search.hybrid.types import (
+    GraphContext,
     GraphSearchResult,
     HybridSearchQuery,
     HybridSearchResult,
@@ -240,6 +241,10 @@ class SchemaAwareRetrieval:
                 graph_weight=adjusted_weights["graph"],
             )
 
+            # Build and attach graph context to results
+            graph_context_map = self._build_graph_context_map(graph_results)
+            fused = self._enrich_with_graph_context(fused, graph_context_map)
+
             # Take top_k results
             results = fused[:top_k]
 
@@ -399,11 +404,13 @@ class SchemaAwareRetrieval:
             )
 
             # Convert to VectorSearchResult
+            # Use entity_type from metadata (human-readable like "Document", "Entity")
+            # instead of enum string representation
             vector_results = [
                 VectorSearchResult(
                     entity_id=r.entity_id,
-                    entity_type=r.entity_type or "Unknown",
-                    content=r.document or "",
+                    entity_type=r.metadata.get("entity_type", "Document"),
+                    content=r.metadata.get("content", r.metadata.get("document", "")),
                     similarity_score=r.similarity_score,
                     schema_version=r.metadata.get("schema_version", current_version),
                     metadata=r.metadata,
@@ -741,3 +748,123 @@ class SchemaAwareRetrieval:
                 )
             except Exception as e:
                 logger.debug(f"Audit logging failed: {e}")
+
+    def _build_graph_context_map(
+        self,
+        graph_results: List[GraphSearchResult],
+    ) -> Dict[str, GraphContext]:
+        """Build graph context map from graph expansion results.
+
+        Per GFM-RAG paper (2502.01113v1):
+        Extracts relationship paths and related entities to show
+        "why" a result is relevant via graph connections.
+
+        Args:
+            graph_results: Results from graph expansion
+
+        Returns:
+            Map from entity_id to GraphContext
+        """
+        context_map: Dict[str, GraphContext] = {}
+
+        for gr in graph_results:
+            if gr.entity_id not in context_map:
+                # Create new graph context for this entity
+                context_map[gr.entity_id] = GraphContext(
+                    related_entities=[],
+                    relationships=[],
+                    path_to_query=gr.path_from_seed.copy() if gr.path_from_seed else [],
+                    hop_count=len(gr.path_from_seed) - 1 if gr.path_from_seed else 0,
+                    path_confidence=gr.path_score,
+                )
+
+                # Add relationship information
+                for rel_type in gr.relationship_types:
+                    context_map[gr.entity_id].relationships.append({
+                        "type": rel_type,
+                        "from_entity": gr.path_from_seed[0] if gr.path_from_seed else None,
+                        "to_entity": gr.entity_id,
+                    })
+
+            else:
+                # Merge additional paths (entity found via multiple paths)
+                existing = context_map[gr.entity_id]
+
+                # Keep the better (higher confidence) path
+                if gr.path_score > existing.path_confidence:
+                    existing.path_to_query = gr.path_from_seed.copy() if gr.path_from_seed else []
+                    existing.hop_count = len(gr.path_from_seed) - 1 if gr.path_from_seed else 0
+                    existing.path_confidence = gr.path_score
+
+                # Add additional relationship types
+                for rel_type in gr.relationship_types:
+                    rel_dict = {
+                        "type": rel_type,
+                        "from_entity": gr.path_from_seed[0] if gr.path_from_seed else None,
+                        "to_entity": gr.entity_id,
+                    }
+                    if rel_dict not in existing.relationships:
+                        existing.relationships.append(rel_dict)
+
+        # Extract related entities from paths
+        all_entities = set()
+        for gr in graph_results:
+            for entity_id in gr.path_from_seed:
+                all_entities.add(entity_id)
+
+        # Add related entities to each context
+        for entity_id, context in context_map.items():
+            for related_id in all_entities:
+                if related_id != entity_id:
+                    context.related_entities.append({
+                        "id": related_id,
+                        "type": "Unknown",  # Would need PKG lookup for type
+                    })
+
+        logger.debug(
+            f"Built graph context for {len(context_map)} entities "
+            f"from {len(graph_results)} graph results"
+        )
+
+        return context_map
+
+    def _enrich_with_graph_context(
+        self,
+        results: List[HybridSearchResult],
+        graph_context_map: Dict[str, GraphContext],
+    ) -> List[HybridSearchResult]:
+        """Enrich fused results with graph context.
+
+        Attaches graph context to results that were found via graph traversal,
+        enabling path visualization and "why relevant" explanations.
+
+        Args:
+            results: Fused search results
+            graph_context_map: Map from entity_id to GraphContext
+
+        Returns:
+            Results with graph_context attached where available
+        """
+        enriched = []
+        for result in results:
+            if result.entity_id in graph_context_map:
+                # Create a new result with graph context
+                enriched.append(
+                    HybridSearchResult(
+                        entity_id=result.entity_id,
+                        entity_type=result.entity_type,
+                        vector_score=result.vector_score,
+                        graph_score=result.graph_score,
+                        combined_score=result.combined_score,
+                        source=result.source,
+                        content=result.content,
+                        schema_version=result.schema_version,
+                        metadata=result.metadata,
+                        graph_context=graph_context_map[result.entity_id],
+                    )
+                )
+            else:
+                # Keep result as-is (vector-only result)
+                enriched.append(result)
+
+        return enriched

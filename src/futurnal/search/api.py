@@ -48,6 +48,7 @@ from futurnal.search.audit_events import (
 if TYPE_CHECKING:
     from futurnal.pkg.client import PKGClient
     from futurnal.privacy.audit import AuditLogger
+    from futurnal.embeddings.service import MultiModelEmbeddingService
 
 logger = logging.getLogger(__name__)
 
@@ -101,27 +102,36 @@ class HybridSearchAPI:
         self,
         config: Optional[SearchConfig] = None,
         pkg_client: Optional["PKGClient"] = None,
+        pkg_manager: Optional[Any] = None,
         multimodal_enabled: bool = False,
         experiential_learning: bool = False,
         caching_enabled: bool = True,
         audit_logger: Optional["AuditLogger"] = None,
+        embedding_service: Optional["MultiModelEmbeddingService"] = None,
+        graphrag_enabled: bool = True,
     ):
         """Initialize HybridSearchAPI.
 
         Args:
             config: Search configuration
-            pkg_client: PKG client for graph queries
+            pkg_client: PKG client (driver) for graph queries (legacy)
+            pkg_manager: PKGDatabaseManager for graph queries (preferred)
             multimodal_enabled: Enable multimodal content search
             experiential_learning: Enable GRPO feedback recording
             caching_enabled: Enable multi-layer caching
             audit_logger: Optional audit logger for search event tracking
+            embedding_service: Optional embedding service for GraphRAG
+            graphrag_enabled: Enable GraphRAG pipeline (requires embedding_service)
         """
         self.config = config or SearchConfig()
         self.pkg = pkg_client
+        self._pkg_manager = pkg_manager
         self.multimodal_enabled = multimodal_enabled
         self.experiential_learning = experiential_learning
         self.caching_enabled = caching_enabled
         self._audit = audit_logger
+        self._embedding_service = embedding_service
+        self._graphrag_enabled = graphrag_enabled
 
         # Initialize components
         self._init_components()
@@ -142,8 +152,10 @@ class HybridSearchAPI:
         self.router: Optional[QueryRouter] = None
         self._init_router()
 
-        # Module 03: Schema-aware retrieval
+        # Module 03: Schema-aware retrieval (GraphRAG)
         self.schema_retrieval: Optional[SchemaAwareRetrieval] = None
+        if self._graphrag_enabled:
+            self._init_schema_aware_retrieval()
 
         # Experiential learning
         if self.experiential_learning:
@@ -192,6 +204,114 @@ class HybridSearchAPI:
         except Exception as e:
             logger.warning(f"Could not init QueryRouter: {e}")
             self.router = None
+
+    def _init_schema_aware_retrieval(self) -> None:
+        """Initialize SchemaAwareRetrieval for GraphRAG pipeline.
+
+        Per GFM-RAG paper (2502.01113v1):
+        - Vector search via ChromaDB (SchemaVersionedEmbeddingStore)
+        - Graph traversal via Neo4j (TemporalGraphQueries)
+        - Intent-based embedding via QueryEmbeddingRouter
+
+        Gracefully falls back to None if dependencies unavailable.
+        """
+        try:
+            # Import dependencies for GraphRAG
+            from futurnal.embeddings.schema_versioned_store import SchemaVersionedEmbeddingStore
+            from futurnal.embeddings.integration import TemporalAwareVectorWriter
+            from futurnal.search.hybrid.query_router import QueryEmbeddingRouter
+            from futurnal.search.temporal.engine import TemporalQueryEngine
+            from futurnal.search.causal.retrieval import CausalChainRetrieval
+
+            # Check if embedding service is available
+            if self._embedding_service is None:
+                logger.info(
+                    "GraphRAG: No embedding service provided, "
+                    "attempting lazy initialization"
+                )
+                # Attempt lazy initialization of embedding service
+                try:
+                    from futurnal.embeddings.service import MultiModelEmbeddingService
+                    from futurnal.embeddings.config import EmbeddingServiceConfig
+
+                    self._embedding_service = MultiModelEmbeddingService(
+                        config=EmbeddingServiceConfig()
+                    )
+                    logger.info("GraphRAG: Lazily initialized embedding service")
+                except Exception as e:
+                    logger.warning(f"GraphRAG: Could not init embedding service: {e}")
+                    return
+
+            # Initialize schema-versioned embedding store (ChromaDB wrapper)
+            try:
+                embedding_store = SchemaVersionedEmbeddingStore(
+                    config=self._embedding_service.config,
+                )
+                logger.debug("GraphRAG: Initialized SchemaVersionedEmbeddingStore")
+            except Exception as e:
+                logger.warning(f"GraphRAG: Could not init embedding store: {e}")
+                return
+
+            # Initialize query embedding router
+            try:
+                query_router = QueryEmbeddingRouter(
+                    embedding_service=self._embedding_service,
+                )
+                logger.debug("GraphRAG: Initialized QueryEmbeddingRouter")
+            except Exception as e:
+                logger.warning(f"GraphRAG: Could not init query router: {e}")
+                query_router = None
+
+            # Initialize temporal engine if PKG client available
+            temporal_engine = None
+            causal_retrieval = None
+            pkg_queries = None
+
+            if self._pkg_manager is not None:
+                try:
+                    from futurnal.pkg.queries.temporal import TemporalGraphQueries
+
+                    pkg_queries = TemporalGraphQueries(db_manager=self._pkg_manager)
+
+                    temporal_engine = TemporalQueryEngine(
+                        pkg_queries=pkg_queries,
+                    )
+                    logger.debug("GraphRAG: Initialized TemporalQueryEngine")
+
+                    causal_retrieval = CausalChainRetrieval(
+                        pkg_queries=pkg_queries,
+                    )
+                    logger.debug("GraphRAG: Initialized CausalChainRetrieval")
+                except Exception as e:
+                    logger.warning(f"GraphRAG: Could not init PKG queries: {e}")
+
+            # Initialize SchemaAwareRetrieval with all dependencies
+            # pkg_queries is required - if not available, we can't use SchemaAwareRetrieval
+            if pkg_queries is None:
+                logger.warning(
+                    "GraphRAG: pkg_queries not available, cannot initialize SchemaAwareRetrieval"
+                )
+                return
+
+            self.schema_retrieval = SchemaAwareRetrieval(
+                pkg_queries=pkg_queries,
+                embedding_store=embedding_store,
+                embedding_router=query_router,
+                temporal_engine=temporal_engine,
+                causal_retrieval=causal_retrieval,
+                config=HybridSearchConfig(),
+                audit_logger=self._audit,
+            )
+
+            logger.info(
+                f"GraphRAG: Initialized SchemaAwareRetrieval "
+                f"(temporal={temporal_engine is not None}, "
+                f"causal={causal_retrieval is not None})"
+            )
+
+        except Exception as e:
+            logger.warning(f"GraphRAG: Could not initialize SchemaAwareRetrieval: {e}")
+            self.schema_retrieval = None
 
     async def search(
         self,
@@ -338,6 +458,90 @@ class HybridSearchAPI:
         else:
             return "exploratory"
 
+    async def _graphrag_search(
+        self,
+        query: str,
+        top_k: int,
+        filters: Optional[Dict[str, Any]],
+        intent: str = "exploratory",
+    ) -> List[Dict[str, Any]]:
+        """Execute GraphRAG hybrid search per GFM-RAG paper.
+
+        Pipeline:
+        1. Semantic retrieval (ChromaDB via SchemaVersionedEmbeddingStore)
+        2. Graph traversal (Neo4j via TemporalGraphQueries)
+        3. Context fusion and re-ranking
+
+        Args:
+            query: Natural language query
+            top_k: Number of results to return
+            filters: Optional search filters
+            intent: Search intent (temporal, causal, exploratory, lookup)
+
+        Returns:
+            List of search results with graph context
+
+        Raises:
+            Falls back to legacy search on any error
+        """
+        if self.schema_retrieval is None:
+            logger.debug("GraphRAG: SchemaAwareRetrieval not available, using legacy search")
+            return []
+
+        try:
+            # Execute hybrid search via SchemaAwareRetrieval
+            # This combines vector similarity + graph expansion
+            hybrid_results = self.schema_retrieval.hybrid_search(
+                query=query,
+                intent=intent,
+                top_k=top_k,
+            )
+
+            # Convert HybridSearchResult to API response format
+            results: List[Dict[str, Any]] = []
+            for r in hybrid_results:
+                # Use source_type from metadata, default to "text"
+                source_type = r.metadata.get("source_type", "text") if r.metadata else "text"
+                result_dict: Dict[str, Any] = {
+                    "id": r.entity_id,
+                    "content": r.content,
+                    "score": r.combined_score,
+                    "confidence": r.vector_score,  # Vector similarity as confidence
+                    "timestamp": r.metadata.get("timestamp") if r.metadata else None,
+                    "entity_type": r.entity_type,
+                    "source_type": source_type,
+                    "metadata": {
+                        "vector_score": r.vector_score,
+                        "graph_score": r.graph_score,
+                        "schema_version": r.schema_version,
+                        "source": r.source,
+                        "graph_enhanced": True,  # Flag for frontend to show graph badge
+                        **(r.metadata if r.metadata else {}),
+                    },
+                }
+
+                # Include graph context if available (serialize Pydantic model)
+                if hasattr(r, 'graph_context') and r.graph_context:
+                    if hasattr(r.graph_context, 'model_dump'):
+                        result_dict["graph_context"] = r.graph_context.model_dump()
+                    elif hasattr(r.graph_context, 'dict'):
+                        result_dict["graph_context"] = r.graph_context.dict()
+                    else:
+                        result_dict["graph_context"] = str(r.graph_context)
+
+                results.append(result_dict)
+
+            logger.info(
+                f"GraphRAG search completed: {len(results)} results "
+                f"(intent={intent}, query_len={len(query)})"
+            )
+
+            return results
+
+        except Exception as e:
+            logger.warning(f"GraphRAG search failed: {e}, falling back to legacy")
+            return []
+
     async def _execute_by_intent_type(
         self,
         query: str,
@@ -383,7 +587,37 @@ class HybridSearchAPI:
         top_k: int,
         filters: Optional[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """Execute temporal-aware search.
+        """Execute temporal-aware search using GraphRAG or legacy fallback.
+
+        Per GFM-RAG paper:
+        1. Try GraphRAG with temporal intent (uses TemporalQueryEngine)
+        2. Fall back to legacy temporal search if GraphRAG unavailable
+
+        Args:
+            query: Natural language query with temporal expressions
+            top_k: Number of results to return
+            filters: Optional search filters
+
+        Returns:
+            List of temporally-filtered search results
+        """
+        # Try GraphRAG with temporal intent first
+        graphrag_results = await self._graphrag_search(query, top_k, filters, intent="temporal")
+        if graphrag_results:
+            self.last_embedding_model = "graphrag-temporal"
+            return graphrag_results
+
+        # Fall back to legacy temporal search
+        logger.debug("GraphRAG returned no results, falling back to legacy temporal search")
+        return await self._legacy_temporal_search(query, top_k, filters)
+
+    async def _legacy_temporal_search(
+        self,
+        query: str,
+        top_k: int,
+        filters: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Legacy temporal-aware search - fallback when GraphRAG unavailable.
 
         Parses temporal expressions like "last week" and filters documents
         by their timestamps within the specified time range.
@@ -524,19 +758,41 @@ class HybridSearchAPI:
         top_k: int,
         filters: Optional[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """Execute causal chain search."""
-        # Placeholder - integrate with CausalChainRetrieval
+        """Execute causal chain search using GraphRAG.
+
+        Per CausalRAG paper (ACL 2025):
+        Uses CausalChainRetrieval to find cause-effect relationships
+        in the personal knowledge graph.
+
+        Args:
+            query: Natural language query about causality
+            top_k: Number of results to return
+            filters: Optional search filters
+
+        Returns:
+            List of results with causal chain information
+        """
+        # Try GraphRAG with causal intent
+        graphrag_results = await self._graphrag_search(query, top_k, filters, intent="causal")
+        if graphrag_results:
+            self.last_embedding_model = "graphrag-causal"
+            return graphrag_results
+
+        # Fallback: Placeholder results when CausalChainRetrieval unavailable
+        logger.debug("GraphRAG causal search unavailable, returning placeholder results")
         return [
             {
                 "id": f"causal_result_{i}",
-                "content": f"Causal result for: {query}",
+                "content": f"Causal search requires GraphRAG infrastructure. Query: {query[:50]}...",
                 "score": 0.85 - (i * 0.05),
+                "confidence": 0.5,
                 "causal_chain": {
                     "anchor": f"event_{i}",
                     "causes": [f"cause_{i}"] if i > 0 else [],
                     "effects": [f"effect_{i}"],
                 },
                 "entity_type": "Event",
+                "source_type": "placeholder",
             }
             for i in range(min(top_k, 5))
         ]
@@ -565,9 +821,39 @@ class HybridSearchAPI:
         top_k: int,
         filters: Optional[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """Execute general hybrid search over workspace documents.
+        """Execute general hybrid search using GraphRAG or legacy fallback.
 
-        Performs keyword-based search over parsed documents and emails.
+        Per GFM-RAG paper:
+        1. Try semantic retrieval via ChromaDB + graph traversal via Neo4j
+        2. Fall back to keyword matching if GraphRAG unavailable
+
+        Args:
+            query: Natural language query
+            top_k: Number of results to return
+            filters: Optional search filters
+
+        Returns:
+            List of search results
+        """
+        # Try GraphRAG first
+        graphrag_results = await self._graphrag_search(query, top_k, filters, intent="exploratory")
+        if graphrag_results:
+            self.last_embedding_model = "graphrag"
+            return graphrag_results
+
+        # Fall back to legacy keyword search
+        logger.debug("GraphRAG returned no results, falling back to legacy keyword search")
+        return await self._legacy_keyword_search(query, top_k, filters)
+
+    async def _legacy_keyword_search(
+        self,
+        query: str,
+        top_k: int,
+        filters: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Legacy keyword-based search over workspace documents.
+
+        Fallback when GraphRAG infrastructure is unavailable.
         Uses term frequency scoring for relevance ranking.
         """
         workspace = Path.home() / ".futurnal" / "workspace"
@@ -946,10 +1232,13 @@ def create_hybrid_search_api(
     caching_enabled: bool = True,
     config: Optional[SearchConfig] = None,
     audit_logger: Optional["AuditLogger"] = None,
+    embedding_service: Optional["MultiModelEmbeddingService"] = None,
+    graphrag_enabled: bool = True,
+    pkg_client: Optional[Any] = None,
 ) -> HybridSearchAPI:
-    """Create HybridSearchAPI instance.
+    """Create HybridSearchAPI instance with GraphRAG support.
 
-    Factory function for integration tests.
+    Factory function for integration tests and production use.
 
     Args:
         multimodal_enabled: Enable multimodal content search
@@ -957,14 +1246,50 @@ def create_hybrid_search_api(
         caching_enabled: Enable caching
         config: Optional search config
         audit_logger: Optional audit logger for search event tracking
+        embedding_service: Optional embedding service for GraphRAG
+        graphrag_enabled: Enable GraphRAG pipeline (semantic + graph search)
+        pkg_client: Optional PKG client for graph queries (attempts auto-connect if None)
 
     Returns:
         Configured HybridSearchAPI instance
+
+    Example:
+        # Basic usage (attempts lazy GraphRAG initialization)
+        api = create_hybrid_search_api()
+
+        # With explicit embedding service
+        from futurnal.embeddings.service import MultiModelEmbeddingService
+        service = MultiModelEmbeddingService()
+        api = create_hybrid_search_api(embedding_service=service)
+
+        # Disable GraphRAG (legacy keyword search only)
+        api = create_hybrid_search_api(graphrag_enabled=False)
     """
+    # Try to connect to PKG if graphrag enabled and no client provided
+    pkg_manager = None
+    if graphrag_enabled and pkg_client is None:
+        try:
+            from futurnal.pkg.database.manager import PKGDatabaseManager
+            from futurnal.configuration.settings import bootstrap_settings
+
+            settings = bootstrap_settings()
+            if settings and settings.workspace and settings.workspace.storage:
+                pkg_manager = PKGDatabaseManager(settings.workspace.storage)
+                # connect() returns the driver
+                pkg_client = pkg_manager.connect()
+                logger.info("GraphRAG: Connected to PKG database")
+        except Exception as e:
+            logger.debug(f"GraphRAG: Could not connect to PKG database: {e}")
+            # Continues without PKG - GraphRAG will be limited to vector search
+
     return HybridSearchAPI(
         config=config,
+        pkg_client=pkg_client,
+        pkg_manager=pkg_manager,
         multimodal_enabled=multimodal_enabled,
         experiential_learning=experiential_learning,
         caching_enabled=caching_enabled,
         audit_logger=audit_logger,
+        embedding_service=embedding_service,
+        graphrag_enabled=graphrag_enabled,
     )

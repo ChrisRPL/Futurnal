@@ -1030,6 +1030,26 @@ def imap_sync(
             errors = fast_result.get("errors", [])
             status = fast_result.get("status", "completed")
 
+            # Index processed emails to knowledge graph (ChromaDB + Neo4j) for GraphRAG
+            kg_indexed = 0
+            if files_processed > 0:
+                if not json_output:
+                    typer.echo("  Indexing to knowledge graph (ChromaDB + Neo4j)...")
+                try:
+                    from futurnal.pipeline.kg_indexer import KnowledgeGraphIndexer
+                    indexer = KnowledgeGraphIndexer(workspace_dir=workspace_path)
+                    index_stats = indexer.index_all_parsed()
+                    kg_indexed = index_stats.get("chroma_indexed", 0) + index_stats.get("neo4j_indexed", 0)
+                    if not json_output:
+                        typer.echo(
+                            f"    Indexed {index_stats.get('chroma_indexed', 0)} to ChromaDB, "
+                            f"{index_stats.get('neo4j_indexed', 0)} to Neo4j"
+                        )
+                    indexer.close()
+                except Exception as kg_err:
+                    if not json_output:
+                        typer.echo(f"  Warning: Knowledge graph indexing failed: {kg_err}", err=True)
+
             if json_output:
                 output = {
                     "repo_id": mailbox_id,
@@ -2272,6 +2292,27 @@ def sync_source(
             if not json_output:
                 typer.echo(f"Warning: Entity extraction failed: {exc}", err=True)
 
+    # Index documents to knowledge graph (ChromaDB + Neo4j) for GraphRAG search
+    kg_indexed = 0
+    if files_processed > 0:
+        if not json_output:
+            typer.echo("Indexing to knowledge graph (ChromaDB + Neo4j)...")
+        try:
+            from futurnal.pipeline.kg_indexer import KnowledgeGraphIndexer
+            indexer = KnowledgeGraphIndexer(workspace_dir=workspace)
+            index_stats = indexer.index_all_parsed()
+            kg_indexed = index_stats.get("chroma_indexed", 0) + index_stats.get("neo4j_indexed", 0)
+            if not json_output:
+                typer.echo(
+                    f"  Indexed {index_stats.get('chroma_indexed', 0)} to ChromaDB, "
+                    f"{index_stats.get('neo4j_indexed', 0)} to Neo4j, "
+                    f"{index_stats.get('entities_indexed', 0)} entities"
+                )
+            indexer.close()
+        except Exception as exc:
+            if not json_output:
+                typer.echo(f"Warning: Knowledge graph indexing failed: {exc}", err=True)
+
     duration = time_module.time() - start_time
 
     if json_output:
@@ -2288,6 +2329,7 @@ def sync_source(
             "files_processed": files_processed,
             "files_failed": files_failed,
             "entities_extracted": entities_extracted,
+            "kg_indexed": kg_indexed,
         }
         print(json.dumps(result))
     else:

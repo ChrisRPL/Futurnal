@@ -199,6 +199,24 @@ export const useSearchStore = create<SearchState>()(
             filters: filtersToApiFormat(filters),
           });
 
+          // Debug logging for search results
+          console.log('[SearchStore] Search response:', {
+            query: trimmedQuery,
+            resultCount: response.results.length,
+            intent: response.intent,
+            executionTimeMs: response.execution_time_ms,
+          });
+          if (response.results.length > 0) {
+            console.log('[SearchStore] Sample result structure:', {
+              id: response.results[0].id,
+              entity_type: response.results[0].entity_type,
+              source_type: response.results[0].source_type,
+              score: response.results[0].score,
+              contentPreview: response.results[0].content?.substring(0, 100),
+              metadataKeys: Object.keys(response.results[0].metadata || {}),
+            });
+          }
+
           const executionTimeMs = Date.now() - startTime;
 
           // Extract intent from response

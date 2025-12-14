@@ -104,20 +104,26 @@ class QueryEmbeddingRouter:
         self,
         embedding_service: "MultiModelEmbeddingService",
         config: Optional[HybridSearchConfig] = None,
+        use_lightweight_model: bool = True,
     ) -> None:
         """Initialize the query embedding router.
 
         Args:
             embedding_service: MultiModelEmbeddingService instance for embedding generation
             config: Hybrid search configuration (uses defaults if None)
+            use_lightweight_model: If True, use all-MiniLM-L6-v2 (384-dim) for queries
+                                   to match KnowledgeGraphIndexer embeddings
         """
         self._embedding_service = embedding_service
         self._config = config or HybridSearchConfig()
+        self._use_lightweight = use_lightweight_model
+        self._lightweight_encoder = None
 
         logger.info(
             "Initialized QueryEmbeddingRouter with "
             f"{len(self._config.code_keywords)} code keywords, "
             f"{len(self._config.document_keywords)} document keywords"
+            f" (lightweight_model={use_lightweight_model})"
         )
 
     @property
@@ -207,6 +213,10 @@ class QueryEmbeddingRouter:
             # Augment query with temporal context if provided
             augmented_query = self._augment_query(query, query_type, temporal_context)
 
+            # Use lightweight model (384-dim) if enabled - matches KnowledgeGraphIndexer
+            if self._use_lightweight:
+                return self._embed_with_lightweight(augmented_query)
+
             # Get entity type for embedding service
             entity_type = self.QUERY_TO_ENTITY_TYPE[query_type]
 
@@ -236,6 +246,40 @@ class QueryEmbeddingRouter:
             raise QueryRoutingError(
                 f"Failed to generate {query_type.value} embedding for query: {e}"
             ) from e
+
+    def _embed_with_lightweight(self, query: str) -> List[float]:
+        """Embed query using lightweight all-MiniLM-L6-v2 model.
+
+        This ensures consistency with KnowledgeGraphIndexer embeddings (384-dim).
+
+        Args:
+            query: Augmented query string
+
+        Returns:
+            Query embedding vector (384-dim)
+
+        Raises:
+            QueryRoutingError: If embedding generation fails
+        """
+        try:
+            from sentence_transformers import SentenceTransformer
+
+            # Lazy load the encoder
+            if self._lightweight_encoder is None:
+                self._lightweight_encoder = SentenceTransformer("all-MiniLM-L6-v2")
+                logger.debug("Loaded lightweight encoder: all-MiniLM-L6-v2")
+
+            embedding = self._lightweight_encoder.encode(query)
+            logger.debug(f"Generated lightweight embedding: dim={len(embedding)}")
+            # Convert numpy array to Python floats for ChromaDB compatibility
+            return [float(x) for x in embedding]
+
+        except ImportError:
+            raise QueryRoutingError(
+                "sentence-transformers not installed for lightweight embeddings"
+            )
+        except Exception as e:
+            raise QueryRoutingError(f"Lightweight embedding failed: {e}") from e
 
     def embed_query_with_type_detection(
         self,

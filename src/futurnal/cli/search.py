@@ -155,3 +155,107 @@ def clear_history() -> None:
         typer.echo("Search history cleared.")
     else:
         typer.echo("No history to clear.")
+
+
+@search_app.command("index")
+def index_documents(
+    workspace_path: Optional[str] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    neo4j_uri: str = typer.Option("bolt://localhost:7687", "--neo4j-uri", help="Neo4j connection URI"),
+    output_json: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Index all parsed documents to ChromaDB and Neo4j for GraphRAG search.
+
+    This command indexes documents from the workspace to enable hybrid search:
+    - ChromaDB: Vector embeddings for semantic similarity search
+    - Neo4j: Graph nodes and relationships for graph traversal
+
+    Run this after syncing data sources to make content searchable via GraphRAG.
+
+    Examples:
+        futurnal search index                    # Index with default settings
+        futurnal search index --json             # Output as JSON
+        futurnal search index --neo4j-uri bolt://myhost:7687
+    """
+    from pathlib import Path
+    from futurnal.pipeline.kg_indexer import KnowledgeGraphIndexer
+
+    workspace = Path(workspace_path) if workspace_path else Path.home() / ".futurnal" / "workspace"
+
+    if not output_json:
+        typer.echo(f"Indexing documents from {workspace}...")
+        typer.echo("  Connecting to ChromaDB and Neo4j...")
+
+    try:
+        indexer = KnowledgeGraphIndexer(
+            workspace_dir=workspace,
+            neo4j_uri=neo4j_uri,
+        )
+
+        stats = indexer.index_all_parsed()
+
+        if output_json:
+            print(json.dumps(stats))
+        else:
+            typer.echo(f"\nIndexing complete:")
+            typer.echo(f"  Documents found: {stats.get('documents_found', 0)}")
+            typer.echo(f"  ChromaDB indexed: {stats.get('chroma_indexed', 0)}")
+            typer.echo(f"  Neo4j indexed: {stats.get('neo4j_indexed', 0)}")
+            typer.echo(f"  Entities indexed: {stats.get('entities_indexed', 0)}")
+            if stats.get('errors', 0) > 0:
+                typer.echo(f"  Errors: {stats.get('errors', 0)}")
+
+        indexer.close()
+
+    except Exception as e:
+        if output_json:
+            print(json.dumps({"error": str(e), "documents_found": 0}))
+            sys.exit(1)
+        else:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1)
+
+
+@search_app.command("status")
+def index_status(
+    workspace_path: Optional[str] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    neo4j_uri: str = typer.Option("bolt://localhost:7687", "--neo4j-uri", help="Neo4j connection URI"),
+    output_json: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Check the status of the knowledge graph indexes.
+
+    Shows the number of documents indexed in ChromaDB and Neo4j.
+    """
+    from pathlib import Path
+    from futurnal.pipeline.kg_indexer import KnowledgeGraphIndexer
+
+    workspace = Path(workspace_path) if workspace_path else Path.home() / ".futurnal" / "workspace"
+
+    try:
+        indexer = KnowledgeGraphIndexer(
+            workspace_dir=workspace,
+            neo4j_uri=neo4j_uri,
+        )
+
+        stats = indexer.get_index_stats()
+
+        if output_json:
+            print(json.dumps(stats))
+        else:
+            typer.echo("Knowledge Graph Index Status:")
+            typer.echo(f"\nChromaDB:")
+            typer.echo(f"  Connected: {stats['chromadb']['connected']}")
+            typer.echo(f"  Documents: {stats['chromadb']['document_count']}")
+            typer.echo(f"\nNeo4j:")
+            typer.echo(f"  Connected: {stats['neo4j']['connected']}")
+            typer.echo(f"  Nodes: {stats['neo4j']['node_count']}")
+            typer.echo(f"  Relationships: {stats['neo4j']['relationship_count']}")
+
+        indexer.close()
+
+    except Exception as e:
+        if output_json:
+            print(json.dumps({"error": str(e)}))
+            sys.exit(1)
+        else:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1)

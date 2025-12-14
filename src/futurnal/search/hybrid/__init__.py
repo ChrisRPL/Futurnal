@@ -73,6 +73,7 @@ from futurnal.search.hybrid.retrieval import SchemaAwareRetrieval
 from futurnal.search.hybrid.schema_compat import SchemaVersionCompatibility
 from futurnal.search.hybrid.strategies import EntityTypeRetrievalStrategy
 from futurnal.search.hybrid.types import (
+    GraphContext,
     GraphSearchResult,
     HybridSearchQuery,
     HybridSearchResult,
@@ -128,6 +129,7 @@ __all__ = [
     "HybridSearchQuery",
     "VectorSearchResult",
     "GraphSearchResult",
+    "GraphContext",
     "HybridSearchResult",
     "TemporalQueryContext",
     "SchemaCompatibilityResult",

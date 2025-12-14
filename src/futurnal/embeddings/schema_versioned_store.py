@@ -361,17 +361,25 @@ class SchemaVersionedEmbeddingStore:
         Raises:
             StorageError: If query fails
         """
-        # Build where filter
-        where_filter: Dict[str, Any] = {}
+        # Build where filter - ChromaDB requires $and for multiple conditions
+        conditions: List[Dict[str, Any]] = []
 
         if entity_type:
-            where_filter["entity_type"] = entity_type
+            conditions.append({"entity_type": entity_type})
 
         if min_schema_version:
-            where_filter["schema_version"] = {"$gte": min_schema_version}
+            conditions.append({"schema_version": {"$gte": min_schema_version}})
 
         if exclude_needs_reembedding:
-            where_filter["needs_reembedding"] = False
+            conditions.append({"needs_reembedding": {"$eq": False}})
+
+        # Build final filter
+        if len(conditions) == 0:
+            where_filter = None
+        elif len(conditions) == 1:
+            where_filter = conditions[0]
+        else:
+            where_filter = {"$and": conditions}
 
         # Query appropriate collection
         try:
@@ -379,14 +387,14 @@ class SchemaVersionedEmbeddingStore:
                 results = self._writer._events_collection.query(
                     query_embeddings=[list(query_vector)],
                     n_results=top_k,
-                    where=where_filter if where_filter else None,
+                    where=where_filter,
                     include=["embeddings", "metadatas", "distances"],
                 )
             else:
                 results = self._writer._entities_collection.query(
                     query_embeddings=[list(query_vector)],
                     n_results=top_k,
-                    where=where_filter if where_filter else None,
+                    where=where_filter,
                     include=["embeddings", "metadatas", "distances"],
                 )
 
@@ -394,6 +402,42 @@ class SchemaVersionedEmbeddingStore:
 
         except Exception as e:
             raise StorageError(f"Failed to query embeddings: {e}") from e
+
+    def encode_query(self, query: str) -> List[float]:
+        """Encode a query string into an embedding vector.
+
+        Uses the same model as the collection's embedding function to ensure
+        dimension compatibility. This is critical for hybrid search.
+
+        Args:
+            query: Natural language query string
+
+        Returns:
+            Query embedding vector (384-dim for all-MiniLM-L6-v2)
+
+        Raises:
+            StorageError: If encoding fails
+        """
+        try:
+            # Use sentence-transformers directly for consistent 384-dim embeddings
+            # This matches the model used by KnowledgeGraphIndexer
+            from sentence_transformers import SentenceTransformer
+
+            # Cache the model for reuse
+            if not hasattr(self, "_query_encoder"):
+                self._query_encoder = SentenceTransformer("all-MiniLM-L6-v2")
+
+            embedding = self._query_encoder.encode(query)
+            # Convert np.float32 to Python float for ChromaDB compatibility
+            return [float(x) for x in embedding]
+
+        except ImportError:
+            raise StorageError(
+                "sentence-transformers package not installed. "
+                "Please install it with: pip install sentence-transformers"
+            )
+        except Exception as e:
+            raise StorageError(f"Failed to encode query: {e}") from e
 
     def _parse_query_results(
         self,

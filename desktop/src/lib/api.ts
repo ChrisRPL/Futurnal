@@ -64,126 +64,25 @@ async function invokeWithTimeout<T>(
 // Search API
 // ============================================================================
 
-/**
- * Mock search results for UI testing when backend is unavailable.
- */
-function getMockSearchResults(queryText: string): SearchResponse {
-  const mockResults = [
-    {
-      id: 'mock-1',
-      content: `Meeting notes from project kickoff discussing ${queryText}. The team agreed on the timeline and key deliverables. Action items were assigned to each team member with specific deadlines.`,
-      score: 0.92,
-      confidence: 0.88,
-      timestamp: new Date().toISOString(),
-      entity_type: 'Event' as const,
-      source_type: 'text' as const,
-      metadata: {
-        source: '/Users/demo/notes/meetings/kickoff.md',
-        extractionTimestamp: new Date().toISOString(),
-        schemaVersion: 'v2',
-        entityId: 'entity-001',
-      },
-      causal_chain: {
-        causes: ['Project approval', 'Budget allocation'],
-        anchor: 'Project kickoff meeting',
-        effects: ['Sprint planning', 'Resource assignment'],
-      },
-    },
-    {
-      id: 'mock-2',
-      content: `Research document about ${queryText} with detailed analysis and findings. This comprehensive study examines the key factors and their relationships.`,
-      score: 0.85,
-      confidence: 0.76,
-      timestamp: new Date(Date.now() - 86400000).toISOString(), // Yesterday
-      entity_type: 'Document' as const,
-      source_type: 'text' as const,
-      metadata: {
-        source: '/Users/demo/research/analysis.md',
-        extractionTimestamp: new Date().toISOString(),
-        schemaVersion: 'v2',
-        entityId: 'entity-002',
-      },
-    },
-    {
-      id: 'mock-3',
-      content: `Code snippet implementing ${queryText} functionality. Uses TypeScript with React hooks for state management and includes error handling.`,
-      score: 0.78,
-      confidence: 0.92,
-      timestamp: new Date(Date.now() - 172800000).toISOString(), // 2 days ago
-      entity_type: 'Code' as const,
-      source_type: 'code' as const,
-      metadata: {
-        source: '/Users/demo/projects/app/src/feature.ts',
-        extractionTimestamp: new Date().toISOString(),
-        schemaVersion: 'v2',
-        entityId: 'entity-003',
-        language: 'TypeScript',
-      },
-    },
-    {
-      id: 'mock-4',
-      content: `Voice memo transcription discussing ${queryText}. Key points mentioned include prioritization, team coordination, and next steps for the upcoming sprint.`,
-      score: 0.71,
-      confidence: 0.65,
-      timestamp: new Date(Date.now() - 604800000).toISOString(), // 1 week ago
-      entity_type: 'Event' as const,
-      source_type: 'audio' as const,
-      source_confidence: 0.82,
-      metadata: {
-        source: '/Users/demo/voice-memos/standup-2024.m4a',
-        extractionTimestamp: new Date().toISOString(),
-        schemaVersion: 'v2',
-        entityId: 'entity-004',
-        duration: '5:32',
-      },
-    },
-    {
-      id: 'mock-5',
-      content: `Scanned document about ${queryText} from the archives. Contains historical context and background information that provides important perspective on current initiatives.`,
-      score: 0.64,
-      confidence: 0.58,
-      timestamp: new Date(Date.now() - 2592000000).toISOString(), // 30 days ago
-      entity_type: 'Document' as const,
-      source_type: 'ocr' as const,
-      source_confidence: 0.74,
-      metadata: {
-        source: '/Users/demo/scans/archive-doc.pdf',
-        extractionTimestamp: new Date().toISOString(),
-        schemaVersion: 'v2',
-        entityId: 'entity-005',
-      },
-    },
-  ];
-
-  return {
-    results: mockResults,
-    total: mockResults.length,
-    query_id: `mock-${Date.now()}`,
-    intent: {
-      primary: 'exploratory',
-    },
-    execution_time_ms: 42,
-  };
-}
-
 export const searchApi = {
   /**
    * Execute a search query against the Hybrid Search API.
-   * Falls back to mock data if backend returns empty results or is unavailable.
+   * Returns real results from GraphRAG pipeline only.
    */
   async search(query: SearchQuery): Promise<SearchResponse> {
     try {
       const response = await invokeWithTimeout<SearchResponse>('search_query', { query });
-      // If backend returns empty results, use mock data for UI testing
-      if (!response.results || response.results.length === 0) {
-        console.info('[Search API] Using mock data - no results from backend');
-        return getMockSearchResults(query.query);
-      }
       return response;
-    } catch {
-      // Return mock data for UI testing when backend is unavailable
-      console.info('[Search API] Using mock data - backend unavailable');
-      return getMockSearchResults(query.query);
+    } catch (error) {
+      console.error('[Search API] Backend error:', error);
+      // Return empty results on error - don't use mock data
+      return {
+        results: [],
+        total: 0,
+        query_id: `error-${Date.now()}`,
+        intent: { primary: 'exploratory' },
+        execution_time_ms: 0,
+      };
     }
   },
 

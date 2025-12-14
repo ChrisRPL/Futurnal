@@ -34,7 +34,6 @@ import {
   Network,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { open } from '@tauri-apps/plugin-shell';
 import { cn, highlightTerms, formatTimestampRelative } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { ScoreIndicator } from './ScoreIndicator';
@@ -68,6 +67,7 @@ const ENTITY_ICONS: Record<EntityType, typeof FileText> = {
   Mailbox: Inbox,
   Source: Database,
   Organization: Building,
+  Entity: Database,  // Generic entity from knowledge graph
 };
 
 /** Icon mapping for source types */
@@ -168,12 +168,26 @@ export function ResultCard({
     navigate(`/graph?select=${encodeURIComponent(finalHighlightId)}`);
   }, [result.id, result.metadata, navigate, closeCommandPalette]);
 
-  const EntityIcon = result.entity_type
-    ? ENTITY_ICONS[result.entity_type]
-    : FileText;
-  const SourceIcon = result.source_type
-    ? SOURCE_ICONS[result.source_type]
-    : FileText;
+  // Defensive icon lookup with fallback - logs unknown types for debugging
+  const EntityIcon = (() => {
+    if (!result.entity_type) return FileText;
+    const icon = ENTITY_ICONS[result.entity_type];
+    if (!icon) {
+      console.warn('[ResultCard] Unknown entity_type:', result.entity_type, 'for result:', result.id);
+      return FileText;
+    }
+    return icon;
+  })();
+
+  const SourceIcon = (() => {
+    if (!result.source_type) return FileText;
+    const icon = SOURCE_ICONS[result.source_type];
+    if (!icon) {
+      console.warn('[ResultCard] Unknown source_type:', result.source_type, 'for result:', result.id);
+      return FileText;
+    }
+    return icon;
+  })();
 
   // Highlight query terms in content
   const highlightedContent = highlightTerms(result.content, query);
@@ -193,18 +207,26 @@ export function ResultCard({
     }
   }, [result.content]);
 
-  // Handle open source action
+  // Handle open source action - use path field for actual file location
   const handleOpenSource = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
-    const sourcePath = result.metadata.source as string | undefined;
-    if (sourcePath) {
+    const filePath = (result.metadata?.path || result.metadata?.source) as string | undefined;
+
+    console.log('[ResultCard] Opening file:', filePath);
+
+    // Only open if it looks like a valid file path
+    if (filePath && filePath.startsWith('/')) {
       try {
-        await open(sourcePath);
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('open_file', { path: filePath });
+        console.log('[ResultCard] File opened successfully');
       } catch (err) {
-        console.error('Failed to open source:', err);
+        console.error('[ResultCard] Failed to open source:', err);
       }
+    } else {
+      console.warn('[ResultCard] No valid file path found. filePath:', filePath);
     }
-  }, [result.metadata.source]);
+  }, [result.metadata]);
 
   // Toggle expand/collapse
   const handleToggleExpand = useCallback((e: React.MouseEvent) => {
@@ -240,6 +262,14 @@ export function ResultCard({
             <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 bg-white/10 text-white/70 rounded">
               <EntityIcon className="h-3 w-3" />
               {result.entity_type}
+            </span>
+          )}
+
+          {/* Graph Enhanced Badge - shown for GraphRAG results */}
+          {result.metadata?.graph_enhanced && (
+            <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 bg-blue-500/20 text-blue-300 rounded border border-blue-500/30">
+              <Network className="h-3 w-3" />
+              Graph Enhanced
             </span>
           )}
 
@@ -331,13 +361,13 @@ export function ResultCard({
           </Button>
 
           {/* Open Source */}
-          {!!result.metadata.source && (
+          {!!(result.metadata?.path || result.metadata?.source) && (
             <Button
               variant="ghost"
               size="icon"
               className="h-7 w-7 text-white/40 hover:text-white/70 hover:bg-white/10"
               onClick={handleOpenSource}
-              title="Open source"
+              title="Open source file"
             >
               <ExternalLink className="h-3.5 w-3.5" />
             </Button>

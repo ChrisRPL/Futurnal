@@ -38,15 +38,51 @@ export interface SearchResult {
   source_confidence?: number;
   causal_chain?: CausalChain;
   metadata: Record<string, unknown>;
+  /** Graph context from GraphRAG traversal (per GFM-RAG paper) */
+  graph_context?: GraphContext;
+  /** Vector similarity score from semantic search (0-1) */
+  vector_score?: number;
+  /** Graph traversal score from graph expansion (0-1) */
+  graph_score?: number;
 }
 
-export type EntityType = 'Event' | 'Document' | 'Code' | 'Person' | 'Concept' | 'Email' | 'Mailbox' | 'Source' | 'Organization';
+export type EntityType = 'Event' | 'Document' | 'Code' | 'Person' | 'Concept' | 'Email' | 'Mailbox' | 'Source' | 'Organization' | 'Entity';
 export type SourceType = 'text' | 'ocr' | 'audio' | 'code';
 
 export interface CausalChain {
   anchor: string;
   causes: string[];
   effects: string[];
+}
+
+/**
+ * Graph traversal context for GraphRAG results.
+ *
+ * Per GFM-RAG paper (2502.01113v1):
+ * - Shows "why" a result is relevant via graph connections
+ * - Enables path visualization for user understanding
+ * - Supports multi-hop reasoning explanation
+ */
+export interface GraphContext {
+  /** Entities connected via graph traversal */
+  relatedEntities: Array<{
+    id: string;
+    type: string;
+    name?: string;
+  }>;
+  /** Relationships traversed to reach this result */
+  relationships: Array<{
+    type: string;
+    source: string;
+    target: string;
+    confidence?: number;
+  }>;
+  /** Path from query entity to this result */
+  pathToQuery: string[];
+  /** Number of hops from seed entities */
+  hopCount: number;
+  /** Confidence score for the traversal path */
+  pathConfidence: number;
 }
 
 export interface SearchResponse {

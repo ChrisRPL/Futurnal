@@ -39,6 +39,32 @@ impl From<PythonError> for String {
 /// Default timeout for CLI commands in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 
+/// Find the Futurnal root directory by looking for .venv or pyproject.toml.
+///
+/// Searches upward from the current exe path to find the project root.
+fn find_futurnal_root() -> Option<std::path::PathBuf> {
+    // Try from current exe path (works in dev and release)
+    if let Ok(exe_path) = std::env::current_exe() {
+        let mut current = exe_path.parent().map(|p| p.to_path_buf());
+        while let Some(dir) = current {
+            // Check for .venv directory or pyproject.toml
+            if dir.join(".venv").exists() || dir.join("pyproject.toml").exists() {
+                return Some(dir);
+            }
+            current = dir.parent().map(|p| p.to_path_buf());
+        }
+    }
+
+    // Fallback: check if we're already in a directory with .venv
+    if let Ok(cwd) = std::env::current_dir() {
+        if cwd.join(".venv").exists() {
+            return Some(cwd);
+        }
+    }
+
+    None
+}
+
 /// Execute a futurnal CLI command with JSON output.
 ///
 /// # Arguments
@@ -62,7 +88,17 @@ pub async fn execute_cli_with_timeout<T: DeserializeOwned>(
     args: &[&str],
     timeout_secs: u64,
 ) -> Result<T, PythonError> {
-    let mut cmd = Command::new("python3");
+    // Find Futurnal root directory (where .venv is located)
+    let futurnal_root = find_futurnal_root();
+
+    // Use venv Python if available, otherwise fall back to system python3
+    let python_path = futurnal_root
+        .as_ref()
+        .map(|root| root.join(".venv/bin/python3"))
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| std::path::PathBuf::from("python3"));
+
+    let mut cmd = Command::new(&python_path);
     cmd.arg("-m")
         .arg("futurnal.cli")
         .args(args)
@@ -70,13 +106,9 @@ pub async fn execute_cli_with_timeout<T: DeserializeOwned>(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    // Set working directory to parent of desktop (where src/futurnal is)
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(parent) = exe_path.parent() {
-            // In dev mode, we're in src-tauri, go up to Futurnal root
-            let futurnal_root = parent.parent().unwrap_or(parent);
-            cmd.current_dir(futurnal_root);
-        }
+    // Set working directory to Futurnal root
+    if let Some(root) = futurnal_root {
+        cmd.current_dir(&root);
     }
 
     let output = tokio::time::timeout(
@@ -115,7 +147,17 @@ pub async fn execute_cli_raw_with_timeout(
     args: &[&str],
     timeout_secs: u64,
 ) -> Result<String, PythonError> {
-    let mut cmd = Command::new("python3");
+    // Find Futurnal root directory (where .venv is located)
+    let futurnal_root = find_futurnal_root();
+
+    // Use venv Python if available, otherwise fall back to system python3
+    let python_path = futurnal_root
+        .as_ref()
+        .map(|root| root.join(".venv/bin/python3"))
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| std::path::PathBuf::from("python3"));
+
+    let mut cmd = Command::new(&python_path);
     cmd.arg("-m")
         .arg("futurnal.cli")
         .args(args)
@@ -123,12 +165,9 @@ pub async fn execute_cli_raw_with_timeout(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    // Set working directory to parent of desktop (where src/futurnal is)
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(parent) = exe_path.parent() {
-            let futurnal_root = parent.parent().unwrap_or(parent);
-            cmd.current_dir(futurnal_root);
-        }
+    // Set working directory to Futurnal root
+    if let Some(root) = futurnal_root {
+        cmd.current_dir(&root);
     }
 
     let output = tokio::time::timeout(
@@ -160,7 +199,17 @@ pub async fn execute_cli_void_with_timeout(
     args: &[&str],
     timeout_secs: u64,
 ) -> Result<(), PythonError> {
-    let mut cmd = Command::new("python3");
+    // Find Futurnal root directory (where .venv is located)
+    let futurnal_root = find_futurnal_root();
+
+    // Use venv Python if available, otherwise fall back to system python3
+    let python_path = futurnal_root
+        .as_ref()
+        .map(|root| root.join(".venv/bin/python3"))
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| std::path::PathBuf::from("python3"));
+
+    let mut cmd = Command::new(&python_path);
     cmd.arg("-m")
         .arg("futurnal.cli")
         .args(args)
@@ -168,12 +217,9 @@ pub async fn execute_cli_void_with_timeout(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    // Set working directory to parent of desktop (where src/futurnal is)
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(parent) = exe_path.parent() {
-            let futurnal_root = parent.parent().unwrap_or(parent);
-            cmd.current_dir(futurnal_root);
-        }
+    // Set working directory to Futurnal root
+    if let Some(root) = futurnal_root {
+        cmd.current_dir(&root);
     }
 
     let output = tokio::time::timeout(

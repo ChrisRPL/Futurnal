@@ -24,7 +24,7 @@ import { cn } from '@/lib/utils';
 import { truncate, formatRelativeTime } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { useUIStore } from '@/stores/uiStore';
-import type { SearchResult, EntityType } from '@/types/api';
+import type { SearchResult, EntityType, GraphContext } from '@/types/api';
 
 interface SearchResultsProps {
   /** Search results to display */
@@ -50,6 +50,7 @@ const ENTITY_ICONS: Record<EntityType, typeof FileText> = {
   Mailbox: Inbox,
   Source: Database,
   Organization: Building,
+  Entity: Database,  // Generic entity from knowledge graph
 };
 
 /**
@@ -57,6 +58,46 @@ const ENTITY_ICONS: Record<EntityType, typeof FileText> = {
  */
 function formatScore(score: number): string {
   return `${Math.round(score * 100)}%`;
+}
+
+/**
+ * GraphContextBadge - Shows graph traversal context for GraphRAG results
+ *
+ * Per GFM-RAG paper: Shows "why" a result is relevant via graph connections
+ */
+function GraphContextBadge({ context }: { context: GraphContext }) {
+  const relatedCount = context.relatedEntities?.length || 0;
+  const hasPath = context.pathToQuery && context.pathToQuery.length > 0;
+
+  if (relatedCount === 0 && !hasPath) return null;
+
+  // Format path as readable trail
+  const pathDisplay = hasPath
+    ? context.pathToQuery.slice(0, 3).map((p) => {
+        // Extract just the entity name from path
+        const parts = p.split(':');
+        return parts.length > 1 ? parts[1] : p.slice(0, 12);
+      }).join(' \u2192 ')
+    : '';
+
+  return (
+    <div className="mt-2 flex items-center gap-2 text-xs text-white/40">
+      <Network className="h-3 w-3" />
+      {relatedCount > 0 && (
+        <span>{relatedCount} related</span>
+      )}
+      {hasPath && (
+        <span className="text-white/30 truncate max-w-[200px]">
+          via {pathDisplay}{context.pathToQuery.length > 3 ? '\u2026' : ''}
+        </span>
+      )}
+      {context.hopCount > 0 && (
+        <span className="text-white/30">
+          ({context.hopCount} {context.hopCount === 1 ? 'hop' : 'hops'})
+        </span>
+      )}
+    </div>
+  );
 }
 
 export function SearchResults({
@@ -156,9 +197,16 @@ export function SearchResults({
         </div>
         <div className="space-y-1">
           {results.map((result, index) => {
-            const Icon = result.entity_type
-              ? ENTITY_ICONS[result.entity_type]
-              : FileText;
+            // Defensive icon lookup with fallback
+            const Icon = (() => {
+              if (!result.entity_type) return FileText;
+              const icon = ENTITY_ICONS[result.entity_type];
+              if (!icon) {
+                console.warn('[SearchResults] Unknown entity_type:', result.entity_type);
+                return FileText;
+              }
+              return icon;
+            })();
 
             return (
               <div
@@ -212,7 +260,23 @@ export function SearchResults({
                         {result.confidence && (
                           <span>Confidence: {formatScore(result.confidence)}</span>
                         )}
+                        {/* GraphRAG scores */}
+                        {result.vector_score !== undefined && (
+                          <span className="text-white/30">
+                            Vector: {formatScore(result.vector_score)}
+                          </span>
+                        )}
+                        {result.graph_score !== undefined && result.graph_score > 0 && (
+                          <span className="text-white/30">
+                            Graph: {formatScore(result.graph_score)}
+                          </span>
+                        )}
                       </div>
+
+                      {/* Graph context from GraphRAG */}
+                      {result.graph_context && (
+                        <GraphContextBadge context={result.graph_context} />
+                      )}
                     </div>
                   </div>
                 </button>

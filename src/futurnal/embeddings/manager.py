@@ -145,7 +145,8 @@ class ModelManager:
                     f"Instructor model unavailable, falling back to "
                     f"sentence-transformers for {model_id}"
                 )
-                self._load_sentence_transformer(model_id, config)
+                # Use wrapper since code expects instruction parameter support
+                self._load_sentence_transformer(model_id, config, wrap_for_instruction=True)
                 return
 
             raise ModelLoadError(
@@ -185,13 +186,14 @@ class ModelManager:
             return False
 
     def _load_sentence_transformer(
-        self, model_id: str, config: ModelConfig
+        self, model_id: str, config: ModelConfig, wrap_for_instruction: bool = False
     ) -> None:
         """Load a SentenceTransformer model.
 
         Args:
             model_id: ID to register the model under
             config: Model configuration
+            wrap_for_instruction: If True, wrap model to accept/ignore instruction param
 
         Raises:
             ModelLoadError: If model fails to load
@@ -203,9 +205,18 @@ class ModelManager:
                 config.model_type.value,
                 device=config.device,
             )
-            self._models[model_id] = model
+
+            # Wrap model if it may receive instruction parameter (fallback from Instructor)
+            if wrap_for_instruction or config.instruction is not None:
+                self._models[model_id] = _SentenceTransformerWrapper(model)
+                logger.info(
+                    f"Loaded SentenceTransformer (wrapped): {config.model_type.value}"
+                )
+            else:
+                self._models[model_id] = model
+                logger.info(f"Loaded SentenceTransformer: {config.model_type.value}")
+
             self._model_versions[model_id] = f"st:{config.model_type.value}"
-            logger.info(f"Loaded SentenceTransformer: {config.model_type.value}")
 
         except ImportError as e:
             raise ModelLoadError(
@@ -345,6 +356,64 @@ class _InstructorModelWrapper:
 
         return self._model.encode(
             inputs,
+            batch_size=batch_size,
+            show_progress_bar=show_progress_bar,
+            **kwargs,
+        )
+
+
+class _SentenceTransformerWrapper:
+    """Wrapper for SentenceTransformer that ignores the instruction parameter.
+
+    When falling back from Instructor to SentenceTransformer, callers may still
+    pass the `instruction` parameter. This wrapper accepts and ignores it,
+    preventing "unexpected keyword argument" errors.
+
+    This enables graceful degradation: code written for Instructor models
+    continues to work when SentenceTransformer is used as a fallback.
+    """
+
+    def __init__(self, model: Any) -> None:
+        """Initialize the wrapper.
+
+        Args:
+            model: The SentenceTransformer model
+        """
+        self._model = model
+
+    def encode(
+        self,
+        sentences: Any,
+        batch_size: int = 32,
+        show_progress_bar: bool = False,
+        instruction: Optional[str] = None,  # Accepted but ignored
+        **kwargs: Any,
+    ) -> Any:
+        """Encode sentences using SentenceTransformer.
+
+        The `instruction` parameter is accepted for API compatibility with
+        Instructor models but is ignored since SentenceTransformer doesn't
+        use task-specific instructions.
+
+        Args:
+            sentences: Text or list of texts to encode
+            batch_size: Batch size for inference
+            show_progress_bar: Whether to show progress
+            instruction: Ignored (accepted for API compatibility)
+            **kwargs: Additional arguments passed to model.encode()
+
+        Returns:
+            Embedding(s) as numpy array
+        """
+        # Log if instruction was provided but will be ignored
+        if instruction is not None:
+            logger.debug(
+                f"Ignoring instruction parameter for SentenceTransformer: "
+                f"'{instruction[:50]}...'" if len(instruction) > 50 else f"'{instruction}'"
+            )
+
+        return self._model.encode(
+            sentences,
             batch_size=batch_size,
             show_progress_bar=show_progress_bar,
             **kwargs,

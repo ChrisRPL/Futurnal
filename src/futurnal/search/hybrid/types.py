@@ -181,6 +181,43 @@ class GraphSearchResult(BaseModel):
     )
 
 
+class GraphContext(BaseModel):
+    """Graph traversal context for search results.
+
+    Contains information about how a result was discovered through
+    graph traversal, including related entities and relationship paths.
+
+    Per GFM-RAG paper (2502.01113v1):
+    - Shows "why" a result is relevant via graph connections
+    - Enables path visualization for user understanding
+    - Supports multi-hop reasoning explanation
+    """
+
+    related_entities: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Entities connected via graph traversal",
+    )
+    relationships: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Relationships traversed to reach this result",
+    )
+    path_to_query: List[str] = Field(
+        default_factory=list,
+        description="Path from query entity to this result",
+    )
+    hop_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of hops from seed entities",
+    )
+    path_confidence: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Confidence score for the traversal path",
+    )
+
+
 class HybridSearchResult(BaseModel):
     """Combined result from hybrid retrieval.
 
@@ -197,6 +234,7 @@ class HybridSearchResult(BaseModel):
         content: Text content or summary (if available)
         schema_version: Schema version (from vector result if available)
         metadata: Combined metadata from both sources
+        graph_context: Graph traversal context (per GFM-RAG paper)
     """
 
     entity_id: str = Field(description="PKG entity identifier")
@@ -233,6 +271,10 @@ class HybridSearchResult(BaseModel):
     metadata: Dict[str, Any] = Field(
         default_factory=dict,
         description="Combined metadata",
+    )
+    graph_context: Optional[GraphContext] = Field(
+        default=None,
+        description="Graph traversal context showing path and related entities",
     )
 
 
