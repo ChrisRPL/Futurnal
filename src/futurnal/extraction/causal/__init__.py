@@ -24,6 +24,7 @@ from futurnal.extraction.causal.models import (
     CausalRelationshipType,
     EventType,
 )
+from futurnal.extraction.causal.pkg_integration import CausalPKGIntegration
 from futurnal.extraction.causal.relationship_detector import CausalRelationshipDetector
 
 __all__ = [
@@ -34,4 +35,5 @@ __all__ = [
     "EventExtractor",
     "CausalRelationshipDetector",
     "BradfordHillPreparation",
+    "CausalPKGIntegration",
 ]
