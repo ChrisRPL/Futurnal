@@ -6,12 +6,13 @@
  * Supports highlight params from search results (?highlight=id1,id2).
  */
 
-import { useRef, useCallback, useMemo, useEffect } from 'react';
+import { useRef, useCallback, useMemo, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Network, Filter, Eye, EyeOff, Mail, Palette, X } from 'lucide-react';
 import { KnowledgeGraph, type KnowledgeGraphRef } from '@/components/graph/KnowledgeGraph';
 import { GraphControls } from '@/components/graph/GraphControls';
 import { NodeDetailPanel } from '@/components/graph/NodeDetailPanel';
+import { ChatInterface } from '@/components/chat';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useKnowledgeGraph } from '@/hooks/useApi';
@@ -21,6 +22,11 @@ import { cn } from '@/lib/utils';
 export function GraphPage() {
   const graphRef = useRef<KnowledgeGraphRef>(null);
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // Chat panel state for "Ask about this" feature
+  // Research: ProPerSim - contextual entity discussion
+  const [chatPanelOpen, setChatPanelOpen] = useState(false);
+  const [chatContextEntity, setChatContextEntity] = useState<{ id: string; label: string } | null>(null);
 
   // Get graph data
   const { data } = useKnowledgeGraph();
@@ -155,6 +161,22 @@ export function GraphPage() {
     },
     [data?.nodes]
   );
+
+  // Handle "Ask about this" - opens chat panel with entity context
+  // Research: ProPerSim - proactive contextual AI conversation
+  const handleAskAbout = useCallback((nodeId: string, nodeLabel: string) => {
+    setChatContextEntity({ id: nodeId, label: nodeLabel });
+    setChatPanelOpen(true);
+  }, []);
+
+  // Close chat panel
+  const handleCloseChatPanel = useCallback(() => {
+    setChatPanelOpen(false);
+    // Keep context entity for potential re-open, clear after animation
+    setTimeout(() => {
+      if (!chatPanelOpen) setChatContextEntity(null);
+    }, 300);
+  }, [chatPanelOpen]);
 
   return (
     <div className="h-screen bg-[var(--color-bg-primary)] flex flex-col overflow-hidden">
@@ -333,8 +355,33 @@ export function GraphPage() {
             onClose={() => setSelectedNode(null)}
             onNavigateToNode={handleNavigateToNode}
             onFocusNode={handleFocusNode}
+            onAskAbout={handleAskAbout}
             className="absolute top-0 right-0 h-full w-80"
           />
+        )}
+
+        {/* Chat panel for "Ask about this" feature
+            Research: ProPerSim - contextual entity discussion
+            Research: Causal-Copilot - natural language exploration */}
+        {chatPanelOpen && (
+          <div
+            className={cn(
+              'absolute top-0 right-0 h-full w-96',
+              'bg-black border-l border-white/10',
+              'animate-slide-in-right z-20'
+            )}
+          >
+            <ChatInterface
+              sessionId={`graph-entity-${chatContextEntity?.id ?? 'default'}`}
+              contextEntityId={chatContextEntity?.id}
+              onEntityClick={(entityId) => {
+                // Navigate to clicked entity in graph
+                handleNavigateToNode(entityId);
+                handleCloseChatPanel();
+              }}
+              onClose={handleCloseChatPanel}
+            />
+          </div>
         )}
       </div>
     </div>

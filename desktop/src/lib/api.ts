@@ -9,6 +9,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   SearchQuery,
   SearchResponse,
+  SearchWithAnswerResponse,
   SearchHistoryItem,
   Connector,
   AddSourceRequest,
@@ -94,6 +95,47 @@ export const searchApi = {
       return await invokeWithTimeout('get_search_history', { limit });
     } catch {
       return []; // Graceful fallback
+    }
+  },
+
+  /**
+   * Execute search with LLM answer generation.
+   *
+   * Step 02: LLM Answer Generation
+   * Research Foundation:
+   * - CausalRAG (ACL 2025): Causal-aware generation
+   * - LLM-Enhanced Symbolic (2501.01246v1): Hybrid approach
+   */
+  async searchWithAnswer(
+    query: SearchQuery,
+    generateAnswer = true,
+    model?: string
+  ): Promise<SearchWithAnswerResponse> {
+    try {
+      const response = await invokeWithTimeout<SearchWithAnswerResponse>(
+        'search_with_answer',
+        {
+          query,
+          generateAnswer,
+          model,
+        },
+        60000 // Longer timeout for answer generation
+      );
+      return response;
+    } catch (error) {
+      console.error('[Search API] Answer generation error:', error);
+      // Return empty results on error - graceful degradation
+      return {
+        results: [],
+        total: 0,
+        query_id: `error-${Date.now()}`,
+        intent: { primary: 'exploratory' },
+        execution_time_ms: 0,
+        answer: undefined,
+        sources: undefined,
+        model: undefined,
+        generation_time_ms: undefined,
+      };
     }
   },
 };
@@ -358,5 +400,140 @@ export const graphApi = {
    */
   async unbookmarkNode(nodeId: string): Promise<void> {
     return invokeWithTimeout('unbookmark_node', { node_id: nodeId });
+  },
+};
+
+// ============================================================================
+// Ollama API
+// ============================================================================
+
+export interface OllamaModel {
+  name: string;
+  size: string;
+  modified: string;
+}
+
+export interface ListModelsResponse {
+  models: OllamaModel[];
+}
+
+export const ollamaApi = {
+  /**
+   * List installed Ollama models.
+   */
+  async listModels(): Promise<ListModelsResponse> {
+    try {
+      return await invokeWithTimeout<ListModelsResponse>('list_ollama_models');
+    } catch (error) {
+      console.warn('[Ollama API] Failed to list models:', error);
+      return { models: [] };
+    }
+  },
+
+  /**
+   * Check if a specific model is installed.
+   */
+  async isModelInstalled(modelName: string): Promise<boolean> {
+    try {
+      return await invokeWithTimeout<boolean>('is_model_installed', { modelName });
+    } catch {
+      return false;
+    }
+  },
+
+  /**
+   * Pull (download) an Ollama model.
+   * Progress updates are emitted via 'ollama-pull-progress' event.
+   * Completion is emitted via 'ollama-pull-complete' event.
+   */
+  async pullModel(modelName: string): Promise<boolean> {
+    return invokeWithTimeout<boolean>('pull_ollama_model', { modelName }, 600000); // 10 min timeout
+  },
+};
+
+// ============================================================================
+// Chat API
+// ============================================================================
+
+import type {
+  ChatRequest,
+  ChatResponse,
+  ChatHistoryResponse,
+  SessionsListResponse,
+  OperationResponse,
+} from '@/types/chat';
+
+/**
+ * Chat API for conversational interface.
+ *
+ * Step 03: Chat Interface & Conversational AI
+ *
+ * Research Foundation:
+ * - ProPerSim (2509.21730v1): Multi-turn context
+ * - Causal-Copilot (2504.13263v2): Confidence scoring
+ */
+export const chatApi = {
+  /**
+   * Send a chat message and get a response.
+   */
+  async sendMessage(request: ChatRequest): Promise<ChatResponse> {
+    return invokeWithTimeout<ChatResponse>('send_chat_message', { request }, 60000); // 60s timeout
+  },
+
+  /**
+   * Get conversation history for a session.
+   */
+  async getHistory(sessionId: string, limit?: number): Promise<ChatHistoryResponse> {
+    try {
+      return await invokeWithTimeout<ChatHistoryResponse>('get_chat_history', {
+        sessionId,
+        limit,
+      });
+    } catch (error) {
+      console.warn('[Chat API] Failed to get history:', error);
+      return {
+        success: false,
+        sessionId,
+        messages: [],
+        total: 0,
+      };
+    }
+  },
+
+  /**
+   * List all chat sessions.
+   */
+  async listSessions(limit?: number): Promise<SessionsListResponse> {
+    try {
+      return await invokeWithTimeout<SessionsListResponse>('list_chat_sessions', { limit });
+    } catch (error) {
+      console.warn('[Chat API] Failed to list sessions:', error);
+      return {
+        success: false,
+        sessions: [],
+        total: 0,
+      };
+    }
+  },
+
+  /**
+   * Create a new chat session.
+   */
+  async createSession(): Promise<string> {
+    return invokeWithTimeout<string>('create_chat_session');
+  },
+
+  /**
+   * Clear messages from a session.
+   */
+  async clearSession(sessionId: string): Promise<OperationResponse> {
+    return invokeWithTimeout<OperationResponse>('clear_chat_session', { sessionId });
+  },
+
+  /**
+   * Delete a chat session.
+   */
+  async deleteSession(sessionId: string): Promise<OperationResponse> {
+    return invokeWithTimeout<OperationResponse>('delete_chat_session', { sessionId });
   },
 };

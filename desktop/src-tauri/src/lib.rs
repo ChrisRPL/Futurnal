@@ -27,6 +27,14 @@ pub fn run() {
             // Search commands
             commands::search::search_query,
             commands::search::get_search_history,
+            commands::search::search_with_answer,
+            // Chat commands (Step 03: Conversational AI)
+            commands::chat::send_chat_message,
+            commands::chat::get_chat_history,
+            commands::chat::list_chat_sessions,
+            commands::chat::clear_chat_session,
+            commands::chat::delete_chat_session,
+            commands::chat::create_chat_session,
             // Connector commands
             commands::connectors::list_sources,
             commands::connectors::add_source,
@@ -66,6 +74,10 @@ pub fn run() {
             commands::graph::bookmark_node,
             commands::graph::unbookmark_node,
             commands::graph::open_file,
+            // Ollama model management commands
+            commands::ollama::list_ollama_models,
+            commands::ollama::is_model_installed,
+            commands::ollama::pull_ollama_model,
         ])
         .setup(|app| {
             log::info!("Futurnal Desktop Shell initialized");

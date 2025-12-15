@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from futurnal.pkg.client import PKGClient
     from futurnal.privacy.audit import AuditLogger
     from futurnal.embeddings.service import MultiModelEmbeddingService
+    from futurnal.search.answer_generator import AnswerGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,10 @@ class HybridSearchAPI:
 
         # Initialize components
         self._init_components()
+
+        # Answer generation (Step 02)
+        self._answer_generator: Optional["AnswerGenerator"] = None
+        self._answer_generation_enabled: bool = True
 
         # Tracking for tests
         self.last_strategy: Optional[str] = None
@@ -442,6 +447,130 @@ class HybridSearchAPI:
             )
 
         return results
+
+    async def _get_answer_generator(self) -> "AnswerGenerator":
+        """Lazy initialization of answer generator.
+
+        Returns:
+            Initialized AnswerGenerator instance
+        """
+        if self._answer_generator is None:
+            from futurnal.search.answer_generator import AnswerGenerator
+
+            self._answer_generator = AnswerGenerator()
+            await self._answer_generator.initialize()
+            logger.info("Answer generator initialized")
+        return self._answer_generator
+
+    async def search_with_answer(
+        self,
+        query: str,
+        top_k: int = 10,
+        filters: Optional[Dict[str, Any]] = None,
+        generate_answer: bool = True,
+        model: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Search with optional LLM answer generation.
+
+        Combines GraphRAG retrieval with LLM-powered answer synthesis.
+
+        Research Foundation:
+        - CausalRAG (ACL 2025): Causal-aware generation
+        - LLM-Enhanced Symbolic (2501.01246v1): Hybrid approach
+
+        Args:
+            query: Natural language query
+            top_k: Number of results to return
+            filters: Optional search filters
+            generate_answer: Whether to generate synthesized answer
+            model: Optional model override for answer generation
+
+        Returns:
+            {
+                'answer': str,           # Synthesized answer (if generate_answer=True)
+                'results': List[Dict],   # Raw search results
+                'sources': List[str],    # Source documents used
+                'intent': Dict,          # Query intent
+                'execution_time_ms': float,
+            }
+        """
+        start = time.time()
+
+        # Step 1: Execute search (existing GraphRAG pipeline)
+        results = await self.search(query, top_k=top_k, filters=filters)
+
+        response: Dict[str, Any] = {
+            "results": results,
+            "sources": [
+                r.get("metadata", {}).get("source")
+                for r in results
+                if r.get("metadata", {}).get("source")
+            ],
+            "intent": {
+                "primary": self.last_strategy or "exploratory",
+            },
+            "answer": None,
+        }
+
+        # Step 2: Generate answer if requested and results exist
+        if generate_answer and results and self._answer_generation_enabled:
+            try:
+                generator = await self._get_answer_generator()
+
+                # Collect graph context from results
+                graph_context = self._aggregate_graph_context(results)
+
+                generated = await generator.generate_answer(
+                    query=query,
+                    context=results,
+                    graph_context=graph_context,
+                    model=model,
+                )
+                response["answer"] = generated.answer
+                response["sources"] = generated.sources
+                response["model"] = generated.model
+                response["generation_time_ms"] = generated.generation_time_ms
+
+                logger.info(
+                    "Search with answer completed: %d results, answer generated",
+                    len(results),
+                )
+
+            except Exception as e:
+                logger.warning(f"Answer generation failed: {e}")
+                # Graceful degradation - return results without answer
+
+        response["execution_time_ms"] = (time.time() - start) * 1000
+        return response
+
+    def _aggregate_graph_context(
+        self,
+        results: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Aggregate graph context from all results.
+
+        Collects relationships and entities from GraphRAG results
+        for use in answer generation.
+
+        Args:
+            results: Search results with potential graph_context
+
+        Returns:
+            Aggregated graph context with relationships and entities
+        """
+        relationships: List[Dict[str, Any]] = []
+        related_entities: List[Dict[str, Any]] = []
+
+        for r in results:
+            gc = r.get("graph_context")
+            if gc:
+                relationships.extend(gc.get("relationships", []))
+                related_entities.extend(gc.get("related_entities", []))
+
+        return {
+            "relationships": relationships[:10],  # Limit for prompt size
+            "related_entities": related_entities[:10],
+        }
 
     def _detect_simple_intent(self, query: str) -> str:
         """Simple rule-based intent detection fallback."""

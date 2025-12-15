@@ -10,6 +10,7 @@ from .orchestrator import orchestrator_app
 from .search import search_app
 from .privacy import privacy_app
 from .cloud_sync import cloud_sync_app
+from .chat import chat_app
 
 
 cli = Typer(help="Futurnal command line tools")
@@ -22,7 +23,8 @@ cli.add_typer(orchestrator_app, name="orchestrator")
 cli.add_typer(search_app, name="search")
 cli.add_typer(privacy_app, name="privacy")
 cli.add_typer(cloud_sync_app, name="cloud-sync")
+cli.add_typer(chat_app, name="chat")
 
-__all__ = ["cli", "sources_app", "config_app", "health_app", "imap_app", "github_app", "orchestrator_app", "search_app", "privacy_app", "cloud_sync_app"]
+__all__ = ["cli", "sources_app", "config_app", "health_app", "imap_app", "github_app", "orchestrator_app", "search_app", "privacy_app", "cloud_sync_app", "chat_app"]
 
 

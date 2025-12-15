@@ -278,6 +278,84 @@ class OllamaConnectionPool:
 
         return processed
 
+    async def stream_generate(
+        self,
+        model: str,
+        prompt: str,
+        system: Optional[str] = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """Stream text generation from Ollama.
+
+        Yields tokens as they are generated for real-time display.
+        Used by AnswerGenerator for streaming answer synthesis.
+
+        Research Foundation:
+        - CausalRAG (ACL 2025): Real-time generation from graph context
+        - Step 02: LLM Answer Generation
+
+        Args:
+            model: Ollama model name (e.g., "llama3.1:8b-instruct-q4_0")
+            prompt: Input prompt
+            system: Optional system prompt for instruction
+            **kwargs: Additional Ollama parameters (temperature, num_predict, etc.)
+
+        Yields:
+            Generated text chunks as they arrive
+
+        Raises:
+            OllamaConnectionError: If connection fails
+        """
+        import json as json_module
+
+        if not self._health_status.is_healthy:
+            logger.warning("Ollama connection unhealthy, attempting streaming anyway")
+
+        if not self._session:
+            await self.initialize()
+
+        request_body: Dict[str, Any] = {
+            "model": model,
+            "prompt": prompt,
+            "stream": True,
+            **kwargs,
+        }
+        if system:
+            request_body["system"] = system
+
+        try:
+            async with self._semaphore:
+                # Use longer timeout for streaming (generation can take time)
+                timeout = aiohttp.ClientTimeout(total=120.0)
+                async with self._session.post(  # type: ignore
+                    f"{self.config.base_url}/api/generate",
+                    json=request_body,
+                    timeout=timeout,
+                ) as response:
+                    response.raise_for_status()
+                    self._health_status.record_success()
+
+                    # Ollama streams newline-delimited JSON
+                    async for line in response.content:
+                        if line:
+                            try:
+                                data = json_module.loads(line.decode("utf-8"))
+                                if "response" in data:
+                                    yield data["response"]
+                                if data.get("done", False):
+                                    break
+                            except json_module.JSONDecodeError:
+                                # Skip malformed lines
+                                continue
+
+        except asyncio.TimeoutError:
+            self._health_status.record_failure()
+            raise OllamaConnectionError("Ollama streaming request timed out")
+
+        except aiohttp.ClientError as e:
+            self._health_status.record_failure()
+            raise OllamaConnectionError(f"Ollama streaming request failed: {e}")
+
     async def _health_check(self) -> bool:
         """Check Ollama server health.
 

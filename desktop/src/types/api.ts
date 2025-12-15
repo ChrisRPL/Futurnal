@@ -93,6 +93,46 @@ export interface SearchResponse {
   execution_time_ms: number;
 }
 
+/**
+ * Search response with LLM-generated answer.
+ *
+ * Step 02: LLM Answer Generation
+ * Research Foundation:
+ * - CausalRAG (ACL 2025): Causal-aware generation
+ * - LLM-Enhanced Symbolic (2501.01246v1): Hybrid approach
+ */
+export interface SearchWithAnswerResponse extends SearchResponse {
+  /** LLM-generated synthesized answer */
+  answer?: string;
+  /** Sources used for answer generation */
+  sources?: string[];
+  /** Model used for answer generation */
+  model?: string;
+  /** Time taken for answer generation (ms) */
+  generation_time_ms?: number;
+}
+
+/**
+ * Available models for answer generation.
+ * Per docs/LLM_MODEL_REGISTRY.md
+ */
+export interface AnswerModel {
+  id: string;
+  label: string;
+  vram: string;
+  hint: string;
+}
+
+export const ANSWER_MODELS: AnswerModel[] = [
+  { id: 'phi3:mini', label: 'Phi-3 Mini', vram: '4GB', hint: 'Fast' },
+  { id: 'llama3.1:8b-instruct-q4_0', label: 'Llama 3.1 8B', vram: '8GB', hint: 'Balanced' },
+  { id: 'SpeakLeash/bielik-4.5b-v3.0-instruct:Q8_0', label: 'Bielik 4.5B', vram: '5GB', hint: 'Polish' },
+  { id: 'qwen2.5:7b-instruct', label: 'Qwen 2.5 7B', vram: '8GB', hint: 'Quality' },
+  { id: 'mistral:7b-instruct', label: 'Mistral 7B', vram: '8GB', hint: 'Reasoning' },
+];
+
+export const DEFAULT_ANSWER_MODEL = 'llama3.1:8b-instruct-q4_0';
+
 export interface QueryIntent {
   primary: 'temporal' | 'causal' | 'exploratory' | 'lookup';
   temporal?: TemporalIntent;

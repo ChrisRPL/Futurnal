@@ -110,7 +110,7 @@ pub struct SearchResponse {
     pub total: u32,
     pub query_id: String,
     pub intent: QueryIntent,
-    pub execution_time_ms: u64,
+    pub execution_time_ms: f64,
 }
 
 /// Detected query intent.
@@ -119,6 +119,29 @@ pub struct QueryIntent {
     pub primary: String,
     pub temporal: Option<TemporalIntent>,
     pub causal: Option<bool>,
+}
+
+/// Search response with LLM-generated answer.
+///
+/// Step 02: LLM Answer Generation
+/// Research Foundation:
+/// - CausalRAG (ACL 2025): Causal-aware generation
+/// - LLM-Enhanced Symbolic (2501.01246v1): Hybrid approach
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SearchWithAnswerResponse {
+    pub results: Vec<SearchResult>,
+    pub total: u32,
+    pub query_id: String,
+    pub intent: QueryIntent,
+    pub execution_time_ms: f64,
+    /// LLM-generated synthesized answer
+    pub answer: Option<String>,
+    /// Sources used for answer generation
+    pub sources: Option<Vec<String>>,
+    /// Model used for answer generation
+    pub model: Option<String>,
+    /// Time taken for answer generation (ms)
+    pub generation_time_ms: Option<f64>,
 }
 
 /// Temporal intent details.
@@ -172,7 +195,7 @@ pub async fn search_query(query: SearchQuery) -> Result<SearchResponse, String> 
                     temporal: None,
                     causal: None,
                 },
-                execution_time_ms: start.elapsed().as_millis() as u64,
+                execution_time_ms: start.elapsed().as_millis() as f64,
             }
         }
     };
@@ -211,4 +234,79 @@ pub async fn get_search_history(limit: Option<u32>) -> Result<Vec<SearchHistoryI
     };
 
     Ok(history)
+}
+
+/// Execute search with LLM answer generation.
+///
+/// Step 02: LLM Answer Generation
+/// Calls: `futurnal search answer --json <query>`
+///
+/// Research Foundation:
+/// - CausalRAG (ACL 2025): Causal-aware generation
+/// - LLM-Enhanced Symbolic (2501.01246v1): Hybrid approach
+#[command]
+pub async fn search_with_answer(
+    query: SearchQuery,
+    generate_answer: Option<bool>,
+    model: Option<String>,
+) -> Result<SearchWithAnswerResponse, String> {
+    let start = std::time::Instant::now();
+
+    // Build CLI args
+    let top_k_str = query.top_k.unwrap_or(10).to_string();
+    let mut args = vec![
+        "search".to_string(),
+        "answer".to_string(),
+        query.query.clone(),
+        "--top-k".to_string(),
+        top_k_str,
+        "--json".to_string(),
+    ];
+
+    // Add --no-answer flag if generate_answer is false
+    if generate_answer == Some(false) {
+        args.push("--no-answer".to_string());
+    }
+
+    // Add model if specified
+    if let Some(m) = &model {
+        args.push("--model".to_string());
+        args.push(m.clone());
+    }
+
+    // Convert to &str slice for execute_cli
+    let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+    // Execute Python CLI
+    let response: SearchWithAnswerResponse = match crate::python::execute_cli(&args_refs).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            log::warn!("Search with answer CLI failed, returning empty results: {}", e);
+            // Return empty results on error (graceful degradation)
+            SearchWithAnswerResponse {
+                results: vec![],
+                total: 0,
+                query_id: Uuid::new_v4().to_string(),
+                intent: QueryIntent {
+                    primary: "exploratory".to_string(),
+                    temporal: None,
+                    causal: None,
+                },
+                execution_time_ms: start.elapsed().as_millis() as f64,
+                answer: None,
+                sources: None,
+                model: None,
+                generation_time_ms: None,
+            }
+        }
+    };
+
+    log::info!(
+        "Search with answer '{}' returned {} results, answer: {}",
+        query.query,
+        response.total,
+        response.answer.is_some()
+    );
+
+    Ok(response)
 }

@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { searchApi } from '@/lib/api';
 import type { SearchResult, SearchFilters } from '@/types/api';
+import { DEFAULT_ANSWER_MODEL } from '@/types/api';
 
 /**
  * Filter chip for UI display
@@ -62,6 +63,16 @@ interface SearchState {
   /** Currently selected result ID for detail panel */
   selectedResultId: string | null;
 
+  // Step 02: LLM Answer Generation
+  /** Generated answer from LLM */
+  answer: string | null;
+  /** Sources used for answer generation */
+  answerSources: string[];
+  /** Whether to generate answers with search (persisted) */
+  generateAnswers: boolean;
+  /** Selected model for answer generation (persisted) */
+  selectedModel: string;
+
   /** Set the query string */
   setQuery: (query: string) => void;
   /** Set active filters */
@@ -84,6 +95,12 @@ interface SearchState {
   clearResults: () => void;
   /** Set selected result ID */
   setSelectedResult: (id: string | null) => void;
+  /** Toggle answer generation on/off */
+  toggleAnswerGeneration: () => void;
+  /** Set selected model for answer generation */
+  setSelectedModel: (model: string) => void;
+  /** Set answer directly */
+  setAnswer: (answer: string | null) => void;
 }
 
 const MAX_SEARCH_HISTORY = 50;
@@ -105,6 +122,11 @@ const initialState = {
   searchHistory: [] as SearchHistoryItem[],
   error: null as string | null,
   selectedResultId: null as string | null,
+  // Step 02: LLM Answer Generation
+  answer: null as string | null,
+  answerSources: [] as string[],
+  generateAnswers: true,
+  selectedModel: DEFAULT_ANSWER_MODEL,
 };
 
 /**
@@ -184,20 +206,31 @@ export const useSearchStore = create<SearchState>()(
       },
 
       executeSearch: async () => {
-        const { query, filters, addSearchToHistory } = get();
+        const { query, filters, addSearchToHistory, generateAnswers, selectedModel } = get();
         const trimmedQuery = query.trim();
 
         if (!trimmedQuery) return;
 
-        set({ isLoading: true, error: null });
+        set({ isLoading: true, error: null, answer: null, answerSources: [] });
         const startTime = Date.now();
 
         try {
-          const response = await searchApi.search({
-            query: trimmedQuery,
-            top_k: 20,
-            filters: filtersToApiFormat(filters),
-          });
+          // Use searchWithAnswer when answer generation is enabled
+          const response = generateAnswers
+            ? await searchApi.searchWithAnswer(
+                {
+                  query: trimmedQuery,
+                  top_k: 20,
+                  filters: filtersToApiFormat(filters),
+                },
+                true,
+                selectedModel
+              )
+            : await searchApi.search({
+                query: trimmedQuery,
+                top_k: 20,
+                filters: filtersToApiFormat(filters),
+              });
 
           // Debug logging for search results
           console.log('[SearchStore] Search response:', {
@@ -205,6 +238,7 @@ export const useSearchStore = create<SearchState>()(
             resultCount: response.results.length,
             intent: response.intent,
             executionTimeMs: response.execution_time_ms,
+            hasAnswer: 'answer' in response && !!response.answer,
           });
           if (response.results.length > 0) {
             console.log('[SearchStore] Sample result structure:', {
@@ -231,11 +265,17 @@ export const useSearchStore = create<SearchState>()(
             executionTimeMs,
           });
 
+          // Extract answer if available (from searchWithAnswer response)
+          const answer = 'answer' in response ? response.answer ?? null : null;
+          const answerSources = 'sources' in response ? response.sources ?? [] : [];
+
           set({
             results: response.results,
             intent: intentPrimary,
             intentConfidence: 0.85, // Default confidence since API doesn't provide it
             isLoading: false,
+            answer,
+            answerSources,
           });
         } catch (error) {
           console.error('Search error:', error);
@@ -245,6 +285,8 @@ export const useSearchStore = create<SearchState>()(
             intentConfidence: 0,
             isLoading: false,
             error: error instanceof Error ? error.message : 'Search failed',
+            answer: null,
+            answerSources: [],
           });
         }
       },
@@ -256,14 +298,30 @@ export const useSearchStore = create<SearchState>()(
           intentConfidence: 0,
           error: null,
           selectedResultId: null,
+          answer: null,
+          answerSources: [],
         }),
 
       setSelectedResult: (id) => set({ selectedResultId: id }),
+
+      // Step 02: LLM Answer Generation actions
+      toggleAnswerGeneration: () => {
+        const { generateAnswers } = get();
+        set({ generateAnswers: !generateAnswers });
+      },
+
+      setSelectedModel: (model) => set({ selectedModel: model }),
+
+      setAnswer: (answer) => set({ answer }),
     }),
     {
       name: 'futurnal-search',
-      // Only persist searchHistory, not query/results/filters
-      partialize: (state) => ({ searchHistory: state.searchHistory }),
+      // Persist searchHistory, generateAnswers, and selectedModel
+      partialize: (state) => ({
+        searchHistory: state.searchHistory,
+        generateAnswers: state.generateAnswers,
+        selectedModel: state.selectedModel,
+      }),
     }
   )
 );

@@ -30,6 +30,7 @@ import {
   Copy,
   Focus,
   Check,
+  MessageSquare,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { cn, formatTimestampRelative } from '@/lib/utils';
@@ -53,6 +54,8 @@ interface NodeDetailPanelProps {
   onNavigateToNode?: (nodeId: string) => void;
   /** Focus on node in graph (center and zoom) */
   onFocusNode?: (nodeId: string) => void;
+  /** Ask about this node - opens chat with context */
+  onAskAbout?: (nodeId: string, nodeLabel: string) => void;
   /** Additional CSS classes */
   className?: string;
 }
@@ -90,6 +93,7 @@ export function NodeDetailPanel({
   onClose,
   onNavigateToNode,
   onFocusNode,
+  onAskAbout,
   className,
 }: NodeDetailPanelProps) {
   const nodeType = node.node_type || 'Document';
@@ -164,6 +168,11 @@ export function NodeDetailPanel({
   const handleFocusInGraph = useCallback(() => {
     onFocusNode?.(node.id);
   }, [node.id, onFocusNode]);
+
+  // Handle ask about this node - opens chat with entity context
+  const handleAskAbout = useCallback(() => {
+    onAskAbout?.(node.id, node.label);
+  }, [node.id, node.label, onAskAbout]);
 
   // Handle open source action - try multiple locations for path
   const handleOpenSource = useCallback(async () => {
@@ -308,6 +317,23 @@ export function NodeDetailPanel({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Center graph on this node</TooltipContent>
+            </Tooltip>
+          )}
+
+          {onAskAbout && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 gap-1.5 text-xs text-white/50 hover:text-white/80"
+                  onClick={handleAskAbout}
+                >
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  Ask
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Ask about this node</TooltipContent>
             </Tooltip>
           )}
         </div>
