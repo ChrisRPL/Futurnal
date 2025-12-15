@@ -11,7 +11,7 @@ from typing import List, Dict, Any
 
 import pytest
 
-from src.futurnal.extraction.temporal.models import (
+from futurnal.extraction.temporal.models import (
     TemporalMark,
     TemporalSourceType,
 )

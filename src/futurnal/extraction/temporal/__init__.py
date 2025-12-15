@@ -40,6 +40,19 @@ from futurnal.extraction.temporal.models import (
     ValidationResult,
 )
 
+from futurnal.extraction.temporal.consistency import (
+    TemporalConsistencyValidator,
+    TemporalInconsistency,
+    ViolationType,
+    Severity,
+    validate_temporal_consistency,
+)
+
+from futurnal.extraction.temporal.enricher import (
+    TemporalEnricher,
+    enrich_with_temporal,
+)
+
 __all__ = [
     # Enums
     "TemporalRelationshipType",
@@ -59,4 +72,13 @@ __all__ = [
     # Result models
     "TemporalExtractionResult",
     "ValidationResult",
+    # Consistency validation (Step 04)
+    "TemporalConsistencyValidator",
+    "TemporalInconsistency",
+    "ViolationType",
+    "Severity",
+    "validate_temporal_consistency",
+    # Pipeline integration (Step 04)
+    "TemporalEnricher",
+    "enrich_with_temporal",
 ]
