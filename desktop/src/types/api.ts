@@ -129,7 +129,21 @@ export const ANSWER_MODELS: AnswerModel[] = [
   { id: 'SpeakLeash/bielik-4.5b-v3.0-instruct:Q8_0', label: 'Bielik 4.5B', vram: '5GB', hint: 'Polish' },
   { id: 'qwen2.5:7b-instruct', label: 'Qwen 2.5 7B', vram: '8GB', hint: 'Quality' },
   { id: 'mistral:7b-instruct', label: 'Mistral 7B', vram: '8GB', hint: 'Reasoning' },
+  { id: 'kimi-k2-thinking:cloud', label: 'Kimi K2 Thinking', vram: 'Cloud', hint: '1T MoE, Deep Reasoning' },
+  { id: 'gpt-oss:20b', label: 'GPT-OSS 20B', vram: '12GB', hint: 'Local 20B' },
 ];
+
+/**
+ * Vision models for image understanding.
+ * Used automatically when images without text are attached.
+ */
+export const VISION_MODELS: AnswerModel[] = [
+  { id: 'llava:7b', label: 'LLaVA 7B', vram: '8GB', hint: 'Vision' },
+  { id: 'llava:13b', label: 'LLaVA 13B', vram: '12GB', hint: 'Quality Vision' },
+  { id: 'moondream:latest', label: 'Moondream', vram: '4GB', hint: 'Fast Vision' },
+];
+
+export const DEFAULT_VISION_MODEL = 'llava:7b';
 
 export const DEFAULT_ANSWER_MODEL = 'llama3.1:8b-instruct-q4_0';
 

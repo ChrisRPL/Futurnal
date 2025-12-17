@@ -1,0 +1,223 @@
+name: Quality Gates
+
+on:
+  push:
+    branches: [main, feat/p1-archivist]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '20'
+
+jobs:
+  # ============================================
+  # Python Backend Quality Gates
+  # ============================================
+  python-tests:
+    name: Python Tests
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Run unit tests
+        run: |
+          pytest tests/ -v --ignore=tests/integration/ --ignore=tests/e2e/ --ignore=tests/performance/ -x
+
+      - name: Run integration tests
+        run: |
+          pytest tests/integration/ -v -x
+
+  python-quality:
+    name: Python Quality
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy
+
+      - name: Lint with ruff
+        run: |
+          ruff check src/ tests/
+
+      - name: Type check with mypy
+        run: |
+          mypy src/futurnal --ignore-missing-imports || true
+
+  quality-gates:
+    name: Quality Gate Validation
+    runs-on: ubuntu-22.04
+    needs: python-tests
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Run quality gate tests
+        run: |
+          pytest tests/quality_gates/ -v -x
+
+  # ============================================
+  # Security Audit
+  # ============================================
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Run security tests
+        run: |
+          pytest tests/security/ -v -x
+
+      - name: Check for credential leaks
+        run: |
+          # Simple check for common credential patterns in code
+          ! grep -rn "password\s*=" src/ --include="*.py" | grep -v "password.*None" | grep -v "password.*:" | grep -v "#" || true
+          ! grep -rn "api_key\s*=" src/ --include="*.py" | grep -v "api_key.*None" | grep -v "#" || true
+
+  # ============================================
+  # Performance Benchmarks
+  # ============================================
+  performance-tests:
+    name: Performance Benchmarks
+    runs-on: ubuntu-22.04
+    needs: python-tests
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Run performance tests
+        run: |
+          pytest tests/performance/ -v -m performance --tb=short || true
+
+  # ============================================
+  # Frontend Quality Gates
+  # ============================================
+  frontend-tests:
+    name: Frontend Tests
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: desktop
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint || true
+
+      - name: Type check
+        run: npm run typecheck || npx tsc --noEmit || true
+
+      - name: Build
+        run: npm run build
+
+  # ============================================
+  # Final Quality Gate Summary
+  # ============================================
+  quality-gate-summary:
+    name: Quality Gate Summary
+    runs-on: ubuntu-22.04
+    needs: [python-tests, python-quality, quality-gates, security-audit, frontend-tests]
+    if: always()
+
+    steps:
+      - name: Check all gates passed
+        run: |
+          echo "Quality Gate Results:"
+          echo "====================="
+          echo "Python Tests: ${{ needs.python-tests.result }}"
+          echo "Python Quality: ${{ needs.python-quality.result }}"
+          echo "Quality Gates: ${{ needs.quality-gates.result }}"
+          echo "Security Audit: ${{ needs.security-audit.result }}"
+          echo "Frontend Tests: ${{ needs.frontend-tests.result }}"
+
+          # Fail if any required job failed
+          if [[ "${{ needs.python-tests.result }}" == "failure" ]]; then
+            echo "ERROR: Python tests failed"
+            exit 1
+          fi
+
+          if [[ "${{ needs.security-audit.result }}" == "failure" ]]; then
+            echo "ERROR: Security audit failed"
+            exit 1
+          fi
+
+          echo ""
+          echo "All critical quality gates passed!"

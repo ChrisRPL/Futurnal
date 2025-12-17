@@ -11,6 +11,12 @@ from .search import search_app
 from .privacy import privacy_app
 from .cloud_sync import cloud_sync_app
 from .chat import chat_app
+from .multimodal import multimodal_app
+from .causal import causal_app
+from .activity import activity_app
+from .schema import schema_app
+from .learning import learning_app
+from .insights import insights_app
 
 
 cli = Typer(help="Futurnal command line tools")
@@ -24,7 +30,13 @@ cli.add_typer(search_app, name="search")
 cli.add_typer(privacy_app, name="privacy")
 cli.add_typer(cloud_sync_app, name="cloud-sync")
 cli.add_typer(chat_app, name="chat")
+cli.add_typer(multimodal_app, name="multimodal")
+cli.add_typer(causal_app, name="causal")
+cli.add_typer(activity_app, name="activity")
+cli.add_typer(schema_app, name="schema")
+cli.add_typer(learning_app, name="learning")
+cli.add_typer(insights_app, name="insights")
 
-__all__ = ["cli", "sources_app", "config_app", "health_app", "imap_app", "github_app", "orchestrator_app", "search_app", "privacy_app", "cloud_sync_app", "chat_app"]
+__all__ = ["cli", "sources_app", "config_app", "health_app", "imap_app", "github_app", "orchestrator_app", "search_app", "privacy_app", "cloud_sync_app", "chat_app", "multimodal_app", "causal_app", "activity_app", "schema_app", "learning_app", "insights_app"]
 
 

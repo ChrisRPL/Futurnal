@@ -16,6 +16,7 @@ Integration:
 - Converts signals to SemanticAdvantage format for GRPO
 - Triggers experiential knowledge updates after threshold
 - Maintains query history for pattern analysis
+- AGI Phase 3: Connects to SearchRankingOptimizer for bidirectional learning
 
 Option B Compliance:
 - No model parameter updates
@@ -36,6 +37,7 @@ from futurnal.search.hybrid.types import QueryPlan
 if TYPE_CHECKING:
     from futurnal.extraction.schema.experiential import TrainingFreeGRPO
     from futurnal.extraction.schema.models import SemanticAdvantage
+    from futurnal.search.hybrid.routing.optimizer import SearchRankingOptimizer
 
 logger = logging.getLogger(__name__)
 
@@ -111,19 +113,26 @@ class SearchQualityFeedback:
     def __init__(
         self,
         grpo_engine: Optional["TrainingFreeGRPO"] = None,
+        optimizer: Optional["SearchRankingOptimizer"] = None,
+        query_router: Optional[Any] = None,
     ):
         """Initialize search quality feedback collector.
 
         Args:
             grpo_engine: TrainingFreeGRPO instance for experiential learning
+            optimizer: AGI Phase 3 - SearchRankingOptimizer for bidirectional learning
+            query_router: QueryRouter instance to apply weight updates
         """
         self.grpo = grpo_engine
+        self.optimizer = optimizer
+        self.query_router = query_router
         self.query_history: List[QueryPlan] = []
         self.signals: List[SearchQualitySignal] = []
 
         logger.info(
             f"SearchQualityFeedback initialized "
-            f"(GRPO: {'connected' if grpo_engine else 'not connected'})"
+            f"(GRPO: {'connected' if grpo_engine else 'not connected'}, "
+            f"Optimizer: {'connected' if optimizer else 'not connected'})"
         )
 
     def record_query(self, plan: QueryPlan):
@@ -187,9 +196,17 @@ class SearchQualityFeedback:
             f"for query {query_id}"
         )
 
+        # AGI Phase 3: Process signal through optimizer for bidirectional learning
+        if self.optimizer:
+            self._process_signal_for_optimizer(signal, query_id)
+
         # Check if we should trigger GRPO update
         if len(self.signals) >= self.GRPO_TRIGGER_THRESHOLD and self.grpo:
             self._trigger_grpo_update()
+
+        # AGI Phase 3: Check if optimizer should update routing weights
+        if self.optimizer and self.query_router:
+            self._check_optimizer_update()
 
     def _trigger_grpo_update(self):
         """Update experiential knowledge based on search signals.
@@ -400,3 +417,92 @@ class SearchQualityFeedback:
             "metrics": self.get_quality_metrics(),
             "intent_performance": self.get_intent_performance(),
         }
+
+    # =========================================================================
+    # AGI Phase 3: Bidirectional Learning Loop Methods
+    # =========================================================================
+
+    def _process_signal_for_optimizer(
+        self,
+        signal: SearchQualitySignal,
+        query_id: str,
+    ):
+        """Process signal through optimizer for bidirectional learning.
+
+        AGI Phase 3: This is how search quality signals flow back to
+        influence routing strategy weights.
+
+        Args:
+            signal: The quality signal
+            query_id: Reference to query plan
+        """
+        # Find corresponding query plan
+        plan = next(
+            (p for p in self.query_history if p.query_id == query_id),
+            None,
+        )
+
+        if not plan:
+            logger.debug(f"No plan found for query {query_id}, skipping optimizer")
+            return
+
+        # Pass signal to optimizer
+        self.optimizer.process_signal(
+            signal=signal,
+            intent=plan.intent,
+            primary_strategy=plan.primary_strategy,
+            secondary_strategy=plan.secondary_strategy,
+        )
+
+    def _check_optimizer_update(self):
+        """Check if optimizer should compute and apply weight updates.
+
+        AGI Phase 3: Triggers the bidirectional learning update cycle
+        when enough signals have accumulated.
+        """
+        if not self.optimizer or not self.query_router:
+            return
+
+        if not self.optimizer.should_update():
+            return
+
+        logger.info("Triggering optimizer weight update")
+
+        # Get current configs from router
+        from futurnal.search.hybrid.types import QueryIntent
+
+        current_configs = {
+            intent: self.query_router.get_strategy_config(intent)
+            for intent in QueryIntent
+        }
+
+        # Compute weight updates
+        updates = self.optimizer.compute_weight_updates(current_configs)
+
+        if updates:
+            # Apply updates to router
+            self.optimizer.apply_updates(updates, self.query_router)
+
+            logger.info(
+                f"Applied {len(updates)} weight updates from optimizer"
+            )
+
+    def set_optimizer(self, optimizer: "SearchRankingOptimizer"):
+        """Set optimizer after initialization.
+
+        Useful when optimizer is created after feedback instance.
+
+        Args:
+            optimizer: SearchRankingOptimizer instance
+        """
+        self.optimizer = optimizer
+        logger.info("SearchRankingOptimizer connected to feedback")
+
+    def set_query_router(self, router: Any):
+        """Set query router after initialization.
+
+        Args:
+            router: QueryRouter instance
+        """
+        self.query_router = router
+        logger.info("QueryRouter connected to feedback")

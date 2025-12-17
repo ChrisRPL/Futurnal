@@ -52,7 +52,7 @@
       "minimumSystemVersion": "10.15",
       "signingIdentity": null,
       "providerShortName": null,
-      "entitlements": null
+      "entitlements": "entitlements.plist"
     },
     "windows": {
       "certificateThumbprint": null,

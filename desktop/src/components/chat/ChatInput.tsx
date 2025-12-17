@@ -25,6 +25,7 @@ import {
   FileImage,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { multimodalApi } from '@/lib/multimodalApi';
 
 // Supported attachment types
 type AttachmentType = 'image' | 'file';
@@ -60,15 +61,30 @@ interface ChatInputProps {
 
 /**
  * Voice recording hook
+ * Note: In Tauri WebView, navigator.mediaDevices may not be available.
+ * We check for availability and provide a graceful fallback.
  */
 function useVoiceRecording() {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Assume supported if API exists - we'll check permission when user clicks
+  const [isSupported, setIsSupported] = useState(
+    typeof navigator !== 'undefined' &&
+    !!navigator.mediaDevices &&
+    !!navigator.mediaDevices.getUserMedia
+  );
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
   const startRecording = useCallback(async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setError('Voice recording not available in this environment');
+      setIsSupported(false);
+      console.error('Voice recording error: navigator.mediaDevices.getUserMedia not available');
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream);
@@ -85,7 +101,8 @@ function useVoiceRecording() {
       setIsRecording(true);
       setError(null);
     } catch (err) {
-      setError('Could not access microphone');
+      setError('Microphone access denied');
+      setIsSupported(false);
       console.error('Voice recording error:', err);
     }
   }, []);
@@ -115,6 +132,7 @@ function useVoiceRecording() {
   return {
     isRecording,
     isProcessing,
+    isSupported,
     error,
     startRecording,
     stopRecording,
@@ -185,7 +203,7 @@ export function ChatInput({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { isRecording, isProcessing, error, startRecording, stopRecording } =
+  const { isRecording, isProcessing, isSupported: voiceSupported, error, startRecording, stopRecording, setIsProcessing } =
     useVoiceRecording();
 
   // Auto-resize textarea
@@ -213,13 +231,35 @@ export function ChatInput({
   };
 
   // Handle voice toggle
+  // Step 08: Frontend Intelligence Integration - Whisper V3 transcription
   const handleVoiceToggle = async () => {
     if (isRecording) {
       const blob = await stopRecording();
       if (blob) {
-        // TODO: Send to speech-to-text API
-        console.log('Voice recording completed:', blob.size, 'bytes');
-        // For now, just log - you'd integrate with Whisper or similar
+        // Transcribe using Whisper V3 (Ollama 10-100x faster, or HuggingFace fallback)
+        setIsProcessing(true);
+        try {
+          // Convert blob to Uint8Array for Tauri IPC
+          const arrayBuffer = await blob.arrayBuffer();
+          const audioData = new Uint8Array(arrayBuffer);
+
+          console.log('[Voice] Transcribing audio:', audioData.length, 'bytes');
+
+          const result = await multimodalApi.transcribeVoice(audioData);
+
+          if (result.success && result.text) {
+            // Append transcribed text to input (preserving existing text)
+            const separator = value.trim() ? ' ' : '';
+            onChange(value + separator + result.text);
+            console.log('[Voice] Transcription complete:', result.text.length, 'chars, language:', result.language);
+          } else if (result.error) {
+            console.error('[Voice] Transcription error:', result.error);
+          }
+        } catch (err) {
+          console.error('[Voice] Transcription failed:', err);
+        } finally {
+          setIsProcessing(false);
+        }
       }
     } else {
       startRecording();
@@ -303,14 +343,16 @@ export function ChatInput({
           {enableVoice && (
             <button
               onClick={handleVoiceToggle}
-              disabled={isProcessing}
+              disabled={isProcessing || !voiceSupported}
               className={cn(
                 'p-2 transition-colors',
-                isRecording
-                  ? 'text-red-400 bg-red-400/10 animate-pulse'
-                  : 'text-white/40 hover:text-white/70 hover:bg-white/5'
+                !voiceSupported
+                  ? 'text-white/20 cursor-not-allowed'
+                  : isRecording
+                    ? 'text-red-400 bg-red-400/10 animate-pulse'
+                    : 'text-white/40 hover:text-white/70 hover:bg-white/5'
               )}
-              title={isRecording ? 'Stop recording' : 'Start voice input'}
+              title={!voiceSupported ? 'Voice not available in Tauri' : isRecording ? 'Stop recording' : 'Start voice input'}
             >
               {isProcessing ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

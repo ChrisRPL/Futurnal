@@ -51,14 +51,22 @@ def resource_registry():
 class TestResourceProfilingIntegration:
     """Integration tests for resource profiling."""
 
+    @pytest.fixture
+    def event_loop(self):
+        """Create event loop for async tests."""
+        loop = asyncio.new_event_loop()
+        yield loop
+        loop.close()
+
     def test_orchestrator_initialization_with_resource_profiling(
-        self, workspace, job_queue, state_store
+        self, workspace, job_queue, state_store, event_loop
     ):
         """Test that orchestrator initializes with resource profiling components."""
         orchestrator = IngestionOrchestrator(
             job_queue=job_queue,
             state_store=state_store,
             workspace_dir=str(workspace),
+            loop=event_loop,
         )
 
         # Verify resource components are initialized
@@ -67,13 +75,14 @@ class TestResourceProfilingIntegration:
         assert isinstance(orchestrator._per_connector_semaphores, dict)
 
     def test_per_connector_semaphores_initialization(
-        self, workspace, job_queue, state_store
+        self, workspace, job_queue, state_store, event_loop
     ):
         """Test that per-connector semaphores are initialized on start."""
         orchestrator = IngestionOrchestrator(
             job_queue=job_queue,
             state_store=state_store,
             workspace_dir=str(workspace),
+            loop=event_loop,
         )
 
         # Semaphores should be empty before start
@@ -92,10 +101,10 @@ class TestResourceProfilingIntegration:
                 assert isinstance(semaphore, asyncio.Semaphore)
         finally:
             # Cleanup
-            asyncio.run(orchestrator.shutdown())
+            event_loop.run_until_complete(orchestrator.shutdown())
 
     def test_resource_monitoring_during_job_execution(
-        self, workspace, job_queue, state_store, tmp_path
+        self, workspace, job_queue, state_store, tmp_path, event_loop
     ):
         """Test that resources are monitored during job execution."""
         # Create a mock element sink
@@ -106,6 +115,7 @@ class TestResourceProfilingIntegration:
             state_store=state_store,
             workspace_dir=str(workspace),
             element_sink=element_sink,
+            loop=event_loop,
         )
 
         # Create a test source directory
@@ -139,10 +149,10 @@ class TestResourceProfilingIntegration:
             if stats:
                 assert stats.connector_type == JobType.LOCAL_FILES
         finally:
-            asyncio.run(orchestrator.shutdown())
+            event_loop.run_until_complete(orchestrator.shutdown())
 
     def test_custom_resource_profile(
-        self, workspace, job_queue, state_store
+        self, workspace, job_queue, state_store, event_loop
     ):
         """Test using a custom resource profile."""
         # Create custom registry with modified profile
@@ -159,6 +169,7 @@ class TestResourceProfilingIntegration:
             state_store=state_store,
             workspace_dir=str(workspace),
             resource_profiles=registry,
+            loop=event_loop,
         )
 
         orchestrator.start()
@@ -169,16 +180,17 @@ class TestResourceProfilingIntegration:
             assert profile.max_concurrent_jobs == 2
             assert profile.cpu_intensity == ResourceIntensity.HIGH
         finally:
-            asyncio.run(orchestrator.shutdown())
+            event_loop.run_until_complete(orchestrator.shutdown())
 
     def test_resource_sampling_loop(
-        self, workspace, job_queue, state_store
+        self, workspace, job_queue, state_store, event_loop
     ):
         """Test that resource sampling loop runs in background."""
         orchestrator = IngestionOrchestrator(
             job_queue=job_queue,
             state_store=state_store,
             workspace_dir=str(workspace),
+            loop=event_loop,
         )
 
         # Start orchestrator
@@ -205,16 +217,17 @@ class TestResourceProfilingIntegration:
             # At least 1 sample should have been taken
             assert metrics.cpu_percent_avg is not None or metrics.memory_mb_avg is not None
         finally:
-            asyncio.run(orchestrator.shutdown())
+            event_loop.run_until_complete(orchestrator.shutdown())
 
     def test_sampling_task_cleanup_on_shutdown(
-        self, workspace, job_queue, state_store
+        self, workspace, job_queue, state_store, event_loop
     ):
         """Test that sampling task is properly cleaned up on shutdown."""
         orchestrator = IngestionOrchestrator(
             job_queue=job_queue,
             state_store=state_store,
             workspace_dir=str(workspace),
+            loop=event_loop,
         )
 
         orchestrator.start()
@@ -222,20 +235,21 @@ class TestResourceProfilingIntegration:
         assert sampling_task is not None
 
         # Shutdown
-        asyncio.run(orchestrator.shutdown())
+        event_loop.run_until_complete(orchestrator.shutdown())
 
         # Sampling task should be cancelled
         assert orchestrator._sampling_task is None
         assert sampling_task.done()
 
     def test_system_resource_availability_check(
-        self, workspace, job_queue, state_store
+        self, workspace, job_queue, state_store, event_loop
     ):
         """Test checking system resource availability."""
         orchestrator = IngestionOrchestrator(
             job_queue=job_queue,
             state_store=state_store,
             workspace_dir=str(workspace),
+            loop=event_loop,
         )
 
         # Get system resources
@@ -255,13 +269,14 @@ class TestResourceProfilingIntegration:
         assert resources["available_cpu_cores"] >= 1
 
     def test_optimal_concurrency_calculation_per_connector(
-        self, workspace, job_queue, state_store
+        self, workspace, job_queue, state_store, event_loop
     ):
         """Test that optimal concurrency is calculated per connector."""
         orchestrator = IngestionOrchestrator(
             job_queue=job_queue,
             state_store=state_store,
             workspace_dir=str(workspace),
+            loop=event_loop,
         )
 
         system_resources = orchestrator._resource_monitor.get_system_resources()
@@ -291,13 +306,14 @@ class TestResourceProfilingIntegration:
         assert imap_concurrency > 0
 
     def test_connector_statistics_aggregation(
-        self, workspace, job_queue, state_store
+        self, workspace, job_queue, state_store, event_loop
     ):
         """Test that connector statistics are properly aggregated."""
         orchestrator = IngestionOrchestrator(
             job_queue=job_queue,
             state_store=state_store,
             workspace_dir=str(workspace),
+            loop=event_loop,
         )
 
         # Simulate multiple jobs for the same connector

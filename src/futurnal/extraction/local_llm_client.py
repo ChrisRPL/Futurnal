@@ -57,11 +57,12 @@ class LocalLLMBackend(str, Enum):
     QWEN_2_5_32B_CODER = "Qwen/Qwen2.5-Coder-32B-Instruct"  # Optimized extraction (32B, 16GB VRAM)
     BIELIK_4_5B = "speakleash/Bielik-4.5B-v3.0-Instruct"  # Polish language model (4.5B)
 
-    # Advanced Reasoning Models
-    KIMI_K2_THINKING = "moonshotai/Kimi-K2-Thinking"  # Advanced reasoning/thinking (alternative to 70B)
+    # Advanced Reasoning Models (Kimi K2 - 1T MoE, 32B active)
+    KIMI_K2_THINKING = "moonshotai/Kimi-K2-Thinking"  # Deep reasoning, 200-300 tool calls
+    KIMI_K2_INSTRUCT = "moonshotai/Kimi-K2-Instruct"  # Fast instruct version
 
-    # Unrestricted Models
-    GPT_OSS_20B = "ArliAI/gpt-oss-20b-Derestricted"  # Unrestricted use (20B)
+    # Local 20B Models
+    GPT_OSS_20B = "ArliAI/gpt-oss-20b"  # Local 20B model
 
     # Alternative models
     QWEN_3_8B = "Qwen/Qwen2.5-7B-Instruct"  # Alternative production
@@ -366,9 +367,8 @@ def get_test_llm_client(
             logger.info("Complex reasoning tasks | Alternative to Llama 3.3 70B")
         elif production_choice in ("gpt-oss", "gpt_oss", "gptoss", "gpt-oss-20b"):
             model = LocalLLMBackend.GPT_OSS_20B
-            logger.info("Using unrestricted model: GPT-OSS-20B-Derestricted")
-            logger.info("Unrestricted content processing | Requires ~12GB VRAM (4-bit)")
-            logger.warning("CAUTION: No content moderation guardrails - use responsibly")
+            logger.info("Using local 20B model: GPT-OSS-20B")
+            logger.info("Large local model | Requires ~12GB VRAM (4-bit)")
         elif production_choice == "auto":
             # Auto-select based on available VRAM
             if torch.cuda.is_available():

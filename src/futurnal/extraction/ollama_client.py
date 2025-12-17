@@ -23,10 +23,11 @@ OLLAMA_MODEL_MAP = {
     "meta-llama/Llama-3.3-70B-Instruct": "llama3.3:70b-instruct-q4_0",
     "Qwen/Qwen2.5-Coder-32B-Instruct": "qwen2.5-coder:32b-instruct-q4_0",
     "speakleash/Bielik-4.5B-v3.0-Instruct": "bielik:4.5b-instruct-q4_0",
-    # Advanced Reasoning Models
-    "moonshotai/Kimi-K2-Thinking": "kimi-k2:thinking",  # Custom Ollama model name
-    # Unrestricted Models
-    "ArliAI/gpt-oss-20b-Derestricted": "gpt-oss:20b-derestricted",  # Custom Ollama model name
+    # Advanced Reasoning Models (Kimi K2 - 1T MoE, 32B active)
+    "moonshotai/Kimi-K2-Thinking": "kimi-k2-thinking",  # Deep reasoning, 200-300 tool calls
+    "moonshotai/Kimi-K2-Instruct": "kimi-k2",  # Fast instruct version
+    # Local 20B Models
+    "ArliAI/gpt-oss-20b": "gpt-oss:20b",  # Local 20B model
 }
 
 

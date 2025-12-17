@@ -305,6 +305,42 @@ class TemporalCorrelationResult(BaseModel):
         description="Confidence in causal interpretation (Phase 3)"
     )
 
+    # Statistical significance (Phase 1 AGI enhancement)
+    p_value: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Statistical significance p-value"
+    )
+    statistical_test: Optional[str] = Field(
+        None,
+        description="Test used: 'fisher_exact', 'chi_square'"
+    )
+    is_statistically_significant: bool = Field(
+        default=False,
+        description="Whether correlation passes statistical significance test"
+    )
+    confidence_interval_95: Optional[Tuple[float, float]] = Field(
+        None,
+        description="95% confidence interval for average gap"
+    )
+    effect_size: Optional[float] = Field(
+        None,
+        description="Effect size (odds ratio or Cramer's V)"
+    )
+    effect_interpretation: Optional[str] = Field(
+        None,
+        description="Effect size interpretation: 'small', 'medium', 'large'"
+    )
+    expected_by_chance: Optional[float] = Field(
+        None,
+        description="Expected co-occurrences under null hypothesis"
+    )
+    corrected_p_value: Optional[float] = Field(
+        None,
+        description="P-value after multiple comparison correction"
+    )
+
     # Example co-occurrences
     examples: List[Tuple[str, str, float]] = Field(
         default_factory=list,

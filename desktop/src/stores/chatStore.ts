@@ -13,7 +13,17 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { chatApi } from '@/lib/api';
-import type { ChatMessage, ChatSessionInfo } from '@/types/chat';
+import type { ChatMessage, ChatSessionInfo, ChatAttachment } from '@/types/chat';
+
+/** Options for sending a message with attachments */
+export interface SendMessageOptions {
+  /** Message content visible to user */
+  content: string;
+  /** Hidden context sent to AI (extracted from attachments) */
+  hiddenContext?: string;
+  /** Attachment metadata for display */
+  attachments?: ChatAttachment[];
+}
 
 interface ChatState {
   /** Current active session ID */
@@ -36,8 +46,8 @@ interface ChatState {
   createSession: () => Promise<string>;
   /** Set current session and load history */
   setCurrentSession: (sessionId: string) => Promise<void>;
-  /** Send a message */
-  sendMessage: (content: string) => Promise<void>;
+  /** Send a message (string or options with attachments) */
+  sendMessage: (contentOrOptions: string | SendMessageOptions) => Promise<void>;
   /** Set context entity for focused conversations */
   setContextEntity: (entityId: string | null) => void;
   /** Load session history */
@@ -101,20 +111,34 @@ export const useChatStore = create<ChatState>()(
         }
       },
 
-      // Send a message
-      sendMessage: async (content: string) => {
+      // Send a message (supports both string and options with attachments)
+      sendMessage: async (contentOrOptions: string | SendMessageOptions) => {
         const state = get();
         let sessionId = state.currentSessionId;
+
+        // Parse input - support both string and options
+        const options: SendMessageOptions = typeof contentOrOptions === 'string'
+          ? { content: contentOrOptions }
+          : contentOrOptions;
+
+        const { content, hiddenContext, attachments } = options;
 
         // Create session if needed
         if (!sessionId) {
           sessionId = await get().createSession();
         }
 
-        // Add user message optimistically
+        // Build message for AI (includes hidden context)
+        const aiMessage = hiddenContext
+          ? `${content}\n\n---\nAttached content:\n${hiddenContext}`
+          : content;
+
+        // Add user message optimistically (UI shows only content + attachments)
         const userMessage: ChatMessage = {
           role: 'user',
           content,
+          hiddenContext,
+          attachments,
           sources: [],
           entityRefs: [],
           confidence: 1.0,
@@ -130,7 +154,7 @@ export const useChatStore = create<ChatState>()(
         try {
           const response = await chatApi.sendMessage({
             sessionId: sessionId!,
-            message: content,
+            message: aiMessage, // Send full message with context to AI
             contextEntityId: state.contextEntityId || undefined,
             model: state.selectedModel,
           });

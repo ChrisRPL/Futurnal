@@ -12,3 +12,4 @@ export { ProvenancePanel } from './ProvenancePanel';
 export { ScoreIndicator } from './ScoreIndicator';
 export { ConfidenceIndicator } from './ConfidenceIndicator';
 export { CausalChainPreview } from './CausalChainPreview';
+export { CausalChain } from './CausalChain';

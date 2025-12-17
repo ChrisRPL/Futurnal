@@ -9,15 +9,18 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, User, Shield, Palette, Database, HardDrive, Info } from 'lucide-react';
+import { ArrowLeft, User, Shield, Palette, Database, HardDrive, Info, GitBranch, Brain, BarChart3 } from 'lucide-react';
 import { ProfileSection } from '@/components/settings/ProfileSection';
 import { PrivacySection } from '@/components/settings/PrivacySection';
 import { AppearanceSection } from '@/components/settings/AppearanceSection';
 import { ConnectorsSection } from '@/components/settings/ConnectorsSection';
 import { DataSection } from '@/components/settings/DataSection';
 import { AboutSection } from '@/components/settings/AboutSection';
+import { SchemaEvolution } from '@/components/settings/SchemaEvolution';
+import { LearningProgress } from '@/components/settings/LearningProgress';
+import { TelemetrySettings } from '@/components/settings/TelemetrySettings';
 
-type SectionId = 'profile' | 'privacy' | 'appearance' | 'connectors' | 'data' | 'about';
+type SectionId = 'profile' | 'privacy' | 'appearance' | 'connectors' | 'data' | 'schema' | 'learning' | 'telemetry' | 'about';
 
 const SECTIONS = [
   { id: 'profile' as const, label: 'Profile', icon: User },
@@ -25,6 +28,9 @@ const SECTIONS = [
   { id: 'appearance' as const, label: 'Appearance', icon: Palette },
   { id: 'connectors' as const, label: 'Data Sources', icon: Database },
   { id: 'data' as const, label: 'Data Management', icon: HardDrive },
+  { id: 'schema' as const, label: 'Schema Evolution', icon: GitBranch },
+  { id: 'learning' as const, label: 'Learning Progress', icon: Brain },
+  { id: 'telemetry' as const, label: 'Telemetry', icon: BarChart3 },
   { id: 'about' as const, label: 'About', icon: Info },
 ];
 
@@ -44,6 +50,12 @@ export default function SettingsPage() {
         return <ConnectorsSection />;
       case 'data':
         return <DataSection />;
+      case 'schema':
+        return <SchemaEvolution />;
+      case 'learning':
+        return <LearningProgress />;
+      case 'telemetry':
+        return <TelemetrySettings />;
       case 'about':
         return <AboutSection />;
       default:
@@ -87,8 +99,8 @@ export default function SettingsPage() {
                         : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text-secondary)]'
                     }`}
                   >
-                    <Icon className="h-4 w-4" />
-                    {section.label}
+                    <Icon className="h-4 w-4 flex-shrink-0" />
+                    <span className="truncate">{section.label}</span>
                   </button>
                 </li>
               );

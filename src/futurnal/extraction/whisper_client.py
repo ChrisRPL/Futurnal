@@ -218,15 +218,155 @@ class OllamaWhisperClient:
 
 
 # =============================================================================
-# HuggingFace Whisper Client (Fallback)
+# Faster Whisper Client (Recommended - 4x faster than HuggingFace)
 # =============================================================================
 
 
-class LocalWhisperClient:
-    """HuggingFace Whisper client as fallback when Ollama unavailable.
+class FasterWhisperClient:
+    """Fast Whisper client using CTranslate2 backend.
+
+    Uses faster-whisper which provides 4x speedup over HuggingFace
+    with lower memory usage. Best local option when Ollama not available.
+    """
+
+    def __init__(
+        self,
+        model_size: str = "base",  # tiny, base, small, medium, large-v3
+        device: str = "auto",
+        compute_type: str = "auto"
+    ):
+        """Initialize Faster Whisper client.
+
+        Args:
+            model_size: Whisper model size (tiny, base, small, medium, large-v3)
+            device: Device for inference ("auto", "cuda", "cpu")
+            compute_type: Quantization type ("auto", "float16", "int8", etc.)
+        """
+        self.model_size = model_size
+        self.device = device
+        self.compute_type = compute_type
+        self.model = None
+
+        logger.info(f"Initialized Faster Whisper client: {model_size}")
+
+    def _load_model(self):
+        """Lazy-load Whisper model."""
+        if self.model is not None:
+            return
+
+        try:
+            from faster_whisper import WhisperModel
+
+            logger.info(f"Loading Whisper model: {self.model_size}")
+
+            # Determine device
+            device = self.device
+            if device == "auto":
+                import torch
+                if torch.cuda.is_available():
+                    device = "cuda"
+                else:
+                    device = "cpu"
+
+            # Determine compute type
+            compute_type = self.compute_type
+            if compute_type == "auto":
+                compute_type = "float16" if device == "cuda" else "int8"
+
+            self.model = WhisperModel(
+                self.model_size,
+                device=device,
+                compute_type=compute_type
+            )
+
+            logger.info(f"Whisper model loaded on {device} with {compute_type}")
+
+        except ImportError:
+            logger.error("faster-whisper not installed. Install with: pip install faster-whisper")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to load Whisper model: {e}")
+            raise
+
+    def transcribe(
+        self,
+        audio_file: str,
+        language: Optional[str] = None,
+        **kwargs
+    ) -> TranscriptionResult:
+        """Transcribe audio using Faster Whisper.
+
+        Args:
+            audio_file: Path to audio file
+            language: Language code (None for auto-detection)
+            **kwargs: Additional parameters
+
+        Returns:
+            TranscriptionResult with text, segments, language, confidence
+        """
+        self._load_model()
+
+        audio_path = Path(audio_file)
+        if not audio_path.exists():
+            raise FileNotFoundError(f"Audio file not found: {audio_file}")
+
+        try:
+            logger.info(f"Transcribing audio: {audio_path.name}")
+
+            segments_gen, info = self.model.transcribe(
+                str(audio_path),
+                language=language,
+                beam_size=5,
+                **kwargs
+            )
+
+            # Collect segments
+            segments = []
+            full_text_parts = []
+
+            for seg in segments_gen:
+                segment = TimestampedSegment(
+                    text=seg.text.strip(),
+                    start=seg.start,
+                    end=seg.end,
+                    confidence=seg.avg_logprob if hasattr(seg, 'avg_logprob') else 0.9
+                )
+                segments.append(segment)
+                full_text_parts.append(seg.text.strip())
+
+            full_text = " ".join(full_text_parts)
+            detected_language = info.language if hasattr(info, 'language') else (language or "unknown")
+
+            result = TranscriptionResult(
+                text=full_text,
+                segments=segments,
+                language=detected_language,
+                confidence=info.language_probability if hasattr(info, 'language_probability') else 0.9
+            )
+
+            logger.info(f"Transcription complete: {len(full_text)} chars, {len(segments)} segments, lang={detected_language}")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Faster Whisper transcription failed: {e}")
+            raise
+
+
+# Alias for backwards compatibility
+LocalWhisperClient = FasterWhisperClient
+
+
+# =============================================================================
+# HuggingFace Whisper Client (Legacy Fallback)
+# =============================================================================
+
+
+class HuggingFaceWhisperClient:
+    """HuggingFace Whisper client as legacy fallback.
 
     This client uses the original OpenAI Whisper via HuggingFace Transformers.
-    Slower than Ollama but works without external dependencies.
+    Slower than faster-whisper but works as a fallback.
     """
 
     def __init__(
@@ -246,7 +386,7 @@ class LocalWhisperClient:
         self.processor = None
 
         logger.info(f"Initialized HuggingFace Whisper client: {model_name}")
-        logger.warning("HuggingFace Whisper is slower than Ollama. Consider using Ollama for 10-100x speedup.")
+        logger.warning("HuggingFace Whisper is slower. Consider using faster-whisper for 4x speedup.")
 
     def _load_model(self):
         """Lazy-load Whisper model and processor."""
@@ -457,6 +597,19 @@ def get_whisper_models() -> List[str]:
         return []
 
 
+def faster_whisper_available() -> bool:
+    """Check if faster-whisper is installed.
+
+    Returns:
+        True if faster-whisper is available
+    """
+    try:
+        import faster_whisper
+        return True
+    except ImportError:
+        return False
+
+
 def get_transcription_client(
     backend: str = "auto",
     model_name: Optional[str] = None,
@@ -465,42 +618,53 @@ def get_transcription_client(
     """Factory function to create transcription client with auto-backend selection.
 
     Args:
-        backend: Backend selection ("auto", "ollama", "hf", "huggingface")
-        model_name: Optional model name override
+        backend: Backend selection ("auto", "faster", "ollama", "hf", "huggingface")
+        model_name: Optional model name/size override
         **kwargs: Additional client initialization parameters
 
     Returns:
-        WhisperTranscriptionClient instance (Ollama or HuggingFace)
+        WhisperTranscriptionClient instance
 
     Examples:
-        >>> # Auto-select best backend
+        >>> # Auto-select best backend (faster-whisper preferred)
         >>> client = get_transcription_client()
 
-        >>> # Force Ollama
-        >>> client = get_transcription_client(backend="ollama")
+        >>> # Force faster-whisper
+        >>> client = get_transcription_client(backend="faster")
 
-        >>> # Force HuggingFace
-        >>> client = get_transcription_client(backend="hf")
+        >>> # Use smaller model for speed
+        >>> client = get_transcription_client(model_name="tiny")
     """
     # Check environment variable override
     env_backend = os.getenv("FUTURNAL_AUDIO_BACKEND", backend)
 
     if env_backend == "auto":
-        # Auto-select based on availability
-        if whisper_available():
-            logger.info("Auto-selected Ollama Whisper backend (10-100x faster)")
+        # Auto-select: prefer faster-whisper (fast, local), then Ollama, then HuggingFace
+        if faster_whisper_available():
+            logger.info("Auto-selected faster-whisper backend (4x faster than HuggingFace)")
+            return FasterWhisperClient(
+                model_size=model_name or "base",  # base is good balance of speed/quality
+                **kwargs
+            )
+        elif whisper_available():
+            logger.info("Auto-selected Ollama Whisper backend")
             return OllamaWhisperClient(
                 model_name=model_name or "whisper:large-v3",
                 **kwargs
             )
         else:
-            logger.info("Auto-selected HuggingFace Whisper backend (Ollama not available)")
-            logger.info("For 10-100x speedup, install Ollama: curl -fsSL https://ollama.com/install.sh | sh")
-            logger.info("Then: ollama pull whisper:large-v3")
-            return LocalWhisperClient(
+            logger.info("Auto-selected HuggingFace Whisper backend (install faster-whisper for 4x speedup)")
+            return HuggingFaceWhisperClient(
                 model_name=model_name or "openai/whisper-large-v3",
                 **kwargs
             )
+
+    elif env_backend in ("faster", "faster-whisper", "ctranslate2"):
+        logger.info("Using faster-whisper backend")
+        return FasterWhisperClient(
+            model_size=model_name or "base",
+            **kwargs
+        )
 
     elif env_backend in ("ollama",):
         logger.info("Using Ollama Whisper backend")
@@ -511,7 +675,7 @@ def get_transcription_client(
 
     elif env_backend in ("hf", "huggingface", "transformers"):
         logger.info("Using HuggingFace Whisper backend")
-        return LocalWhisperClient(
+        return HuggingFaceWhisperClient(
             model_name=model_name or "openai/whisper-large-v3",
             **kwargs
         )

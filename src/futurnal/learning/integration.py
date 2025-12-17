@@ -17,9 +17,12 @@ Option B Compliance:
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from futurnal.learning.world_state import (
@@ -31,13 +34,21 @@ from futurnal.learning.curriculum import (
     CurriculumGenerator,
     DocumentComplexity,
 )
-from futurnal.learning.token_priors import TokenPriorStore
+from futurnal.learning.token_priors import (
+    TokenPriorStore,
+    EntityTypePrior,
+    RelationTypePrior,
+    TemporalPatternPrior,
+)
 
 if TYPE_CHECKING:
     from futurnal.extraction.schema.experiential import TrainingFreeGRPO
     from futurnal.extraction.schema.models import ThoughtTemplate
 
 logger = logging.getLogger(__name__)
+
+# Default persistence path
+DEFAULT_LEARNING_STATE_PATH = Path.home() / ".futurnal" / "workspace" / "learning"
 
 
 # Quality gate threshold
@@ -144,6 +155,8 @@ class LearningState:
             "total_documents_processed": self.total_documents_processed,
             "total_successful": self.total_successful,
             "total_failed": self.total_failed,
+            "cumulative_quality_before": self.cumulative_quality_before,
+            "cumulative_quality_after": self.cumulative_quality_after,
             "overall_success_rate": self.overall_success_rate,
             "overall_quality_improvement": self.overall_quality_improvement,
             "passes_quality_gate": self.passes_quality_gate,
@@ -152,6 +165,23 @@ class LearningState:
             "started_at": self.started_at.isoformat(),
             "last_updated": self.last_updated.isoformat(),
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "LearningState":
+        """Create LearningState from dictionary."""
+        state = cls()
+        state.total_documents_processed = data.get("total_documents_processed", 0)
+        state.total_successful = data.get("total_successful", 0)
+        state.total_failed = data.get("total_failed", 0)
+        state.cumulative_quality_before = data.get("cumulative_quality_before", 0.0)
+        state.cumulative_quality_after = data.get("cumulative_quality_after", 0.0)
+        state.batches_processed = data.get("batches_processed", 0)
+        state.patterns_in_store = data.get("patterns_in_store", 0)
+        if data.get("started_at"):
+            state.started_at = datetime.fromisoformat(data["started_at"])
+        if data.get("last_updated"):
+            state.last_updated = datetime.fromisoformat(data["last_updated"])
+        return state
 
 
 class ExperientialLearningPipeline:
@@ -516,3 +546,284 @@ class ExperientialLearningPipeline:
                 export_sections.append(f"- {pattern}")
 
         return "\n".join(export_sections)
+
+    # =========================================================================
+    # Persistence Methods
+    # =========================================================================
+
+    def save_state(self, path: Optional[Path] = None) -> None:
+        """Persist learning state and token priors to disk.
+
+        Args:
+            path: Directory to save state. Defaults to DEFAULT_LEARNING_STATE_PATH.
+        """
+        save_path = path or DEFAULT_LEARNING_STATE_PATH
+        save_path.mkdir(parents=True, exist_ok=True)
+
+        state_file = save_path / "learning_state.json"
+        priors_file = save_path / "token_priors.json"
+
+        # Save learning state
+        state_data = self.state.to_dict()
+        with open(state_file, "w") as f:
+            json.dump(state_data, f, indent=2)
+
+        # Save token priors
+        priors_data = {
+            "entity_priors": {k: v.to_dict() for k, v in self.token_store.entity_priors.items()},
+            "relation_priors": {k: v.to_dict() for k, v in self.token_store.relation_priors.items()},
+            "temporal_priors": {k: v.to_dict() for k, v in self.token_store.temporal_priors.items()},
+            "total_updates": self.token_store.total_updates,
+            "created_at": self.token_store.created_at.isoformat(),
+        }
+        with open(priors_file, "w") as f:
+            json.dump(priors_data, f, indent=2)
+
+        logger.info(f"Saved learning state to {save_path}")
+
+    def load_state(self, path: Optional[Path] = None) -> bool:
+        """Load learning state and token priors from disk.
+
+        Args:
+            path: Directory to load state from. Defaults to DEFAULT_LEARNING_STATE_PATH.
+
+        Returns:
+            True if state was loaded, False if no state file found.
+        """
+        load_path = path or DEFAULT_LEARNING_STATE_PATH
+        state_file = load_path / "learning_state.json"
+        priors_file = load_path / "token_priors.json"
+
+        if not state_file.exists():
+            logger.debug(f"No learning state file found at {state_file}")
+            return False
+
+        try:
+            # Load learning state
+            with open(state_file, "r") as f:
+                state_data = json.load(f)
+            self.state = LearningState.from_dict(state_data)
+
+            # Load token priors if file exists
+            if priors_file.exists():
+                with open(priors_file, "r") as f:
+                    priors_data = json.load(f)
+
+                # Reconstruct entity priors
+                for key, data in priors_data.get("entity_priors", {}).items():
+                    prior = EntityTypePrior(
+                        entity_type=data["entity_type"],
+                        frequency=data.get("frequency", 0),
+                        confidence=data.get("confidence", 0.5),
+                        context_pattern=data.get("context_pattern", ""),
+                        examples=data.get("examples", []),
+                        success_count=data.get("success_count", 0),
+                        failure_count=data.get("failure_count", 0),
+                    )
+                    if data.get("created_at"):
+                        prior.created_at = datetime.fromisoformat(data["created_at"])
+                    if data.get("updated_at"):
+                        prior.updated_at = datetime.fromisoformat(data["updated_at"])
+                    self.token_store.entity_priors[key] = prior
+
+                # Reconstruct relation priors
+                for key, data in priors_data.get("relation_priors", {}).items():
+                    prior = RelationTypePrior(
+                        relation_type=data["relation_type"],
+                        frequency=data.get("frequency", 0),
+                        confidence=data.get("confidence", 0.5),
+                        subject_types=data.get("subject_types", []),
+                        object_types=data.get("object_types", []),
+                        context_pattern=data.get("context_pattern", ""),
+                        examples=data.get("examples", []),
+                        success_count=data.get("success_count", 0),
+                        failure_count=data.get("failure_count", 0),
+                    )
+                    if data.get("created_at"):
+                        prior.created_at = datetime.fromisoformat(data["created_at"])
+                    if data.get("updated_at"):
+                        prior.updated_at = datetime.fromisoformat(data["updated_at"])
+                    self.token_store.relation_priors[key] = prior
+
+                # Reconstruct temporal priors
+                for key, data in priors_data.get("temporal_priors", {}).items():
+                    prior = TemporalPatternPrior(
+                        pattern_type=data["pattern_type"],
+                        frequency=data.get("frequency", 0),
+                        confidence=data.get("confidence", 0.5),
+                        extraction_guidance=data.get("extraction_guidance", ""),
+                        examples=data.get("examples", []),
+                        success_count=data.get("success_count", 0),
+                        failure_count=data.get("failure_count", 0),
+                    )
+                    if data.get("created_at"):
+                        prior.created_at = datetime.fromisoformat(data["created_at"])
+                    if data.get("updated_at"):
+                        prior.updated_at = datetime.fromisoformat(data["updated_at"])
+                    self.token_store.temporal_priors[key] = prior
+
+                self.token_store.total_updates = priors_data.get("total_updates", 0)
+                if priors_data.get("created_at"):
+                    self.token_store.created_at = datetime.fromisoformat(priors_data["created_at"])
+
+            logger.info(
+                f"Loaded learning state: {self.state.total_documents_processed} docs, "
+                f"{len(self.token_store.entity_priors)} entity priors, "
+                f"{len(self.token_store.relation_priors)} relation priors"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to load learning state: {e}")
+            return False
+
+    def record_document(
+        self,
+        document_id: str,
+        content: str,
+        source: str = "chat",
+        content_type: str = "text",
+        success: bool = True,
+        quality_score: Optional[float] = None,
+        entity_types: Optional[List[str]] = None,
+        relation_types: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Record a single document processing to the learning pipeline.
+
+        Simplified method for tracking document processing without full batch
+        processing. Updates state and priors, then persists.
+
+        Args:
+            document_id: Unique identifier for the document
+            content: Extracted text content
+            source: Source of the document (chat, ingestion, etc.)
+            content_type: Type of content (text, image, audio, document)
+            success: Whether extraction was successful
+            quality_score: Optional quality score (0-1). If None, estimated from content.
+            entity_types: Entity types discovered in the content
+            relation_types: Relationship types discovered
+
+        Returns:
+            Dict with recording stats
+        """
+        # Estimate quality if not provided
+        if quality_score is None:
+            # Simple heuristic: longer content with more structure = higher quality
+            content_len = len(content) if content else 0
+            if content_len > 1000:
+                quality_score = 0.8
+            elif content_len > 500:
+                quality_score = 0.7
+            elif content_len > 100:
+                quality_score = 0.6
+            else:
+                quality_score = 0.4
+
+        # Baseline quality (before learning)
+        quality_before = 0.5  # Default baseline
+
+        # Update state
+        self.state.total_documents_processed += 1
+        if success:
+            self.state.total_successful += 1
+        else:
+            self.state.total_failed += 1
+        self.state.cumulative_quality_before += quality_before
+        self.state.cumulative_quality_after += quality_score
+        self.state.last_updated = datetime.utcnow()
+
+        # Update token priors
+        # Default entity types based on content type
+        if entity_types is None:
+            entity_types = ["Document"]
+            if content_type == "image":
+                entity_types.append("Image")
+            elif content_type == "audio":
+                entity_types.append("Audio")
+
+        # Update entity priors
+        for entity_type in entity_types:
+            self.token_store._update_entity_prior(entity_type, success)
+
+        # Update relation priors
+        if relation_types:
+            for relation_type in relation_types:
+                self.token_store._update_relation_prior(relation_type, success)
+
+        # Update patterns count
+        self.state.patterns_in_store = (
+            len(self.token_store.entity_priors) +
+            len(self.token_store.relation_priors) +
+            len(self.token_store.temporal_priors)
+        )
+
+        # Persist state
+        self.save_state()
+
+        logger.info(
+            f"Recorded document {document_id}: "
+            f"quality={quality_score:.2f}, success={success}, "
+            f"total_docs={self.state.total_documents_processed}"
+        )
+
+        return {
+            "document_id": document_id,
+            "success": success,
+            "quality_score": quality_score,
+            "total_documents": self.state.total_documents_processed,
+            "overall_success_rate": self.state.overall_success_rate,
+            "entity_priors": len(self.token_store.entity_priors),
+            "relation_priors": len(self.token_store.relation_priors),
+        }
+
+
+# =============================================================================
+# Persistent Pipeline Singleton
+# =============================================================================
+
+_PIPELINE_INSTANCE: Optional[ExperientialLearningPipeline] = None
+
+
+def get_persistent_pipeline(
+    force_reload: bool = False,
+    state_path: Optional[Path] = None,
+) -> ExperientialLearningPipeline:
+    """Get the persistent ExperientialLearningPipeline singleton.
+
+    This function ensures only one pipeline instance exists and that it
+    loads its state from disk on first access.
+
+    Args:
+        force_reload: If True, reload state from disk even if instance exists.
+        state_path: Optional custom path for state storage.
+
+    Returns:
+        The singleton ExperientialLearningPipeline instance.
+
+    Example:
+        >>> pipeline = get_persistent_pipeline()
+        >>> pipeline.record_document("doc_123", "extracted text")
+        >>> # State is automatically persisted
+    """
+    global _PIPELINE_INSTANCE
+
+    if _PIPELINE_INSTANCE is None or force_reload:
+        _PIPELINE_INSTANCE = ExperientialLearningPipeline()
+        _PIPELINE_INSTANCE.load_state(state_path)
+        logger.info(
+            f"Initialized persistent pipeline: "
+            f"{_PIPELINE_INSTANCE.state.total_documents_processed} docs loaded"
+        )
+
+    return _PIPELINE_INSTANCE
+
+
+def reset_persistent_pipeline() -> None:
+    """Reset the persistent pipeline singleton.
+
+    Clears the in-memory instance. Next call to get_persistent_pipeline()
+    will create a new instance and load from disk.
+    """
+    global _PIPELINE_INSTANCE
+    _PIPELINE_INSTANCE = None
+    logger.info("Reset persistent pipeline singleton")

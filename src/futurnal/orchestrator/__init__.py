@@ -33,6 +33,20 @@ from .crash_recovery import (
     RecoveryStateTracker,
     CrashRecoveryManager,
 )
+from .insight_jobs import (
+    InsightJobExecutor,
+    InsightJobResult,
+    InsightScheduleConfig,
+    create_insight_schedule,
+)
+from .autonomous_loop import (
+    AutonomousEventBus,
+    AutonomousEventType,
+    AutonomousEvent,
+    AutonomousLoop,
+    AutonomousLoopConfig,
+    create_autonomous_loop,
+)
 
 __all__ = [
     "JobStatus",
@@ -63,6 +77,18 @@ __all__ = [
     "CrashRecoveryReport",
     "RecoveryStateTracker",
     "CrashRecoveryManager",
+    # Insight jobs
+    "InsightJobExecutor",
+    "InsightJobResult",
+    "InsightScheduleConfig",
+    "create_insight_schedule",
+    # Autonomous loop
+    "AutonomousEventBus",
+    "AutonomousEventType",
+    "AutonomousEvent",
+    "AutonomousLoop",
+    "AutonomousLoopConfig",
+    "create_autonomous_loop",
 ]
 
 

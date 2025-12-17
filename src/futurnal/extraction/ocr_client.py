@@ -467,6 +467,15 @@ class TesseractOCRClient:
 # =============================================================================
 
 
+def ocr_available() -> bool:
+    """Check if any OCR backend is available.
+
+    Returns:
+        True if either DeepSeek-OCR or Tesseract is available
+    """
+    return deepseek_available() or tesseract_available()
+
+
 def deepseek_available() -> bool:
     """Check if DeepSeek-OCR model is available.
 

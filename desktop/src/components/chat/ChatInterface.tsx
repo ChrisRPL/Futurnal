@@ -21,9 +21,11 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { MessageSquare, X, Link2, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
+import { multimodalApi } from '@/lib/multimodalApi';
 import { ChatBubble } from './ChatBubble';
 import { MessageLoading } from './MessageLoading';
 import { ChatInput, type Attachment } from './ChatInput';
+import { ChatModelSelector } from './ChatModelSelector';
 
 interface ChatInterfaceProps {
   /** Session ID to use (creates new if not provided) */
@@ -55,6 +57,7 @@ export function ChatInterface({
   className,
 }: ChatInterfaceProps) {
   const [input, setInput] = useState('');
+  const [processingStatus, setProcessingStatus] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -105,25 +108,147 @@ export function ChatInterface({
   }, [error, clearError]);
 
   // Handle send message
+  // Step 08: Frontend Intelligence Integration - DeepSeek-OCR and document processing
+  // UX: Show attachment chips (like ChatGPT), send extracted content as context to AI
   const handleSubmit = useCallback(
     async (text: string, attachments?: Attachment[]) => {
       if (!text.trim() && (!attachments || attachments.length === 0)) return;
-      if (isLoading) return;
+      if (isLoading || processingStatus) return;
 
-      // TODO: Handle attachments (send to vision/OCR models)
-      if (attachments && attachments.length > 0) {
-        console.log('Attachments:', attachments);
-        // For now, just append info about attachments to the message
-        const attachmentInfo = attachments
-          .map((a) => `[Attached: ${a.name}]`)
-          .join(' ');
-        text = `${text}\n\n${attachmentInfo}`;
+      // Clear input immediately for responsive UX
+      setInput('');
+
+      // If no attachments, send immediately
+      if (!attachments || attachments.length === 0) {
+        await sendMessage(text);
+        return;
       }
 
-      setInput('');
-      await sendMessage(text);
+      // Show processing status for attachments
+      setProcessingStatus(`Analyzing ${attachments.length} attachment${attachments.length > 1 ? 's' : ''}...`);
+      console.log('[Chat] Processing attachments:', attachments.length);
+
+      // Build context from attachments (sent to AI but not shown in UI)
+      const extractedContents: string[] = [];
+
+      // Process attachments with multimodal API
+      for (let i = 0; i < attachments.length; i++) {
+        const attachment = attachments[i];
+        setProcessingStatus(`Processing ${attachment.name} (${i + 1}/${attachments.length})...`);
+
+        try {
+          const arrayBuffer = await attachment.file.arrayBuffer();
+          const data = new Uint8Array(arrayBuffer);
+
+          if (attachment.type === 'image') {
+            // Process image with BOTH OCR and vision model for comprehensive understanding
+            const contentParts: string[] = [];
+
+            // 1. OCR for text extraction
+            console.log('[Chat] Analyzing image with OCR:', attachment.name);
+            const ocrResult = await multimodalApi.analyzeImage(data);
+
+            if (ocrResult.success && ocrResult.text.trim()) {
+              contentParts.push(`Text extracted:\n${ocrResult.text.trim()}`);
+              console.log('[Chat] OCR extracted:', ocrResult.text.length, 'chars');
+            }
+
+            // 2. Vision model for visual understanding (always run)
+            console.log('[Chat] Analyzing image with vision model:', attachment.name);
+            setProcessingStatus(`Analyzing image content (${i + 1}/${attachments.length})...`);
+
+            const visionResult = await multimodalApi.describeImage(data);
+
+            if (visionResult.success && visionResult.description.trim()) {
+              contentParts.push(`Visual description:\n${visionResult.description.trim()}`);
+              console.log('[Chat] Vision model described image:', visionResult.description.length, 'chars');
+            } else {
+              console.log('[Chat] Vision model unavailable or failed:', visionResult.error);
+            }
+
+            // Combine results
+            if (contentParts.length > 0) {
+              extractedContents.push(`[Image: ${attachment.name}]\n${contentParts.join('\n\n')}`);
+
+              // Record to learning pipeline
+              multimodalApi.recordDocumentLearning({
+                content: contentParts.join('\n\n'),
+                source: 'chat',
+                contentType: 'image',
+                success: true,
+                entityTypes: ['Image', 'Document'],
+              }).then(result => {
+                if (result.success) {
+                  console.log('[Chat] Learning recorded for image:', result.documentId);
+                }
+              }).catch(e => console.warn('[Chat] Learning record failed:', e));
+            } else {
+              extractedContents.push(`[Image: ${attachment.name}] (could not extract text or visual description)`);
+            }
+          } else {
+            // Process document through normalization pipeline
+            console.log('[Chat] Processing document:', attachment.name);
+            const docResult = await multimodalApi.processDocument(data, attachment.name);
+
+            if (docResult.success && docResult.text.trim()) {
+              extractedContents.push(`[Document: ${attachment.name}]\n${docResult.text}`);
+              console.log('[Chat] Document processed:', docResult.wordCount, 'words');
+
+              // Record to learning pipeline
+              multimodalApi.recordDocumentLearning({
+                content: docResult.text,
+                source: 'chat',
+                contentType: 'document',
+                success: true,
+                entityTypes: ['Document'],
+              }).then(result => {
+                if (result.success) {
+                  console.log('[Chat] Learning recorded for document:', result.documentId);
+                }
+              }).catch(e => console.warn('[Chat] Learning record failed:', e));
+            } else if (docResult.error) {
+              extractedContents.push(`[Document: ${attachment.name}] (processing failed: ${docResult.error})`);
+              console.warn('[Chat] Document processing error:', docResult.error);
+            }
+          }
+        } catch (err) {
+          console.error('[Chat] Attachment processing failed:', attachment.name, err);
+          extractedContents.push(`[${attachment.type === 'image' ? 'Image' : 'Document'}: ${attachment.name}] (failed to process)`);
+
+          // Record failure to learning pipeline
+          multimodalApi.recordDocumentLearning({
+            content: '',
+            source: 'chat',
+            contentType: attachment.type === 'image' ? 'image' : 'document',
+            success: false,
+          }).catch(e => console.warn('[Chat] Learning record failed:', e));
+        }
+      }
+
+      // Build attachment metadata for display
+      const chatAttachments = attachments.map(a => ({
+        id: a.id,
+        type: a.type as 'image' | 'document',
+        name: a.name,
+        preview: a.preview,
+        status: 'success' as const,
+      }));
+
+      // Build hidden context for AI
+      const hiddenContext = extractedContents.length > 0
+        ? extractedContents.join('\n\n')
+        : undefined;
+
+      setProcessingStatus(null);
+
+      // Send message with attachments metadata and hidden context
+      await sendMessage({
+        content: text,
+        hiddenContext,
+        attachments: chatAttachments,
+      });
     },
-    [isLoading, sendMessage]
+    [isLoading, processingStatus, sendMessage]
   );
 
   // Handle clear conversation
@@ -142,7 +267,9 @@ export function ChatInterface({
           Chat with Knowledge
         </span>
 
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-2">
+          {/* Model selector */}
+          <ChatModelSelector />
           {/* Clear button */}
           {messages.length > 0 && (
             <button
@@ -234,6 +361,14 @@ export function ChatInterface({
           />
         ))}
 
+        {/* Processing attachments indicator */}
+        {processingStatus && (
+          <div className="flex items-center gap-3 px-4 py-3 bg-white/5 border border-white/10 animate-pulse">
+            <div className="h-2 w-2 bg-white/60 rounded-full animate-ping" />
+            <span className="text-sm text-white/70">{processingStatus}</span>
+          </div>
+        )}
+
         {/* Loading indicator */}
         {isLoading && <MessageLoading />}
 
@@ -247,14 +382,16 @@ export function ChatInterface({
           value={input}
           onChange={setInput}
           onSubmit={handleSubmit}
-          isLoading={isLoading}
+          isLoading={isLoading || !!processingStatus}
           enableVoice={enableVoice}
           enableImages={enableImages}
           enableFiles={enableFiles}
           placeholder={
-            storeContextEntity
-              ? `Ask about ${storeContextEntity}...`
-              : 'Ask about your knowledge...'
+            processingStatus
+              ? processingStatus
+              : storeContextEntity
+                ? `Ask about ${storeContextEntity}...`
+                : 'Ask about your knowledge...'
           }
         />
 

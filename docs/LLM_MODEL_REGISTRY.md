@@ -87,26 +87,27 @@
 **Implementation**: `src/futurnal/extraction/whisper_client.py`
 **Fallback**: HuggingFace Transformers
 
-### 9. Kimi-K2-Thinking ✅
+### 9. Kimi-K2-Thinking ✅ (Cloud)
 **Model**: `moonshotai/Kimi-K2-Thinking`
-**Status**: Integrated
-**VRAM**: ~16GB (4-bit quantized)
-**Use Case**: Complex reasoning tasks, advanced thinking
-**Pros**: Advanced reasoning capabilities, alternative to Llama 3.3 70B
-**Cons**: May require custom Ollama model setup
+**Ollama**: `kimi-k2-thinking:cloud` (remote inference)
+**Status**: Integrated (Cloud-based)
+**VRAM**: Cloud (no local VRAM needed)
+**Use Case**: Complex reasoning tasks, deep thinking, 200-300 tool calls
+**Pros**: 1T MoE (32B active), step-by-step reasoning, agentic capabilities
+**Cons**: Requires internet, cloud inference
 **Access**: `FUTURNAL_PRODUCTION_LLM=kimi`
 **Implementation**: `src/futurnal/extraction/local_llm_client.py`
 
-### 10. GPT-OSS-20B-Derestricted ✅
-**Model**: `ArliAI/gpt-oss-20b-Derestricted`
+### 10. GPT-OSS-20B ✅
+**Model**: `ArliAI/gpt-oss-20b`
+**Ollama**: `gpt-oss:20b`
 **Status**: Integrated
 **VRAM**: ~12GB (4-bit quantized)
-**Use Case**: Unrestricted content processing
-**Pros**: No content moderation guardrails, useful for research
-**Cons**: Use responsibly - no safety filters
+**Use Case**: Large local 20B model
+**Pros**: Runs locally, good reasoning
+**Cons**: Requires 12GB VRAM
 **Access**: `FUTURNAL_PRODUCTION_LLM=gpt-oss`
 **Implementation**: `src/futurnal/extraction/local_llm_client.py`
-**Warning**: Use carefully, ensure compliance with use case
 
 ---
 
@@ -131,7 +132,7 @@
 |-----------|-----------------------------|-------------|
 | 4GB       | Phi-3 Mini 3.8B            | Fast/Basic  |
 | 5-8GB     | Bielik 4.5B / Llama 3.1 8B | Good        |
-| 12GB      | GPT-OSS-20B                | Good (unrestricted) |
+| 12GB      | GPT-OSS-20B                | Good        |
 | 16GB      | Qwen 2.5 32B / Kimi-K2     | Excellent   |
 | 24GB+     | Llama 3.3 70B              | Best        |
 
@@ -143,7 +144,7 @@
 | Entity extraction (PL)  | Bielik 4.5B v3        | ✅ Integrated |
 | Reasoning tasks         | Llama 3.3 70B / Kimi-K2 | ✅ Integrated |
 | Advanced reasoning      | Kimi-K2-Thinking      | ✅ Integrated |
-| Unrestricted content    | GPT-OSS-20B           | ✅ Integrated |
+| Large local 20B         | GPT-OSS-20B           | ✅ Integrated |
 | Fast testing            | Phi-3 Mini            | ✅ Integrated |
 | OCR preprocessing       | DeepSeek-OCR          | ✅ Integrated (Module 08) |
 | Audio transcription     | Whisper V3            | ✅ Integrated (Module 08) |
@@ -167,8 +168,8 @@
 - Llama 3.3 70B
 - Bielik 4.5B v3 (Polish)
 - Qwen 2.5 32B (with network caveats)
-- **Kimi-K2-Thinking** - Advanced reasoning via `FUTURNAL_PRODUCTION_LLM=kimi`
-- **GPT-OSS-20B-Derestricted** - Unrestricted use via `FUTURNAL_PRODUCTION_LLM=gpt-oss`
+- **Kimi-K2-Thinking** - Cloud reasoning via `FUTURNAL_PRODUCTION_LLM=kimi` (remote inference)
+- **GPT-OSS-20B** - Local 20B via `FUTURNAL_PRODUCTION_LLM=gpt-oss`
 
 ### ✅ Ready to Use (Module 08: Multimodal)
 - **NVIDIA Orchestrator-8B** - Agentic coordination via `orchestrator_client.py`
@@ -212,18 +213,18 @@ export FUTURNAL_PRODUCTION_LLM=auto
 pytest tests/ -v
 ```
 
-### Advanced Reasoning (Kimi-K2)
+### Advanced Reasoning (Kimi-K2 Cloud)
 ```bash
 export FUTURNAL_PRODUCTION_LLM=kimi
 pytest tests/ -v
-# Alternative to Llama 3.3 70B for complex reasoning
+# Uses cloud inference for 1T MoE model
 ```
 
-### Unrestricted Content (GPT-OSS-20B)
+### Local 20B Model (GPT-OSS)
 ```bash
 export FUTURNAL_PRODUCTION_LLM=gpt-oss
 pytest tests/ -v
-# WARNING: No content moderation - use responsibly
+# Requires 12GB VRAM
 ```
 
 ---

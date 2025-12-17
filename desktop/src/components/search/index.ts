@@ -13,3 +13,4 @@ export { IntentBadge } from './IntentBadge';
 export { SearchTrigger } from './SearchTrigger';
 export { ModelSelector } from './ModelSelector';
 export { StreamingAnswer } from './StreamingAnswer';
+export { TemporalQuery } from './TemporalQuery';

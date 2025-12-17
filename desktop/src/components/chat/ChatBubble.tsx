@@ -2,18 +2,24 @@
  * ChatBubble - Message bubble component with avatar and actions
  *
  * Step 03: Chat Interface & Conversational AI
+ * Step 08: Experiential Learning Integration
  *
  * Research Foundation:
  * - ProPerSim (2509.21730v1): Session tracking
  * - Causal-Copilot (2504.13263v2): Confidence scoring
+ * - RLHI: Reinforcement Learning from Human Interactions
+ * - AgentFlow: Learning from explicit user feedback
  *
  * Styling: Per frontend-design.mdc - monochrome, dark-mode first
  */
 
 import { useState } from 'react';
-import { Copy, Check, BookOpen, Link2, Bot, User } from 'lucide-react';
+import { Copy, Check, BookOpen, Link2, Bot, User, FileText, ImageIcon, AlertCircle, ThumbsUp, ThumbsDown } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
-import type { ChatMessage } from '@/types/chat';
+import { multimodalApi } from '@/lib/multimodalApi';
+import type { ChatMessage, ChatAttachment } from '@/types/chat';
 
 interface ChatBubbleProps {
   message: ChatMessage;
@@ -94,6 +100,96 @@ function MessageActions({
         ) : (
           <Copy className="h-3 w-3" />
         )}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Feedback buttons for explicit learning
+ *
+ * Research Foundation:
+ * - RLHI: Reinforcement Learning from Human Interactions
+ * - AgentFlow: Explicit feedback for continuous improvement
+ *
+ * When users provide feedback, it's recorded to the learning pipeline
+ * to improve future responses. This is what makes the system feel smarter
+ * over time - their feedback actually matters.
+ */
+function FeedbackButtons({
+  content,
+  entityRefs,
+  className,
+}: {
+  content: string;
+  entityRefs: string[];
+  className?: string;
+}) {
+  const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+
+  const handleFeedback = async (isPositive: boolean) => {
+    if (feedback !== null || isRecording) return;
+
+    setIsRecording(true);
+    const feedbackType = isPositive ? 'up' : 'down';
+
+    try {
+      // Record to learning pipeline
+      await multimodalApi.recordDocumentLearning({
+        content: content.slice(0, 500),
+        source: 'chat_feedback',
+        contentType: 'user_feedback',
+        success: isPositive,
+        qualityScore: isPositive ? 0.9 : 0.3,
+        entityTypes: ['UserFeedback', ...(isPositive ? ['GoodResponse'] : ['BadResponse']), ...entityRefs.slice(0, 3)],
+        relationTypes: isPositive ? ['APPROVED_BY_USER'] : ['REJECTED_BY_USER'],
+      });
+
+      setFeedback(feedbackType);
+      console.log(`[Chat] User feedback recorded: ${feedbackType}`);
+    } catch (err) {
+      console.warn('[Chat] Failed to record feedback:', err);
+      // Still show the feedback state locally even if recording failed
+      setFeedback(feedbackType);
+    } finally {
+      setIsRecording(false);
+    }
+  };
+
+  return (
+    <div className={cn('flex items-center gap-0.5', className)}>
+      <button
+        onClick={() => handleFeedback(true)}
+        disabled={feedback !== null || isRecording}
+        className={cn(
+          'p-1 transition-all',
+          feedback === 'up'
+            ? 'text-green-400'
+            : feedback === 'down'
+              ? 'text-white/20 cursor-default'
+              : 'text-white/40 hover:text-green-400 hover:bg-white/5',
+          isRecording && 'opacity-50'
+        )}
+        title="Good response - helps me learn"
+      >
+        <ThumbsUp className="h-3 w-3" />
+      </button>
+      <button
+        onClick={() => handleFeedback(false)}
+        disabled={feedback !== null || isRecording}
+        className={cn(
+          'p-1 transition-all',
+          feedback === 'down'
+            ? 'text-red-400'
+            : feedback === 'up'
+              ? 'text-white/20 cursor-default'
+              : 'text-white/40 hover:text-red-400 hover:bg-white/5',
+          isRecording && 'opacity-50'
+        )}
+        title="Needs improvement - helps me learn"
+      >
+        <ThumbsDown className="h-3 w-3" />
       </button>
     </div>
   );
@@ -207,6 +303,94 @@ function EntityRefsList({
 }
 
 /**
+ * Attachment chip component - displays file attachments as compact widgets
+ */
+function AttachmentChip({
+  attachment,
+  isUserMessage,
+  className,
+}: {
+  attachment: ChatAttachment;
+  isUserMessage: boolean;
+  className?: string;
+}) {
+  const isImage = attachment.type === 'image';
+  const hasError = attachment.status === 'error';
+
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-2 px-2 py-1.5 rounded',
+        isUserMessage
+          ? 'bg-black/10'
+          : 'bg-white/5 border border-white/10',
+        hasError && 'border-red-500/30',
+        className
+      )}
+    >
+      {/* Icon or image preview */}
+      {isImage && attachment.preview ? (
+        <img
+          src={attachment.preview}
+          alt={attachment.name}
+          className="w-8 h-8 object-cover rounded"
+        />
+      ) : isImage ? (
+        <ImageIcon className={cn(
+          'w-4 h-4',
+          isUserMessage ? 'text-black/60' : 'text-white/60'
+        )} />
+      ) : (
+        <FileText className={cn(
+          'w-4 h-4',
+          isUserMessage ? 'text-black/60' : 'text-white/60'
+        )} />
+      )}
+
+      {/* File name */}
+      <span className={cn(
+        'text-xs truncate max-w-[120px]',
+        isUserMessage ? 'text-black/80' : 'text-white/80'
+      )}>
+        {attachment.name}
+      </span>
+
+      {/* Status indicator */}
+      {hasError && (
+        <AlertCircle className="w-3 h-3 text-red-400 flex-shrink-0" />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Attachments list component
+ */
+function AttachmentsList({
+  attachments,
+  isUserMessage,
+  className,
+}: {
+  attachments?: ChatAttachment[];
+  isUserMessage: boolean;
+  className?: string;
+}) {
+  if (!attachments || attachments.length === 0) return null;
+
+  return (
+    <div className={cn('flex flex-wrap gap-1.5', className)}>
+      {attachments.map((attachment) => (
+        <AttachmentChip
+          key={attachment.id}
+          attachment={attachment}
+          isUserMessage={isUserMessage}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
  * Main ChatBubble component
  */
 export function ChatBubble({
@@ -243,10 +427,26 @@ export function ChatBubble({
               : 'bg-white/5 text-white/90 border border-white/10'
           )}
         >
-          {/* Message text */}
-          <div className="text-sm leading-relaxed whitespace-pre-wrap">
-            {message.content}
-          </div>
+          {/* Attachments (shown first for user messages) */}
+          {isUser && message.attachments && message.attachments.length > 0 && (
+            <AttachmentsList
+              attachments={message.attachments}
+              isUserMessage={isUser}
+              className="mb-2"
+            />
+          )}
+
+          {/* Message text with markdown support */}
+          {message.content && (
+            <div className={cn(
+              'text-sm leading-relaxed chat-markdown',
+              isUser ? 'chat-markdown-light' : 'chat-markdown-dark'
+            )}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {message.content}
+              </ReactMarkdown>
+            </div>
+          )}
 
           {/* Confidence indicator (assistant only) */}
           {!isUser && (
@@ -274,6 +474,13 @@ export function ChatBubble({
         {/* Message actions */}
         <div className="flex items-center gap-2 mt-1 px-1">
           <MessageActions content={message.content} />
+          {/* Feedback buttons (assistant only) - RLHI learning */}
+          {!isUser && (
+            <FeedbackButtons
+              content={message.content}
+              entityRefs={message.entityRefs}
+            />
+          )}
           <span className="text-xs text-white/30">
             {new Date(message.timestamp).toLocaleTimeString([], {
               hour: '2-digit',

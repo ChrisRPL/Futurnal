@@ -14,6 +14,7 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { CommandPalette } from '@/components/search';
 import { GraphMiniView } from '@/components/graph';
 import { ChatInterface } from '@/components/chat';
+import { ActivityStreamWidget } from '@/components/activity';
 import { ThemeLogo } from '@/components/ThemeLogo';
 import { useUIStore } from '@/stores/uiStore';
 import {
@@ -25,6 +26,7 @@ import {
   HardDrive,
   Database,
   LogOut,
+  Clock,
 } from 'lucide-react';
 
 // Pages
@@ -35,6 +37,7 @@ import ForgotPassword from '@/pages/ForgotPassword';
 import GraphPage from '@/pages/Graph';
 import ConnectorsPage from '@/pages/Connectors';
 import SettingsPage from '@/pages/Settings';
+import ActivityPage from '@/pages/Activity';
 
 /**
  * Get time-based greeting
@@ -264,7 +267,36 @@ function HomePage({ onOpenSearch }: HomePageProps) {
             icon={<Settings className="w-4 h-4" />}
             onClick={() => navigate('/settings')}
           />
+          <QuickAction
+            title="Activity"
+            icon={<Clock className="w-4 h-4" />}
+            onClick={() => navigate('/activity')}
+          />
         </div>
+
+        {/* Activity Stream Widget - Step 08: Frontend Intelligence Integration
+            Research Foundation:
+            - AgentFlow: Activity tracking patterns
+            - RLHI: User interaction history
+        */}
+        <details className="group border border-[var(--color-border)] mb-4" open>
+          <summary className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-[var(--color-surface)] transition-colors">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-[var(--color-text-tertiary)]" />
+              <span className="text-sm font-medium text-[var(--color-text-primary)]">Activity Stream</span>
+            </div>
+            <span className="text-xs text-[var(--color-text-tertiary)] group-open:hidden">Click to expand</span>
+            <button
+              onClick={(e) => { e.preventDefault(); navigate('/activity'); }}
+              className="text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hidden group-open:block"
+            >
+              Open full view →
+            </button>
+          </summary>
+          <div className="border-t border-[var(--color-border)]">
+            <ActivityStreamWidget maxEvents={8} />
+          </div>
+        </details>
 
         {/* Knowledge Graph Mini-View - Secondary, collapsible */}
         <details className="group border border-[var(--color-border)]">
@@ -380,6 +412,14 @@ function App() {
           element={
             <ProtectedRoute>
               <SettingsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/activity"
+          element={
+            <ProtectedRoute>
+              <ActivityPage />
             </ProtectedRoute>
           }
         />

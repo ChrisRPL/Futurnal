@@ -121,8 +121,8 @@ pub async fn send_chat_message(request: ChatRequest) -> Result<ChatResponse, Str
     // Convert to &str slice for execute_cli
     let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
-    // Execute Python CLI
-    let response: ChatResponse = match crate::python::execute_cli(&args_refs).await {
+    // Execute Python CLI with longer timeout for LLM inference
+    let response: ChatResponse = match crate::python::execute_cli_with_timeout(&args_refs, 120).await {
         Ok(resp) => resp,
         Err(e) => {
             log::warn!("Chat send CLI failed: {}", e);

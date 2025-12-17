@@ -114,10 +114,12 @@ async def test_manual_job_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 def test_paused_source_blocks_automatic_jobs(tmp_path: Path) -> None:
     queue = JobQueue(tmp_path / "queue.db")
     state_store = MemoryStateStore()
+    loop = asyncio.new_event_loop()
     orchestrator = IngestionOrchestrator(
         job_queue=queue,
         state_store=state_store,
         workspace_dir=str(tmp_path / "workspace"),
+        loop=loop,
     )
 
     root = tmp_path / "root"
@@ -140,4 +142,7 @@ def test_paused_source_blocks_automatic_jobs(tmp_path: Path) -> None:
 
     orchestrator.run_manual_job("notes", force=True)
     assert queue.pending_count() == 1
+
+    # Cleanup
+    loop.close()
 

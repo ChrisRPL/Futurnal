@@ -29,6 +29,10 @@ from futurnal.search.temporal.exceptions import (
     InsufficientDataError,
 )
 from futurnal.search.temporal.results import TemporalCorrelationResult
+from futurnal.search.temporal.statistics import (
+    StatisticalCorrelationValidator,
+    StatisticalSignificanceResult,
+)
 
 if TYPE_CHECKING:
     from futurnal.pkg.queries.temporal import TemporalGraphQueries
@@ -69,15 +73,25 @@ class TemporalCorrelationDetector:
         self,
         pkg_queries: "TemporalGraphQueries",
         config: Optional[TemporalSearchConfig] = None,
+        statistical_validation: bool = True,
+        significance_threshold: float = 0.05,
     ):
         """Initialize the correlation detector.
 
         Args:
             pkg_queries: PKG temporal queries service
             config: Optional configuration
+            statistical_validation: Enable rigorous statistical testing
+            significance_threshold: P-value threshold for significance
         """
         self._pkg = pkg_queries
         self._config = config or TemporalSearchConfig()
+        self._statistical_validation = statistical_validation
+
+        # Statistical validator for rigorous testing (AGI Phase 1 enhancement)
+        self._validator = StatisticalCorrelationValidator(
+            significance_threshold=significance_threshold,
+        ) if statistical_validation else None
 
     def detect_correlation(
         self,
@@ -171,11 +185,40 @@ class TemporalCorrelationDetector:
             # Calculate statistics
             stats = self._calculate_correlation_stats(co_occurrences)
 
+            # Calculate time range for statistical validation
+            time_range_days = (end_time - start_time).days if time_range else 365.0
+
+            # Statistical validation (AGI Phase 1 enhancement)
+            stat_result: Optional[StatisticalSignificanceResult] = None
+            is_statistically_significant = False
+
+            if self._validator and len(co_occurrences) >= 3:
+                gap_values = [gap for _, _, gap in co_occurrences]
+                stat_result = self._validator.validate_correlation(
+                    observed_cooccurrences=len(co_occurrences),
+                    total_events_a=len(events_a),
+                    total_events_b=len(events_b),
+                    time_range_days=time_range_days,
+                    max_gap_days=max_gap.days,
+                    gap_values=gap_values,
+                )
+                is_statistically_significant = stat_result.is_significant
+
+                logger.debug(
+                    f"Statistical validation for {event_type_a}->{event_type_b}: "
+                    f"p={stat_result.p_value:.4f}, significant={is_statistically_significant}"
+                )
+
             # Determine if this is a causal candidate
+            # Now requires both heuristic AND statistical significance
             is_causal_candidate = self._is_causal_candidate(
                 co_occurrences=len(co_occurrences),
                 gap_consistency=stats["consistency"],
             )
+
+            # Only flag as causal candidate if statistically significant
+            if self._statistical_validation and stat_result:
+                is_causal_candidate = is_causal_candidate and is_statistically_significant
 
             return TemporalCorrelationResult(
                 correlation_found=True,
@@ -189,6 +232,14 @@ class TemporalCorrelationDetector:
                 correlation_strength=stats["strength"],
                 is_causal_candidate=is_causal_candidate,
                 examples=co_occurrences[:5],  # First 5 examples
+                # Statistical significance fields (Phase 1 AGI)
+                p_value=stat_result.p_value if stat_result else None,
+                statistical_test=stat_result.test_used if stat_result else None,
+                is_statistically_significant=is_statistically_significant,
+                confidence_interval_95=stat_result.confidence_interval_95 if stat_result else None,
+                effect_size=stat_result.effect_size if stat_result else None,
+                effect_interpretation=stat_result.effect_interpretation if stat_result else None,
+                expected_by_chance=stat_result.expected_by_chance if stat_result else None,
             )
 
         except Exception as e:
@@ -319,16 +370,25 @@ class TemporalCorrelationDetector:
         time_range: Tuple[datetime, datetime],
         min_occurrences: Optional[int] = None,
         max_gap: Optional[timedelta] = None,
+        apply_multiple_testing_correction: bool = True,
+        correction_method: str = "bonferroni",
     ) -> List[TemporalCorrelationResult]:
         """Scan for all significant correlations in time range.
 
         Analyzes all pairs of event types to find temporal correlations.
         Useful for Phase 2 automated correlation discovery.
 
+        AGI Phase 1 Enhancement:
+        - Applies Bonferroni or FDR correction for multiple hypothesis testing
+        - Only returns correlations that pass corrected significance threshold
+        - Prevents "horoscope problem" of spurious patterns
+
         Args:
             time_range: (start, end) time range to analyze
             min_occurrences: Minimum co-occurrences for significance
             max_gap: Maximum gap for correlation
+            apply_multiple_testing_correction: Apply Bonferroni/FDR correction
+            correction_method: "bonferroni" (conservative) or "fdr" (less conservative)
 
         Returns:
             List of TemporalCorrelationResult for all found correlations,
@@ -340,6 +400,8 @@ class TemporalCorrelationDetector:
             ... )
             >>> for c in correlations[:10]:
             ...     print(f"{c.temporal_pattern}: strength={c.correlation_strength:.2f}")
+            ...     if c.is_statistically_significant:
+            ...         print(f"  p={c.p_value:.4f} (corrected: {c.corrected_p_value:.4f})")
         """
         if min_occurrences is None:
             min_occurrences = self._config.correlation_min_occurrences
@@ -370,6 +432,9 @@ class TemporalCorrelationDetector:
         event_types = list(events_by_type.keys())
         logger.debug(f"Found {len(event_types)} distinct event types")
 
+        # Calculate time range for statistical validation
+        time_range_days = (end_time - start_time).days
+
         # Check all pairs
         correlations: List[TemporalCorrelationResult] = []
 
@@ -383,6 +448,7 @@ class TemporalCorrelationDetector:
                     type_b=type_b,
                     max_gap=max_gap,
                     min_occurrences=min_occurrences,
+                    time_range_days=time_range_days,
                 )
                 if result_ab.correlation_found:
                     correlations.append(result_ab)
@@ -395,9 +461,26 @@ class TemporalCorrelationDetector:
                     type_b=type_a,
                     max_gap=max_gap,
                     min_occurrences=min_occurrences,
+                    time_range_days=time_range_days,
                 )
                 if result_ba.correlation_found:
                     correlations.append(result_ba)
+
+        # Apply multiple testing correction (AGI Phase 1)
+        if apply_multiple_testing_correction and self._validator and correlations:
+            correlations = self._apply_multiple_testing_correction(
+                correlations=correlations,
+                method=correction_method,
+            )
+            # Filter to only statistically significant after correction
+            significant_correlations = [
+                c for c in correlations if c.is_statistically_significant
+            ]
+            logger.info(
+                f"After {correction_method} correction: "
+                f"{len(significant_correlations)}/{len(correlations)} remain significant"
+            )
+            correlations = significant_correlations
 
         # Sort by correlation strength descending
         correlations.sort(
@@ -408,6 +491,56 @@ class TemporalCorrelationDetector:
         logger.info(f"Found {len(correlations)} significant correlations")
         return correlations
 
+    def _apply_multiple_testing_correction(
+        self,
+        correlations: List[TemporalCorrelationResult],
+        method: str = "bonferroni",
+    ) -> List[TemporalCorrelationResult]:
+        """Apply multiple testing correction to correlation results.
+
+        Args:
+            correlations: List of correlation results with p-values
+            method: "bonferroni" or "fdr"
+
+        Returns:
+            Updated correlations with corrected p-values and significance
+        """
+        if not self._validator:
+            return correlations
+
+        # Collect p-values
+        p_values = [c.p_value if c.p_value is not None else 1.0 for c in correlations]
+
+        # Apply correction
+        if method == "fdr":
+            corrections = self._validator.benjamini_hochberg_correction(p_values)
+        else:
+            corrections = self._validator.bonferroni_correction(p_values)
+
+        # Update results with corrected values
+        updated = []
+        for corr, (corrected_p, is_sig) in zip(correlations, corrections):
+            # Create updated result - use model_copy for Pydantic v2
+            if hasattr(corr, 'model_copy'):
+                updated_corr = corr.model_copy(update={
+                    "corrected_p_value": corrected_p,
+                    "is_statistically_significant": is_sig,
+                    # Update causal candidate based on corrected significance
+                    "is_causal_candidate": corr.is_causal_candidate and is_sig if self._statistical_validation else corr.is_causal_candidate,
+                })
+            else:
+                # Fallback for older Pydantic
+                data = corr.dict()
+                data["corrected_p_value"] = corrected_p
+                data["is_statistically_significant"] = is_sig
+                if self._statistical_validation:
+                    data["is_causal_candidate"] = data["is_causal_candidate"] and is_sig
+                updated_corr = TemporalCorrelationResult(**data)
+
+            updated.append(updated_corr)
+
+        return updated
+
     def _check_pair_correlation(
         self,
         events_a: List[EventNode],
@@ -416,6 +549,7 @@ class TemporalCorrelationDetector:
         type_b: str,
         max_gap: timedelta,
         min_occurrences: int,
+        time_range_days: float = 365.0,
     ) -> TemporalCorrelationResult:
         """Check correlation between a specific pair of event types."""
         co_occurrences = self._find_co_occurrences(
@@ -434,6 +568,30 @@ class TemporalCorrelationDetector:
 
         stats = self._calculate_correlation_stats(co_occurrences)
 
+        # Statistical validation (AGI Phase 1)
+        stat_result: Optional[StatisticalSignificanceResult] = None
+        is_statistically_significant = False
+
+        if self._validator and len(co_occurrences) >= 3:
+            gap_values = [gap for _, _, gap in co_occurrences]
+            stat_result = self._validator.validate_correlation(
+                observed_cooccurrences=len(co_occurrences),
+                total_events_a=len(events_a),
+                total_events_b=len(events_b),
+                time_range_days=time_range_days,
+                max_gap_days=max_gap.days,
+                gap_values=gap_values,
+            )
+            is_statistically_significant = stat_result.is_significant
+
+        is_causal_candidate = self._is_causal_candidate(
+            len(co_occurrences), stats["consistency"]
+        )
+
+        # Only flag as causal candidate if statistically significant
+        if self._statistical_validation and stat_result:
+            is_causal_candidate = is_causal_candidate and is_statistically_significant
+
         return TemporalCorrelationResult(
             correlation_found=True,
             event_type_a=type_a,
@@ -444,10 +602,16 @@ class TemporalCorrelationDetector:
             max_gap_days=stats["max_gap_days"],
             std_gap_days=stats["std_gap_days"],
             correlation_strength=stats["strength"],
-            is_causal_candidate=self._is_causal_candidate(
-                len(co_occurrences), stats["consistency"]
-            ),
+            is_causal_candidate=is_causal_candidate,
             examples=co_occurrences[:5],
+            # Statistical significance fields
+            p_value=stat_result.p_value if stat_result else None,
+            statistical_test=stat_result.test_used if stat_result else None,
+            is_statistically_significant=is_statistically_significant,
+            confidence_interval_95=stat_result.confidence_interval_95 if stat_result else None,
+            effect_size=stat_result.effect_size if stat_result else None,
+            effect_interpretation=stat_result.effect_interpretation if stat_result else None,
+            expected_by_chance=stat_result.expected_by_chance if stat_result else None,
         )
 
     def _normalize_datetime(self, dt: datetime) -> datetime:

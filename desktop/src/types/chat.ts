@@ -13,6 +13,28 @@
 // ============================================================================
 
 /**
+ * Attachment metadata for chat messages.
+ */
+export interface ChatAttachment {
+  /** Unique attachment ID */
+  id: string;
+  /** Attachment type */
+  type: 'image' | 'document';
+  /** Original filename */
+  name: string;
+  /** MIME type */
+  mimeType?: string;
+  /** File size in bytes */
+  size?: number;
+  /** Preview URL (for images) */
+  preview?: string;
+  /** Processing status */
+  status: 'pending' | 'processing' | 'success' | 'error';
+  /** Error message if failed */
+  error?: string;
+}
+
+/**
  * Individual chat message.
  *
  * Research Foundation:
@@ -22,8 +44,12 @@
 export interface ChatMessage {
   /** Message sender role */
   role: 'user' | 'assistant';
-  /** Message content */
+  /** Message content (visible to user) */
   content: string;
+  /** Hidden context sent to AI (extracted from attachments) */
+  hiddenContext?: string;
+  /** File attachments */
+  attachments?: ChatAttachment[];
   /** Source documents used */
   sources: string[];
   /** PKG entity references */

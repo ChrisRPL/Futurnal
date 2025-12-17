@@ -12,6 +12,7 @@ Responsibilities:
 3. Execute multi-strategy retrieval
 4. Fuse results with weighted combination
 5. Record feedback for GRPO learning
+6. AGI Phase 3: Dynamic weight optimization via SearchRankingOptimizer
 
 Integration Points:
 - TemporalQueryEngine: For temporal queries
@@ -19,11 +20,13 @@ Integration Points:
 - SchemaAwareRetrieval: For hybrid/lookup queries
 - SearchQualityFeedback: GRPO integration
 - QueryTemplateDatabase: Query understanding templates
+- SearchRankingOptimizer: AGI Phase 3 bidirectional learning
 
 Option B Compliance:
 - Ghost model FROZEN: LLM classification only
 - Experiential learning via SearchQualityFeedback
 - Temporal-first design: TEMPORAL queries prioritized
+- Dynamic weights via SearchRankingOptimizer (not model updates)
 """
 
 from __future__ import annotations
@@ -45,6 +48,7 @@ if TYPE_CHECKING:
     from futurnal.search.causal.retrieval import CausalChainRetrieval
     from futurnal.search.hybrid.retrieval import SchemaAwareRetrieval
     from futurnal.search.hybrid.routing.feedback import SearchQualityFeedback
+    from futurnal.search.hybrid.routing.optimizer import SearchRankingOptimizer
     from futurnal.search.hybrid.routing.templates import (
         QueryTemplate,
         QueryTemplateDatabase,
@@ -117,6 +121,7 @@ class QueryRouter:
         intent_classifier: Optional[IntentClassifierLLM] = None,
         grpo_feedback: Optional["SearchQualityFeedback"] = None,
         template_db: Optional["QueryTemplateDatabase"] = None,
+        optimizer: Optional["SearchRankingOptimizer"] = None,
     ):
         """Initialize QueryRouter.
 
@@ -127,6 +132,7 @@ class QueryRouter:
             intent_classifier: Intent classifier (auto-created if None)
             grpo_feedback: GRPO feedback collector (optional)
             template_db: Query template database (optional)
+            optimizer: AGI Phase 3 - SearchRankingOptimizer for bidirectional learning
         """
         self.temporal = temporal_engine
         self.causal = causal_retrieval
@@ -134,8 +140,18 @@ class QueryRouter:
         self.classifier = intent_classifier or get_intent_classifier()
         self.grpo_feedback = grpo_feedback
         self.template_db = template_db
+        self.optimizer = optimizer
 
-        logger.info("QueryRouter initialized")
+        # AGI Phase 3: Connect optimizer to feedback system for bidirectional learning
+        if self.grpo_feedback and self.optimizer:
+            self.grpo_feedback.set_optimizer(self.optimizer)
+            self.grpo_feedback.set_query_router(self)
+            logger.info("Bidirectional learning loop connected")
+
+        logger.info(
+            f"QueryRouter initialized "
+            f"(optimizer: {'connected' if optimizer else 'not connected'})"
+        )
 
     def route_query(self, query: str) -> QueryPlan:
         """Route query to appropriate strategies.
@@ -614,3 +630,43 @@ class QueryRouter:
             Strategy configuration dictionary
         """
         return self.STRATEGY_CONFIGS.get(intent, {})
+
+    # =========================================================================
+    # AGI Phase 3: Bidirectional Learning Methods
+    # =========================================================================
+
+    def get_strategy_effectiveness(self, intent: QueryIntent) -> Dict[str, float]:
+        """Get effectiveness scores for strategies of an intent.
+
+        AGI Phase 3: Returns learned effectiveness from optimizer.
+
+        Args:
+            intent: Query intent
+
+        Returns:
+            Dictionary mapping strategy key to effectiveness score
+        """
+        if not self.optimizer:
+            return {}
+        return self.optimizer.get_strategy_effectiveness(intent)
+
+    def export_learned_configs(self) -> str:
+        """Export learned routing configurations as JSON.
+
+        AGI Phase 3: Exports the learned weights for analysis or persistence.
+
+        Returns:
+            JSON string of learned configurations
+        """
+        if not self.optimizer:
+            return "{}"
+        return self.optimizer.export_learned_configs()
+
+    def reset_learned_weights(self):
+        """Reset learned weights to defaults.
+
+        AGI Phase 3: Allows resetting the learning state.
+        """
+        if self.optimizer:
+            self.optimizer.reset()
+            logger.info("Learned weights reset to defaults")

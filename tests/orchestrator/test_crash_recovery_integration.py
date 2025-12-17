@@ -329,9 +329,14 @@ class TestOrchestratorCrashRecovery:
         audit_path = workspace / "audit" / "audit.log"
         assert audit_path.exists()
 
-        # Read and parse audit log
+        # Read and parse audit log (JSONL format - one JSON per line)
         content = audit_path.read_text()
-        event = json.loads(content.strip())
+        events = [json.loads(line) for line in content.strip().split('\n') if line.strip()]
+
+        # Find the crash recovery event
+        recovery_events = [e for e in events if e.get("source") == "crash_recovery"]
+        assert len(recovery_events) >= 1, f"Expected crash_recovery event, got events: {[e.get('source') for e in events]}"
+        event = recovery_events[0]
 
         # Verify event details
         assert event["source"] == "crash_recovery"

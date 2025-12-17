@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from futurnal.extraction.schema.models import ThoughtTemplate
+    from futurnal.learning.context_gate import SemanticContextGate
 
 logger = logging.getLogger(__name__)
 
@@ -279,15 +280,19 @@ class TokenPriorStore:
         self,
         capacity: int = DEFAULT_PRIOR_CAPACITY,
         min_confidence: float = MIN_CONFIDENCE_THRESHOLD,
+        context_gate: Optional["SemanticContextGate"] = None,
     ):
         """Initialize Token Prior Store.
 
         Args:
             capacity: Maximum priors to store per category
             min_confidence: Minimum confidence for priors to be included in prompts
+            context_gate: Optional SemanticContextGate for query-aware filtering
+                         (AGI Phase 2 enhancement)
         """
         self.capacity = capacity
         self.min_confidence = min_confidence
+        self._context_gate = context_gate
 
         # Prior storage (keyed by type/pattern name)
         self.entity_priors: Dict[str, EntityTypePrior] = {}
@@ -478,6 +483,7 @@ class TokenPriorStore:
 
     def generate_prompt_context(
         self,
+        query: Optional[str] = None,
         document_type: Optional[str] = None,
         target_entity_types: Optional[List[str]] = None,
         include_temporal: bool = True,
@@ -488,7 +494,13 @@ class TokenPriorStore:
         This is the TOKEN PRIOR - injected into prompt to guide extraction.
         The Ghost model uses this context without any parameter changes.
 
+        AGI Phase 2 Enhancement:
+        - When query is provided and context_gate is configured, only
+          priors relevant to the query are included
+        - Prevents irrelevant priors from polluting context
+
         Args:
+            query: Optional user query for relevance filtering (Phase 2)
             document_type: Optional filter by document type
             target_entity_types: Optional specific entity types to include
             include_temporal: Whether to include temporal priors
@@ -511,6 +523,15 @@ class TokenPriorStore:
         sections.append("## Learned Patterns from Experience\n")
         sections.append("The following patterns have been learned from previous extractions:\n")
 
+        # Use context gate for query-aware filtering if available (AGI Phase 2)
+        if query and self._context_gate:
+            return self._generate_query_aware_context(
+                query=query,
+                include_temporal=include_temporal,
+                max_priors=max_priors,
+            )
+
+        # Standard filtering (no query or no context gate)
         # Entity type priors
         entity_priors = self._get_high_confidence_priors(
             self.entity_priors,
@@ -550,6 +571,80 @@ class TokenPriorStore:
                 "Use these learned patterns to guide your extraction. "
                 "Prioritize patterns with higher confidence scores."
             )
+
+        return "\n".join(sections)
+
+    def _generate_query_aware_context(
+        self,
+        query: str,
+        include_temporal: bool = True,
+        max_priors: int = 10,
+    ) -> str:
+        """Generate query-aware context using SemanticContextGate.
+
+        AGI Phase 2: Filter priors by relevance to user query.
+
+        Args:
+            query: User's natural language query
+            include_temporal: Whether to include temporal priors
+            max_priors: Maximum priors per category
+
+        Returns:
+            Natural language context with only relevant priors
+        """
+        sections = []
+        sections.append("## Relevant Patterns for Your Query\n")
+        sections.append(f"Based on your query, these learned patterns are most relevant:\n")
+
+        # Filter all categories
+        filtered = self._context_gate.filter_all_prior_categories(
+            query=query,
+            entity_priors=self.entity_priors,
+            relation_priors=self.relation_priors,
+            temporal_priors=self.temporal_priors if include_temporal else {},
+            top_k_per_category=max_priors,
+        )
+
+        # Entity priors
+        if filtered.get("entity"):
+            sections.append("\n### Entity Types (Relevant to Query)")
+            for prior, relevance in filtered["entity"]:
+                sections.append(f"{prior.to_natural_language()} [relevance: {relevance:.0%}]")
+
+        # Relation priors
+        if filtered.get("relation"):
+            sections.append("\n### Relationship Types (Relevant to Query)")
+            for prior, relevance in filtered["relation"]:
+                sections.append(f"{prior.to_natural_language()} [relevance: {relevance:.0%}]")
+
+        # Temporal priors
+        if include_temporal and filtered.get("temporal"):
+            sections.append("\n### Temporal Patterns (Relevant to Query)")
+            for prior, relevance in filtered["temporal"]:
+                sections.append(f"{prior.to_natural_language()} [relevance: {relevance:.0%}]")
+
+        # Total priors included
+        total_included = sum(len(v) for v in filtered.values())
+        total_available = len(self.entity_priors) + len(self.relation_priors)
+        if include_temporal:
+            total_available += len(self.temporal_priors)
+
+        if total_included > 0:
+            sections.append(
+                f"\n### Context Gate Applied\n"
+                f"Included {total_included} of {total_available} available priors "
+                f"based on query relevance."
+            )
+        else:
+            sections.append(
+                "\n### No Highly Relevant Priors\n"
+                "No priors passed the relevance threshold for this query. "
+                "Consider exploring related topics to build relevant experience."
+            )
+
+        logger.debug(
+            f"Query-aware context: {total_included}/{total_available} priors included"
+        )
 
         return "\n".join(sections)
 

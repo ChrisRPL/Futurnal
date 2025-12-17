@@ -78,6 +78,34 @@ pub fn run() {
             commands::ollama::list_ollama_models,
             commands::ollama::is_model_installed,
             commands::ollama::pull_ollama_model,
+            // Multimodal commands (Step 08: Frontend Intelligence Integration)
+            commands::multimodal::transcribe_voice,
+            commands::multimodal::analyze_image,
+            commands::multimodal::describe_image,
+            commands::multimodal::process_document,
+            commands::multimodal::get_multimodal_status,
+            // Causal chain commands (Step 08: Causal Visualization)
+            commands::causal::find_causes,
+            commands::causal::find_effects,
+            commands::causal::find_causal_path,
+            // Activity stream commands (Step 08: Activity Stream)
+            commands::activity::get_activity_log,
+            commands::activity::get_recent_activities,
+            // Schema evolution commands (Step 08: Schema Dashboard)
+            commands::schema::get_schema_stats,
+            // Learning progress commands (Step 08: Learning Progress)
+            commands::learning::get_learning_progress,
+            commands::learning::record_document_learning,
+            // Insights commands (AGI Phase 8: Frontend Integration)
+            commands::insights::get_insights,
+            commands::insights::mark_insight_read,
+            commands::insights::dismiss_insight,
+            commands::insights::get_knowledge_gaps,
+            commands::insights::mark_gap_addressed,
+            commands::insights::get_pending_verifications,
+            commands::insights::submit_causal_verification,
+            commands::insights::get_insight_stats,
+            commands::insights::trigger_insight_scan,
         ])
         .setup(|app| {
             log::info!("Futurnal Desktop Shell initialized");

@@ -21,6 +21,16 @@ export interface SearchFilter {
 }
 
 /**
+ * Temporal range for date-based filtering
+ * Step 08: Frontend Intelligence Integration - Phase 4
+ */
+export interface TemporalRange {
+  start: Date;
+  end: Date;
+  label?: string; // e.g., "Last 7 days", "This month"
+}
+
+/**
  * Intent type for classification
  */
 export type IntentType = 'temporal' | 'causal' | 'exploratory' | 'lookup';
@@ -63,6 +73,12 @@ interface SearchState {
   /** Currently selected result ID for detail panel */
   selectedResultId: string | null;
 
+  // Step 08: Temporal Query Interface
+  /** Temporal range filter */
+  temporalRange: TemporalRange | null;
+  /** Parsed temporal expression (e.g., "last week" → "Dec 9 - Dec 16, 2024") */
+  parsedTemporalExpression: string | null;
+
   // Step 02: LLM Answer Generation
   /** Generated answer from LLM */
   answer: string | null;
@@ -101,6 +117,12 @@ interface SearchState {
   setSelectedModel: (model: string) => void;
   /** Set answer directly */
   setAnswer: (answer: string | null) => void;
+
+  // Step 08: Temporal Query Interface
+  /** Set temporal range filter */
+  setTemporalRange: (range: TemporalRange | null) => void;
+  /** Clear temporal range */
+  clearTemporalRange: () => void;
 }
 
 const MAX_SEARCH_HISTORY = 50;
@@ -122,6 +144,9 @@ const initialState = {
   searchHistory: [] as SearchHistoryItem[],
   error: null as string | null,
   selectedResultId: null as string | null,
+  // Step 08: Temporal Query Interface
+  temporalRange: null as TemporalRange | null,
+  parsedTemporalExpression: null as string | null,
   // Step 02: LLM Answer Generation
   answer: null as string | null,
   answerSources: [] as string[],
@@ -313,6 +338,23 @@ export const useSearchStore = create<SearchState>()(
       setSelectedModel: (model) => set({ selectedModel: model }),
 
       setAnswer: (answer) => set({ answer }),
+
+      // Step 08: Temporal Query Interface
+      setTemporalRange: (range) => {
+        const label = range
+          ? `${range.start.toLocaleDateString()} - ${range.end.toLocaleDateString()}`
+          : null;
+        set({
+          temporalRange: range,
+          parsedTemporalExpression: range?.label || label,
+        });
+      },
+
+      clearTemporalRange: () =>
+        set({
+          temporalRange: null,
+          parsedTemporalExpression: null,
+        }),
     }),
     {
       name: 'futurnal-search',

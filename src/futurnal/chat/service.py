@@ -3,6 +3,8 @@
 Research Foundation:
 - ProPerSim (2509.21730v1): Proactive + personalized with multi-turn context
 - Causal-Copilot (2504.13263v2): Natural language causal exploration
+- SEAgent (2508.04700v2): Experiential learning integration
+- Training-Free GRPO (2510.08191v1): Token priors for enhanced reasoning
 
 Production Plan Reference:
 docs/phase-1/implementation-steps/03-chat-interface-conversational.md
@@ -12,6 +14,7 @@ Option B Compliance:
 - Context-grounded generation prevents hallucination
 - Local-first processing on localhost:11434
 - Experiential learning via prompt refinement (not parameter updates)
+- Token priors injected as natural language context
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from futurnal.search.answer_generator import AnswerGenerator, AnswerGeneratorCon
 
 if TYPE_CHECKING:
     from futurnal.search.api import HybridSearchAPI
+    from futurnal.learning.integration import ExperientialLearningPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +49,7 @@ class ChatService:
         >>> await service.close()
     """
 
-    CHAT_SYSTEM_PROMPT = '''You are Futurnal's conversational knowledge assistant. Your role is to help
+    CHAT_SYSTEM_PROMPT_BASE = '''You are Futurnal's conversational knowledge assistant. Your role is to help
 users explore and understand their personal knowledge graph through natural dialogue.
 
 CRITICAL RULES:
@@ -63,12 +67,23 @@ FORMAT:
 - Reference sources inline
 - If building on previous conversation, acknowledge it naturally'''
 
+    # Dynamic prompt section for experiential learning
+    EXPERIENTIAL_LEARNING_TEMPLATE = '''
+
+EXPERIENTIAL KNOWLEDGE (learned from this user's data patterns):
+{experiential_context}
+
+Use this learned knowledge to better understand the user's personal context, terminology,
+and the relationships between concepts in their knowledge graph. This helps you provide
+more personalized and accurate responses.'''
+
     def __init__(
         self,
         search_api: Optional["HybridSearchAPI"] = None,
         answer_generator: Optional[AnswerGenerator] = None,
         storage: Optional[SessionStorage] = None,
         context_window_size: int = 10,  # 5 turns = 10 messages
+        enable_experiential_learning: bool = True,
     ) -> None:
         """Initialize chat service.
 
@@ -77,6 +92,7 @@ FORMAT:
             answer_generator: Optional pre-existing answer generator
             storage: Optional custom session storage
             context_window_size: Max messages to include in context (default: 10)
+            enable_experiential_learning: Whether to inject learned priors into prompts
         """
         self._search_api = search_api
         self._answer_generator = answer_generator
@@ -84,11 +100,13 @@ FORMAT:
         self._sessions: Dict[str, ChatSession] = {}
         self._context_window_size = context_window_size
         self._initialized = False
+        self._enable_experiential_learning = enable_experiential_learning
+        self._learning_pipeline: Optional["ExperientialLearningPipeline"] = None
 
     async def initialize(self) -> None:
         """Initialize service components.
 
-        Lazily initializes HybridSearchAPI and AnswerGenerator if not provided.
+        Lazily initializes HybridSearchAPI, AnswerGenerator, and ExperientialLearningPipeline.
         """
         if self._initialized:
             return
@@ -114,6 +132,21 @@ FORMAT:
             except Exception as e:
                 logger.warning(f"ChatService: Could not init search API: {e}")
 
+        # Initialize experiential learning pipeline (Option B: token priors)
+        if self._enable_experiential_learning:
+            try:
+                from futurnal.learning.integration import get_persistent_pipeline
+
+                self._learning_pipeline = get_persistent_pipeline()
+                logger.info(
+                    "ChatService: Loaded experiential learning pipeline "
+                    f"({self._learning_pipeline.state.total_documents_processed} docs, "
+                    f"{len(self._learning_pipeline.token_store.entity_priors)} entity priors)"
+                )
+            except Exception as e:
+                logger.warning(f"ChatService: Could not init learning pipeline: {e}")
+                self._learning_pipeline = None
+
         self._initialized = True
         logger.info("ChatService initialized")
 
@@ -128,6 +161,226 @@ FORMAT:
 
         self._initialized = False
         logger.info("ChatService closed")
+
+    def _build_system_prompt(self, query: Optional[str] = None) -> str:
+        """Build dynamic system prompt with experiential learning context.
+
+        Research Foundation:
+        - Training-Free GRPO: Inject token priors as natural language
+        - SEAgent: Use experiential knowledge to enhance reasoning
+
+        AGI Phase 2 Enhancement:
+        - When query is provided, filters priors by semantic relevance
+        - Prevents irrelevant priors from polluting context
+
+        Option B Compliance:
+        - Ghost model FROZEN - priors are text, not weights
+        - Knowledge transfers as natural language context
+
+        Args:
+            query: Optional user query for query-aware prior filtering
+
+        Returns:
+            System prompt with optional experiential learning section
+        """
+        base_prompt = self.CHAT_SYSTEM_PROMPT_BASE
+
+        # Skip if learning not enabled or pipeline not available
+        if not self._enable_experiential_learning or self._learning_pipeline is None:
+            return base_prompt
+
+        # Get experiential context from token priors (with query-aware filtering)
+        try:
+            experiential_context = self._build_experiential_context(query=query)
+            if experiential_context:
+                return base_prompt + self.EXPERIENTIAL_LEARNING_TEMPLATE.format(
+                    experiential_context=experiential_context
+                )
+        except Exception as e:
+            logger.warning(f"Failed to build experiential context: {e}")
+
+        return base_prompt
+
+    def _build_experiential_context(self, query: Optional[str] = None) -> str:
+        """Build experiential learning context from token priors.
+
+        Converts learned patterns into natural language guidance
+        that helps the LLM understand this user's personal context.
+
+        AGI Phase 2: When query is provided and token store has context gate,
+        filters priors to only those relevant to the query.
+
+        Args:
+            query: Optional user query for relevance filtering
+
+        Returns:
+            Natural language description of learned patterns
+        """
+        if self._learning_pipeline is None:
+            return ""
+
+        token_store = self._learning_pipeline.token_store
+        state = self._learning_pipeline.state
+
+        # AGI Phase 2: Use query-aware filtering if available
+        # This uses SemanticContextGate to filter priors by relevance to query
+        if query and token_store._context_gate is not None:
+            logger.debug(f"Using query-aware prior filtering for: {query[:50]}...")
+            try:
+                # Use token store's query-aware generation
+                query_context = token_store.generate_prompt_context(query=query)
+                if query_context:
+                    # Prepend learning stats
+                    stats_line = ""
+                    if state.total_documents_processed > 0:
+                        stats_line = (
+                            f"Learning from {state.total_documents_processed} documents "
+                            f"(success rate: {state.overall_success_rate:.0%})\n\n"
+                        )
+                    return stats_line + query_context
+            except Exception as e:
+                logger.warning(f"Query-aware filtering failed, falling back to standard: {e}")
+
+        # Standard filtering (no query or no context gate)
+        parts = []
+
+        # Add learning stats for context
+        if state.total_documents_processed > 0:
+            parts.append(
+                f"Learning from {state.total_documents_processed} documents "
+                f"(success rate: {state.overall_success_rate:.0%})"
+            )
+
+        # Add top entity types with high confidence
+        top_entities = sorted(
+            token_store.entity_priors.values(),
+            key=lambda e: e.confidence * e.frequency,
+            reverse=True
+        )[:10]
+
+        if top_entities:
+            entity_descriptions = []
+            for entity in top_entities:
+                if entity.confidence >= 0.6:
+                    desc = f"- {entity.entity_type}: "
+                    if entity.context_pattern:
+                        desc += f"{entity.context_pattern}"
+                    else:
+                        desc += f"appears frequently ({entity.frequency}x)"
+                    if entity.examples:
+                        desc += f" (e.g., '{entity.examples[0]}')"
+                    entity_descriptions.append(desc)
+
+            if entity_descriptions:
+                parts.append("\nKnown entity types in user's knowledge:")
+                parts.extend(entity_descriptions)
+
+        # Add top relationship types
+        top_relations = sorted(
+            token_store.relation_priors.values(),
+            key=lambda r: r.confidence * r.frequency,
+            reverse=True
+        )[:8]
+
+        if top_relations:
+            relation_descriptions = []
+            for rel in top_relations:
+                if rel.confidence >= 0.5:
+                    desc = f"- {rel.relation_type}"
+                    if rel.subject_types and rel.object_types:
+                        desc += f": connects {rel.subject_types[0]} → {rel.object_types[0]}"
+                    if rel.context_pattern:
+                        desc += f" ({rel.context_pattern})"
+                    relation_descriptions.append(desc)
+
+            if relation_descriptions:
+                parts.append("\nKnown relationships in user's knowledge:")
+                parts.extend(relation_descriptions)
+
+        # Add temporal patterns
+        top_temporal = sorted(
+            token_store.temporal_priors.values(),
+            key=lambda t: t.confidence * t.frequency,
+            reverse=True
+        )[:5]
+
+        if top_temporal:
+            temporal_descriptions = []
+            for temp in top_temporal:
+                if temp.confidence >= 0.5:
+                    desc = f"- {temp.pattern_type}"
+                    if temp.extraction_guidance:
+                        desc += f": {temp.extraction_guidance}"
+                    temporal_descriptions.append(desc)
+
+            if temporal_descriptions:
+                parts.append("\nTemporal patterns in user's data:")
+                parts.extend(temporal_descriptions)
+
+        return "\n".join(parts) if parts else ""
+
+    def _record_chat_learning(
+        self,
+        response: str,
+        sources: List[str],
+        entity_refs: List[str],
+        confidence: float,
+        success: bool = True,
+    ) -> None:
+        """Record a chat interaction for experiential learning.
+
+        Research Foundation:
+        - RLHI: Learn from implicit user feedback
+        - AgentFlow: Continuous learning from interactions
+
+        Option B Compliance:
+        - Updates token priors (natural language), not model weights
+        - Ghost model remains FROZEN
+
+        Args:
+            response: The generated response text
+            sources: Sources used in the response
+            entity_refs: Entity references in the response
+            confidence: Confidence score of the response
+            success: Whether the interaction was successful
+        """
+        if self._learning_pipeline is None:
+            return
+
+        # Infer entity types from entity refs
+        entity_types = ["ChatResponse"]
+        if entity_refs:
+            entity_types.extend(entity_refs[:5])  # Use refs as entity types
+
+        # Infer relation types from response structure
+        relation_types = []
+        if sources:
+            relation_types.append("CITES")
+        if entity_refs:
+            relation_types.append("REFERENCES")
+
+        # Record to learning pipeline
+        try:
+            import uuid
+            doc_id = f"chat_{uuid.uuid4().hex[:12]}"
+
+            self._learning_pipeline.record_document(
+                document_id=doc_id,
+                content=response[:500],  # Truncate for efficiency
+                source="chat",
+                content_type="chat_response",
+                success=success,
+                quality_score=confidence,
+                entity_types=entity_types,
+                relation_types=relation_types if relation_types else None,
+            )
+
+            logger.debug(
+                f"Recorded chat learning: {doc_id}, confidence={confidence:.2f}, "
+                f"entities={len(entity_types)}, relations={len(relation_types)}"
+            )
+        except Exception as e:
+            logger.debug(f"Failed to record chat learning: {e}")
 
     async def chat(
         self,
@@ -257,12 +510,14 @@ FORMAT:
             context_entity_id=context_entity_id,
         )
 
-        # Stream response
+        # Stream response with dynamic system prompt (includes experiential learning)
+        # AGI Phase 2: Pass query for context-aware prior filtering
+        system_prompt = self._build_system_prompt(query=message)
         full_response = []
         async for chunk in self._answer_generator._pool.stream_generate(
             model=model or self._answer_generator.config.model_name,
             prompt=prompt,
-            system=self.CHAT_SYSTEM_PROMPT,
+            system=system_prompt,
             temperature=self._answer_generator.config.temperature,
             num_predict=self._answer_generator.config.max_tokens,
         ):
@@ -407,11 +662,15 @@ FORMAT:
             context_entity_id=context_entity_id,
         )
 
+        # Build dynamic system prompt with experiential learning context
+        # AGI Phase 2: Pass query for context-aware prior filtering
+        system_prompt = self._build_system_prompt(query=message)
+
         try:
             response = await self._answer_generator._pool.generate(
                 model=model or self._answer_generator.config.model_name,
                 prompt=prompt,
-                system=self.CHAT_SYSTEM_PROMPT,
+                system=system_prompt,
                 temperature=self._answer_generator.config.temperature,
                 num_predict=self._answer_generator.config.max_tokens,
             )
@@ -429,6 +688,20 @@ FORMAT:
 
         # Calculate confidence based on search result scores
         confidence = self._calculate_confidence(search_results)
+
+        # Record successful interaction for experiential learning
+        # High confidence responses are implicitly positive feedback
+        if confidence >= 0.6 and self._learning_pipeline is not None:
+            try:
+                self._record_chat_learning(
+                    response=response,
+                    sources=sources,
+                    entity_refs=entity_refs,
+                    confidence=confidence,
+                    success=True,
+                )
+            except Exception as e:
+                logger.debug(f"Failed to record chat learning: {e}")
 
         return response, sources, entity_refs, confidence
 

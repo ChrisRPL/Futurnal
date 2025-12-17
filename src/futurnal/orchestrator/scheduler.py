@@ -11,7 +11,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -56,6 +56,14 @@ from .resource_monitor import ResourceMonitor
 from .resource_registry import ResourceProfileRegistry
 from .source_control import PausedSourcesRegistry
 from .crash_recovery import CrashRecoveryManager
+from .autonomous_loop import (
+    AutonomousEventBus,
+    AutonomousEventType,
+    AutonomousEvent,
+    AutonomousLoop,
+    AutonomousLoopConfig,
+    create_autonomous_loop,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +208,11 @@ class IngestionOrchestrator:
         # Uptime tracking for audit logging
         self._start_time: Optional[float] = None
 
+        # Autonomous loop for proactive insight generation ("Brain's Heartbeat")
+        self._autonomous_event_bus: Optional[AutonomousEventBus] = None
+        self._autonomous_loop: Optional[AutonomousLoop] = None
+        self._autonomous_loop_task: Optional[asyncio.Task] = None
+
     def register_source(self, registration: SourceRegistration) -> None:
         if registration.schedule not in {"@manual", "@interval"} and not is_valid(
             registration.schedule
@@ -276,6 +289,15 @@ class IngestionOrchestrator:
         self._deadlock_detection_task = self._loop.create_task(self._deadlock_detection_loop())
         # Start periodic invariant checking
         self._invariant_check_task = self._loop.create_task(self._invariant_check_loop())
+
+        # Start the autonomous loop (Brain's Heartbeat)
+        # create_autonomous_loop returns (event_bus, loop) tuple
+        self._autonomous_event_bus, self._autonomous_loop = create_autonomous_loop(
+            orchestrator=self,
+            config=AutonomousLoopConfig(),
+        )
+        self._autonomous_loop_task = self._loop.create_task(self._autonomous_loop.start())
+
         self._running = True
         logger.info("Ingestion orchestrator started")
 
@@ -319,6 +341,17 @@ class IngestionOrchestrator:
             except asyncio.CancelledError:
                 pass
             self._invariant_check_task = None
+
+        # Stop autonomous loop (Brain's Heartbeat)
+        if self._autonomous_loop:
+            await self._autonomous_loop.stop()
+        if self._autonomous_loop_task:
+            self._autonomous_loop_task.cancel()
+            try:
+                await self._autonomous_loop_task
+            except asyncio.CancelledError:
+                pass
+            self._autonomous_loop_task = None
 
         # Clear recovery marker (graceful shutdown)
         self._crash_recovery._recovery_tracker.clear_recovery_marker()
@@ -605,6 +638,21 @@ class IngestionOrchestrator:
                 del self._retry_budgets[job.job_id]
 
             self._record_audit_event(job, "succeeded")
+
+            # Emit INGESTION_COMPLETED event for autonomous loop ("Brain's Heartbeat")
+            # This triggers CuriosityEngine and InsightGenerator analysis
+            if self._autonomous_event_bus:
+                self._autonomous_event_bus.emit(AutonomousEvent(
+                    event_type=AutonomousEventType.INGESTION_COMPLETED,
+                    source=job.payload.get("source_name", "unknown"),
+                    payload={
+                        "job_id": job.job_id,
+                        "job_type": job.job_type.value,
+                        "files_processed": files_processed,
+                        "bytes_processed": bytes_processed,
+                        "duration_seconds": duration,
+                    },
+                ))
 
     async def _execute_job(self, job: IngestionJob) -> None:
         if job.job_type == JobType.LOCAL_FILES:

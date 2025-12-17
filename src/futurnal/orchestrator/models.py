@@ -20,6 +20,12 @@ class JobType(str, Enum):
     IMAP_MAILBOX = "imap_mailbox"
     GITHUB_REPOSITORY = "github_repository"
 
+    # AGI Phase 6: Autonomous Insight Jobs
+    INSIGHT_GENERATION = "insight_generation"
+    CORRELATION_SCAN = "correlation_scan"
+    CURIOSITY_SCAN = "curiosity_scan"
+    LEARNING_UPDATE = "learning_update"
+
 
 @dataclass(slots=True)
 class IngestionJob:
