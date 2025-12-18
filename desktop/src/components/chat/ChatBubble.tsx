@@ -19,11 +19,14 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { cn } from '@/lib/utils';
 import { multimodalApi } from '@/lib/multimodalApi';
+import { InsightSaveButtonCompact } from './InsightSaveButton';
 import type { ChatMessage, ChatAttachment } from '@/types/chat';
 
 interface ChatBubbleProps {
   message: ChatMessage;
   onEntityClick?: (entityId: string) => void;
+  onInsightSaved?: (insightId: string) => void;
+  sessionId?: string;
   className?: string;
 }
 
@@ -396,6 +399,8 @@ function AttachmentsList({
 export function ChatBubble({
   message,
   onEntityClick,
+  onInsightSaved,
+  sessionId,
   className,
 }: ChatBubbleProps) {
   const isUser = message.role === 'user';
@@ -474,6 +479,15 @@ export function ChatBubble({
         {/* Message actions */}
         <div className="flex items-center gap-2 mt-1 px-1">
           <MessageActions content={message.content} />
+          {/* Save insight button (assistant only) */}
+          {!isUser && (
+            <InsightSaveButtonCompact
+              messageContent={message.content}
+              conversationId={sessionId}
+              relatedEntities={message.entityRefs}
+              onSave={onInsightSaved}
+            />
+          )}
           {/* Feedback buttons (assistant only) - RLHI learning */}
           {!isUser && (
             <FeedbackButtons

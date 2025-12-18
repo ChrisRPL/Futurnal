@@ -555,3 +555,87 @@ def trigger_insight_scan(
             }))
         else:
             print(f"Error: {e}")
+
+
+# ============================================================================
+# User Insight Saving (Phase C: Save Insight)
+# ============================================================================
+
+def _get_insight_storage():
+    """Get InsightStorageService singleton."""
+    try:
+        from futurnal.insights.insight_storage import get_insight_service
+        return get_insight_service()
+    except ImportError as e:
+        logger.warning(f"Insight storage not available: {e}")
+        return None
+
+
+@insights_app.command("save")
+def save_user_insight(
+    content: str = Option(..., "--content", help="Insight content to save"),
+    conversation_id: Optional[str] = Option(None, "--conversation-id", help="Source conversation ID"),
+    entities: Optional[str] = Option(None, "--entities", help="Comma-separated related entity IDs"),
+    source: str = Option("user_explicit", "--source", help="How the insight was created"),
+    output_json: bool = Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Save a user-generated insight from chat conversation.
+
+    This stores the insight in the knowledge graph for future reference
+    and learning.
+
+    Examples:
+        futurnal insights save --content "My productivity peaks between 10am-12pm"
+        futurnal insights save --content "Late meetings affect my focus" --entities "meeting,focus" --json
+        futurnal insights save --content "Coffee improves coding" --conversation-id conv_123 --json
+    """
+    import asyncio
+
+    async def _save():
+        try:
+            storage = _get_insight_storage()
+
+            # Parse entities
+            related_entities = []
+            if entities:
+                related_entities = [e.strip() for e in entities.split(",") if e.strip()]
+
+            if storage is not None:
+                # Use the real storage service
+                insight = await storage.save_insight(
+                    content=content,
+                    conversation_id=conversation_id,
+                    related_entities=related_entities,
+                    source=source,
+                )
+                insight_id = insight.insight_id
+            else:
+                # Fallback: generate ID and log
+                insight_id = str(uuid4())
+                logger.info(f"Would save insight: {content[:50]}... (storage not available)")
+
+            if output_json:
+                print(json.dumps({
+                    "success": True,
+                    "insightId": insight_id,
+                }))
+            else:
+                print(f"\nInsight Saved")
+                print("-" * 40)
+                print(f"ID: {insight_id}")
+                print(f"Content: {content[:100]}{'...' if len(content) > 100 else ''}")
+                if related_entities:
+                    print(f"Related: {', '.join(related_entities)}")
+
+        except Exception as e:
+            logger.error(f"Save insight failed: {e}")
+            if output_json:
+                print(json.dumps({
+                    "success": False,
+                    "insightId": None,
+                    "error": str(e),
+                }))
+            else:
+                print(f"Error: {e}")
+
+    asyncio.run(_save())

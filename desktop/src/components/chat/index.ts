@@ -10,3 +10,6 @@ export { ChatInterface } from './ChatInterface';
 export { ChatBubble } from './ChatBubble';
 export { ChatInput, type Attachment, type AttachmentType } from './ChatInput';
 export { MessageLoading } from './MessageLoading';
+export { SlashCommandPopover } from './SlashCommandPopover';
+export { InsightSaveButton, InsightSaveButtonCompact } from './InsightSaveButton';
+export { PaperSearchResults } from './PaperSearchResults';

@@ -19,6 +19,7 @@ class JobType(str, Enum):
     OBSIDIAN_VAULT = "obsidian_vault"
     IMAP_MAILBOX = "imap_mailbox"
     GITHUB_REPOSITORY = "github_repository"
+    ACADEMIC_PAPER = "academic_paper"
 
     # AGI Phase 6: Autonomous Insight Jobs
     INSIGHT_GENERATION = "insight_generation"

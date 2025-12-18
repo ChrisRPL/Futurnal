@@ -181,6 +181,8 @@ class IngestionOrchestrator:
         self._github_connector = None
         self._github_credential_manager = None
         self._github_api_client_manager = None
+        self._papers_connector = None
+        self._papers_state_store = None
 
         # Temporary storage for resource metrics (populated in _run_job, consumed in _process_job)
         self._job_resource_metrics: Dict[str, any] = {}
@@ -663,6 +665,8 @@ class IngestionOrchestrator:
             return await self._ingest_imap(job)
         elif job.job_type == JobType.GITHUB_REPOSITORY:
             return await self._ingest_github(job)
+        elif job.job_type == JobType.ACADEMIC_PAPER:
+            return await self._ingest_paper(job)
         else:
             raise ValueError(f"Unsupported job type {job.job_type}")
 
@@ -844,6 +848,118 @@ class IngestionOrchestrator:
             raise RuntimeError(f"GitHub sync failed: {result.error_message}")
 
         return files_processed, bytes_processed
+
+    def _ensure_papers_connector(self):
+        """Lazy-initialize Papers connector if needed."""
+        if self._papers_connector is None:
+            try:
+                from ..ingestion.papers.connector import PapersConnector
+                from ..agents.paper_search.state_store import PaperStateStore
+
+                papers_workspace = self._workspace_dir / "papers"
+                papers_workspace.mkdir(parents=True, exist_ok=True)
+
+                self._papers_state_store = PaperStateStore(
+                    path=papers_workspace / "state.db"
+                )
+                self._papers_connector = PapersConnector(
+                    workspace_dir=papers_workspace,
+                    element_sink=self._element_sink,
+                    audit_logger=self._audit_logger,
+                    consent_registry=self._consent_registry,
+                )
+                logger.info("Initialized Papers connector")
+            except (ImportError, AttributeError) as exc:
+                logger.error(f"Failed to initialize Papers connector: {exc}")
+                raise RuntimeError("Papers connector not available") from exc
+
+    async def _ingest_paper(self, job: IngestionJob) -> tuple[int, int]:
+        """Process academic paper ingestion job.
+
+        Args:
+            job: Ingestion job with paper_path and metadata in payload
+
+        Returns:
+            Tuple of (elements_processed, bytes_processed)
+        """
+        self._ensure_papers_connector()
+
+        paper_path = Path(job.payload["paper_path"])
+        paper_id = job.payload.get("paper_id", paper_path.stem)
+        title = job.payload.get("title", paper_path.stem)
+        trigger = job.payload.get("trigger", "manual")
+
+        logger.info(
+            f"Processing academic paper: {title} (trigger: {trigger})",
+            extra={
+                "ingestion_job_id": job.job_id,
+                "paper_id": paper_id,
+                "paper_trigger": trigger,
+            },
+        )
+
+        # Create PaperMetadata from job payload
+        from ..ingestion.papers.connector import PaperMetadata
+
+        metadata = PaperMetadata(
+            paper_id=paper_id,
+            title=title,
+            authors=job.payload.get("authors", []),
+            year=job.payload.get("year"),
+            venue=job.payload.get("venue"),
+            doi=job.payload.get("doi"),
+            arxiv_id=job.payload.get("arxiv_id"),
+            abstract=job.payload.get("abstract"),
+            citation_count=job.payload.get("citation_count", 0),
+            fields_of_study=job.payload.get("fields_of_study", []),
+            pdf_url=job.payload.get("pdf_url"),
+        )
+
+        # Update state to processing
+        if self._papers_state_store:
+            self._papers_state_store.mark_ingestion_processing(paper_id)
+
+        # Perform ingestion
+        elements_processed = 0
+        bytes_processed = 0
+
+        try:
+            for element in self._papers_connector.ingest(
+                paper_path, metadata, job_id=job.job_id
+            ):
+                await self._handle_ingested_element(element)
+                elements_processed += 1
+                bytes_processed += len(str(element))
+
+            # Mark ingestion as completed
+            if self._papers_state_store:
+                self._papers_state_store.mark_ingestion_completed(paper_id)
+
+            logger.info(
+                f"Paper ingestion completed: {elements_processed} elements",
+                extra={
+                    "ingestion_job_id": job.job_id,
+                    "paper_id": paper_id,
+                    "paper_elements": elements_processed,
+                    "paper_bytes": bytes_processed,
+                },
+            )
+        except Exception as exc:
+            # Mark ingestion as failed
+            if self._papers_state_store:
+                self._papers_state_store.mark_ingestion_failed(paper_id, str(exc))
+
+            logger.error(
+                f"Paper ingestion failed: {exc}",
+                extra={
+                    "ingestion_job_id": job.job_id,
+                    "paper_id": paper_id,
+                    "paper_error": str(exc),
+                },
+            )
+            raise
+
+        return elements_processed, bytes_processed
 
     async def _handle_ingested_element(self, element: dict) -> None:
         logger.debug(

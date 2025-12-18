@@ -106,6 +106,16 @@ pub fn run() {
             commands::insights::submit_causal_verification,
             commands::insights::get_insight_stats,
             commands::insights::trigger_insight_scan,
+            commands::insights::save_user_insight,
+            // Paper search commands (Phase D: Academic Paper Agent)
+            commands::papers::search_papers,
+            commands::papers::download_paper,
+            commands::papers::get_paper_recommendations,
+            commands::papers::get_paper_details,
+            commands::papers::agentic_search_papers,
+            commands::papers::ingest_papers,
+            commands::papers::get_paper_status,
+            commands::papers::get_all_papers_status,
         ])
         .setup(|app| {
             log::info!("Futurnal Desktop Shell initialized");

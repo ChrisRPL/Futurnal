@@ -13,6 +13,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Send,
   Mic,
@@ -26,6 +27,9 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { multimodalApi } from '@/lib/multimodalApi';
+import { SlashCommandPopover } from './SlashCommandPopover';
+import { filterCommands, parseSlashCommand, getHelpText, type SlashCommand } from '@/data/commands';
+import { useUIStore } from '@/stores/uiStore';
 
 // Supported attachment types
 type AttachmentType = 'image' | 'file';
@@ -45,6 +49,8 @@ interface ChatInputProps {
   onChange: (value: string) => void;
   /** Submit handler (text + optional attachments) */
   onSubmit: (text: string, attachments?: Attachment[]) => void;
+  /** Handler for slash command chat actions */
+  onSlashCommand?: (action: string, args: string) => void;
   /** Whether the chat is processing */
   isLoading?: boolean;
   /** Placeholder text */
@@ -191,6 +197,7 @@ export function ChatInput({
   value,
   onChange,
   onSubmit,
+  onSlashCommand,
   isLoading = false,
   placeholder = 'Ask about your knowledge...',
   enableVoice = true,
@@ -198,13 +205,78 @@ export function ChatInput({
   enableFiles = true,
   className,
 }: ChatInputProps) {
+  const navigate = useNavigate();
+  const openCommandPalette = useUIStore((state) => state.openCommandPalette);
+
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [showSlashCommands, setShowSlashCommands] = useState(false);
+  const [slashFilter, setSlashFilter] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputContainerRef = useRef<HTMLDivElement>(null);
 
   const { isRecording, isProcessing, isSupported: voiceSupported, error, startRecording, stopRecording, setIsProcessing } =
     useVoiceRecording();
+
+  // Check for slash command mode
+  useEffect(() => {
+    if (value.startsWith('/')) {
+      const filter = value.slice(1).split(' ')[0];
+      setSlashFilter(filter);
+      // Only show if there's no space yet (user is still typing command name)
+      setShowSlashCommands(!value.includes(' ') || value === '/');
+    } else {
+      setShowSlashCommands(false);
+      setSlashFilter('');
+    }
+  }, [value]);
+
+  // Handle slash command selection
+  const handleSlashCommandSelect = useCallback(
+    (command: SlashCommand) => {
+      setShowSlashCommands(false);
+
+      switch (command.handlerType) {
+        case 'navigate':
+          if (command.route) {
+            navigate(command.route);
+          }
+          onChange('');
+          break;
+
+        case 'store':
+          if (command.name === 'search') {
+            openCommandPalette();
+          }
+          onChange('');
+          break;
+
+        case 'modal':
+          // TODO: Implement modal opening
+          onChange('');
+          break;
+
+        case 'chat':
+          if (command.hasArgs) {
+            // Set the command with a space for user to type args
+            onChange(`/${command.name} `);
+            textareaRef.current?.focus();
+          } else {
+            // Execute immediately
+            if (command.chatAction === 'show_help') {
+              // Send help text as a message
+              onSubmit(getHelpText());
+            } else if (onSlashCommand && command.chatAction) {
+              onSlashCommand(command.chatAction, '');
+            }
+            onChange('');
+          }
+          break;
+      }
+    },
+    [navigate, openCommandPalette, onChange, onSubmit, onSlashCommand]
+  );
 
   // Auto-resize textarea
   useEffect(() => {
@@ -218,9 +290,19 @@ export function ChatInput({
   const handleSubmit = useCallback(() => {
     if ((!value.trim() && attachments.length === 0) || isLoading) return;
 
+    // Check for slash command with args
+    const parsed = parseSlashCommand(value);
+    if (parsed && parsed.command.handlerType === 'chat' && parsed.command.chatAction) {
+      if (onSlashCommand) {
+        onSlashCommand(parsed.command.chatAction, parsed.args);
+      }
+      onChange('');
+      return;
+    }
+
     onSubmit(value, attachments.length > 0 ? attachments : undefined);
     setAttachments([]);
-  }, [value, attachments, isLoading, onSubmit]);
+  }, [value, attachments, isLoading, onSubmit, onSlashCommand, onChange]);
 
   // Handle key down
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -321,7 +403,15 @@ export function ChatInput({
   const hasContent = value.trim() || attachments.length > 0;
 
   return (
-    <div className={cn('space-y-2', className)}>
+    <div ref={inputContainerRef} className={cn('space-y-2 relative', className)}>
+      {/* Slash Command Popover */}
+      <SlashCommandPopover
+        filter={slashFilter}
+        isOpen={showSlashCommands}
+        onSelect={handleSlashCommandSelect}
+        onClose={() => setShowSlashCommands(false)}
+      />
+
       {/* Attachments preview */}
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-2 px-1">

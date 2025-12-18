@@ -240,6 +240,67 @@ a:hover {
   }
 }
 
+/* ===== GLASS/FROSTED STYLING ===== */
+.glass {
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.glass-subtle {
+  background: rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.light .glass {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.light .glass-subtle {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+/* Glass border with gradient */
+.glass-border {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-border:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.light .glass-border {
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.light .glass-border:hover {
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+/* Sidebar slide animation */
+@keyframes sidebar-expand {
+  from {
+    width: 3.5rem;
+    opacity: 0.8;
+  }
+  to {
+    width: 16rem;
+    opacity: 1;
+  }
+}
+
+@keyframes sidebar-collapse {
+  from {
+    width: 16rem;
+    opacity: 1;
+  }
+  to {
+    width: 3.5rem;
+    opacity: 0.8;
+  }
+}
+
 /* ===== MARKDOWN IN CHAT BUBBLES ===== */
 .chat-markdown {
   /* Paragraphs */

@@ -491,3 +491,78 @@ pub async fn trigger_insight_scan() -> Result<InsightStatsResponse, String> {
 
     Ok(response)
 }
+
+// ============================================================================
+// User Insight Saving (Phase C: Save Insight)
+// ============================================================================
+
+/// Request to save a user insight from chat.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveUserInsightRequest {
+    pub content: String,
+    pub conversation_id: Option<String>,
+    pub related_entities: Vec<String>,
+    pub source: String,
+}
+
+/// Response from saving a user insight.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveUserInsightResponse {
+    pub success: bool,
+    pub insight_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Save a user-generated insight from chat conversation.
+///
+/// Calls: `futurnal insights save --content "..." --json [--conversation-id ID] [--entities e1,e2]`
+#[command]
+pub async fn save_user_insight(
+    request: SaveUserInsightRequest,
+) -> Result<SaveUserInsightResponse, String> {
+    let mut args = vec![
+        "insights".to_string(),
+        "save".to_string(),
+        "--content".to_string(),
+        request.content.clone(),
+        "--json".to_string(),
+    ];
+
+    if let Some(conv_id) = &request.conversation_id {
+        args.push("--conversation-id".to_string());
+        args.push(conv_id.clone());
+    }
+
+    if !request.related_entities.is_empty() {
+        args.push("--entities".to_string());
+        args.push(request.related_entities.join(","));
+    }
+
+    args.push("--source".to_string());
+    args.push(request.source.clone());
+
+    let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+    let response: SaveUserInsightResponse = match crate::python::execute_cli(&args_ref).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            log::warn!("Save user insight CLI failed: {}", e);
+            return Ok(SaveUserInsightResponse {
+                success: false,
+                insight_id: None,
+                error: Some(format!("Failed to save insight: {}", e)),
+            });
+        }
+    };
+
+    log::info!(
+        "Saved user insight: {:?} (content: {}...)",
+        response.insight_id,
+        &request.content[..request.content.len().min(50)]
+    );
+
+    Ok(response)
+}

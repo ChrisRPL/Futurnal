@@ -18,14 +18,16 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { MessageSquare, X, Link2, Trash2 } from 'lucide-react';
+import { MessageSquare, X, Link2, Trash2, FileText, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
 import { multimodalApi } from '@/lib/multimodalApi';
+import { papersApi, type AgenticSearchResponse, type ScoredPaper } from '@/lib/api';
 import { ChatBubble } from './ChatBubble';
 import { MessageLoading } from './MessageLoading';
 import { ChatInput, type Attachment } from './ChatInput';
 import { ChatModelSelector } from './ChatModelSelector';
+import { PaperSearchResults, type SearchResult } from './PaperSearchResults';
 
 interface ChatInterfaceProps {
   /** Session ID to use (creates new if not provided) */
@@ -58,6 +60,10 @@ export function ChatInterface({
 }: ChatInterfaceProps) {
   const [input, setInput] = useState('');
   const [processingStatus, setProcessingStatus] = useState<string | null>(null);
+  const [paperSearchResults, setPaperSearchResults] = useState<SearchResult | null>(null);
+  const [agenticSearchResults, setAgenticSearchResults] = useState<AgenticSearchResponse | null>(null);
+  const [isPaperSearching, setIsPaperSearching] = useState(false);
+  const [searchProgress, setSearchProgress] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -258,6 +264,89 @@ export function ChatInterface({
     }
   };
 
+  // Handle slash commands
+  const handleSlashCommand = useCallback(
+    async (action: string, args: string) => {
+      console.log('[Chat] Slash command:', action, args);
+
+      switch (action) {
+        case 'save_insight':
+          // Send a special message to save insight
+          await sendMessage(`[SYSTEM: Save insight] ${args || 'Save the key insights from our conversation'}`);
+          break;
+
+        case 'paper_search':
+          // Use agentic paper search for intelligent query handling
+          if (!args.trim()) {
+            await sendMessage('[Paper Search] Please provide a search query. Example: /paper causal inference');
+            break;
+          }
+
+          setIsPaperSearching(true);
+          setPaperSearchResults(null);
+          setAgenticSearchResults(null);
+          setSearchProgress('Analyzing query...');
+
+          try {
+            console.log('[Chat] Agentic paper search for:', args);
+
+            // Use agentic search for intelligent multi-strategy search
+            const response = await papersApi.agenticSearch(args.trim());
+
+            if (response.success && response.papers.length > 0) {
+              // Store the full agentic results (includes synthesis, suggestions)
+              setAgenticSearchResults(response);
+
+              // Convert to SearchResult format for PaperSearchResults component (camelCase)
+              const searchResult: SearchResult = {
+                query: response.query,
+                total: response.totalEvaluated,
+                papers: response.papers.map((sp: ScoredPaper) => ({
+                  paperId: sp.paperId,
+                  title: sp.title,
+                  authors: sp.authors.map(a => ({ name: a.name, authorId: a.authorId })),
+                  year: sp.year,
+                  abstractText: sp.abstractText,
+                  venue: sp.venue,
+                  citationCount: sp.citationCount,
+                  pdfUrl: sp.pdfUrl,
+                  semanticScholarUrl: sp.sourceUrl,
+                })),
+                searchTimeMs: response.searchTimeMs,
+              };
+              setPaperSearchResults(searchResult);
+            } else if (response.synthesis) {
+              // No papers but we have synthesis (maybe suggestions)
+              setAgenticSearchResults(response);
+            } else {
+              await sendMessage(`No papers found for "${args}". Try different keywords or a broader search term.`);
+            }
+          } catch (error) {
+            console.error('[Chat] Agentic paper search failed:', error);
+            await sendMessage(`Paper search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          } finally {
+            setIsPaperSearching(false);
+            setSearchProgress('');
+          }
+          break;
+
+        case 'causal_analysis':
+          // Send a special message for causal analysis
+          await sendMessage(`[SYSTEM: Causal analysis] Analyze causal factors for: ${args}`);
+          break;
+
+        case 'show_insights':
+          // Send a special message to show insights
+          await sendMessage('[SYSTEM: Show insights] Show me the emergent insights from my data');
+          break;
+
+        default:
+          console.log('[Chat] Unknown slash command action:', action);
+      }
+    },
+    [sendMessage]
+  );
+
   return (
     <div className={cn('flex flex-col h-full bg-black', className)}>
       {/* Header */}
@@ -358,6 +447,7 @@ export function ChatInterface({
             key={`${msg.timestamp}-${i}`}
             message={msg}
             onEntityClick={onEntityClick}
+            sessionId={currentSessionId || undefined}
           />
         ))}
 
@@ -372,6 +462,113 @@ export function ChatInterface({
         {/* Loading indicator */}
         {isLoading && <MessageLoading />}
 
+        {/* Paper search loading indicator */}
+        {isPaperSearching && (
+          <div className="flex items-center gap-3 px-4 py-3 bg-white/5 border border-white/10 rounded-lg">
+            <Loader2 className="h-4 w-4 text-white/60 animate-spin" />
+            <div className="flex flex-col">
+              <span className="text-sm text-white/70">Intelligent paper search in progress...</span>
+              {searchProgress && (
+                <span className="text-xs text-white/40">{searchProgress}</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Agentic paper search results */}
+        {(paperSearchResults || agenticSearchResults) && (
+          <div className="p-4 bg-white/[0.02] border border-white/10 rounded-lg space-y-4">
+            {/* Header */}
+            <div className="flex items-center gap-2 pb-2 border-b border-white/10">
+              <FileText className="h-4 w-4 text-white/60" />
+              <span className="text-sm font-medium text-white/80">
+                Agentic Paper Search: "{agenticSearchResults?.query || paperSearchResults?.query}"
+              </span>
+              <button
+                onClick={() => {
+                  setPaperSearchResults(null);
+                  setAgenticSearchResults(null);
+                }}
+                className="ml-auto p-1 text-white/40 hover:text-white/60 transition-colors"
+                title="Dismiss results"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Synthesis - AI summary of findings */}
+            {agenticSearchResults?.synthesis && (
+              <div className="p-3 bg-white/5 rounded-lg border border-white/10">
+                <div className="text-xs font-medium text-white/50 uppercase tracking-wider mb-2">
+                  Synthesis
+                </div>
+                <p className="text-sm text-white/80 leading-relaxed">
+                  {agenticSearchResults.synthesis}
+                </p>
+              </div>
+            )}
+
+            {/* Strategies tried */}
+            {agenticSearchResults?.strategiesTried && agenticSearchResults.strategiesTried.length > 0 && (
+              <div className="text-xs text-white/40">
+                <span className="font-medium">Strategies tried: </span>
+                {agenticSearchResults.strategiesTried.map(s => s.type).join(', ')}
+                <span className="mx-2">•</span>
+                <span>{agenticSearchResults.totalEvaluated} papers evaluated</span>
+              </div>
+            )}
+
+            {/* Paper results */}
+            {paperSearchResults && paperSearchResults.papers.length > 0 && (
+              <PaperSearchResults
+                results={paperSearchResults}
+                onDownload={(papers) => {
+                  console.log('[Chat] Papers added to KG:', papers.length);
+                }}
+              />
+            )}
+
+            {/* Suggestions */}
+            {agenticSearchResults?.suggestions && agenticSearchResults.suggestions.length > 0 && (
+              <div className="pt-3 border-t border-white/10">
+                <div className="text-xs font-medium text-white/50 uppercase tracking-wider mb-2">
+                  Try these searches
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {agenticSearchResults.suggestions.map((suggestion, i) => {
+                    // Extract search term from suggestion
+                    const match = suggestion.match(/["']([^"']+)["']/i) ||
+                                  suggestion.match(/search\s+for\s+(.+?)(?:\.|$)/i) ||
+                                  suggestion.match(/try\s+(.+?)(?:\.|$)/i);
+                    const searchTerm = match ? match[1] : suggestion.replace(/^(try|search|search for)\s*/i, '').trim();
+
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => {
+                          // Directly trigger a new paper search
+                          handleSlashCommand('paper_search', searchTerm);
+                        }}
+                        className="px-2 py-1 text-xs bg-white/5 border border-white/10 rounded text-white/60 hover:text-white/80 hover:bg-white/10 transition-colors"
+                        title={`Search for: ${searchTerm}`}
+                      >
+                        {searchTerm.length > 40 ? `${searchTerm.slice(0, 40)}...` : searchTerm}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Search time */}
+            {agenticSearchResults?.searchTimeMs && (
+              <div className="text-xs text-white/30 text-right">
+                Search completed in {(agenticSearchResults.searchTimeMs / 1000).toFixed(1)}s
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Scroll anchor */}
         <div ref={messagesEndRef} />
       </div>
@@ -382,6 +579,7 @@ export function ChatInterface({
           value={input}
           onChange={setInput}
           onSubmit={handleSubmit}
+          onSlashCommand={handleSlashCommand}
           isLoading={isLoading || !!processingStatus}
           enableVoice={enableVoice}
           enableImages={enableImages}

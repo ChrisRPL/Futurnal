@@ -12,21 +12,15 @@ import { useAuth } from '@/contexts/AuthContext';
 import { openSubscriptionPortal } from '@/lib/subscription';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { CommandPalette } from '@/components/search';
-import { GraphMiniView } from '@/components/graph';
 import { ChatInterface } from '@/components/chat';
-import { ActivityStreamWidget } from '@/components/activity';
 import { ThemeLogo } from '@/components/ThemeLogo';
+import { Sidebar } from '@/components/layout';
 import { useUIStore } from '@/stores/uiStore';
 import {
-  Search,
-  FolderPlus,
-  Network,
-  Settings,
   CircleDot,
   HardDrive,
   Database,
   LogOut,
-  Clock,
 } from 'lucide-react';
 
 // Pages
@@ -38,16 +32,6 @@ import GraphPage from '@/pages/Graph';
 import ConnectorsPage from '@/pages/Connectors';
 import SettingsPage from '@/pages/Settings';
 import ActivityPage from '@/pages/Activity';
-
-/**
- * Get time-based greeting
- */
-function getGreeting(): string {
-  const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 18) return 'Good afternoon';
-  return 'Good evening';
-}
 
 /**
  * Compact stat badge for header
@@ -69,51 +53,16 @@ function StatBadge({ label, value, icon }: StatBadgeProps) {
 }
 
 /**
- * Compact quick action button for inline row
+ * Dashboard / Home page - Chat-first with sidebar layout
  */
-interface QuickActionProps {
-  title: string;
-  icon: React.ReactNode;
-  primary?: boolean;
-  onClick?: () => void;
-}
-
-function QuickAction({ title, icon, primary = false, onClick }: QuickActionProps) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-2 px-4 py-2.5 transition-all ${
-        primary
-          ? 'bg-[var(--color-inverse-bg)] text-[var(--color-inverse-text)] hover:bg-[var(--color-inverse-bg-hover)]'
-          : 'bg-transparent border border-[var(--color-border)] text-[var(--color-text-primary)] hover:border-[var(--color-border-active)]'
-      }`}
-    >
-      <div className={primary ? 'text-[var(--color-inverse-text)]' : 'text-[var(--color-text-tertiary)]'}>
-        {icon}
-      </div>
-      <span className={`text-sm font-medium ${primary ? 'text-[var(--color-inverse-text)]' : 'text-[var(--color-text-primary)]'}`}>
-        {title}
-      </span>
-    </button>
-  );
-}
-
-
-/**
- * Dashboard / Home page
- */
-interface HomePageProps {
-  /** Handler to open the search palette */
-  onOpenSearch?: () => void;
-}
-
-function HomePage({ onOpenSearch }: HomePageProps) {
+function HomePage() {
   const navigate = useNavigate();
   const { data: orchestratorStatus, isLoading: isLoadingStatus } = useOrchestratorStatus();
   const { data: connectors } = useConnectors();
   const { data: graphStats } = useGraphStats();
   const { user, logout } = useAuth();
   const { isPro, isLoading: isTierLoading } = useSubscription();
+  const openCommandPalette = useUIStore((state) => state.openCommandPalette);
 
   const isActive = orchestratorStatus?.running ?? false;
   const totalNodes = graphStats?.total_nodes ?? 0;
@@ -134,42 +83,42 @@ function HomePage({ onOpenSearch }: HomePageProps) {
   };
 
   return (
-    <div className="min-h-screen bg-[var(--color-bg-primary)] flex flex-col">
-      {/* Header with stats badges */}
+    <div className="h-screen bg-[var(--color-bg-primary)] flex flex-col overflow-hidden">
+      {/* Header - minimal */}
       <header className="border-b border-[var(--color-border)] flex-shrink-0">
-        <div className="flex items-center justify-between px-6 py-4 max-w-7xl mx-auto">
+        <div className="flex items-center justify-between px-4 py-3">
           {/* Logo */}
           <Link to="/dashboard" className="no-underline">
-            <ThemeLogo variant="horizontal" className="h-7 w-auto" />
+            <ThemeLogo variant="horizontal" className="h-6 w-auto" />
           </Link>
 
           {/* Center: Stats badges */}
-          <div className="hidden lg:flex items-center gap-3">
+          <div className="hidden md:flex items-center gap-2">
             <StatBadge
               label="Nodes"
               value={totalNodes.toLocaleString()}
-              icon={<CircleDot className="w-3.5 h-3.5" />}
+              icon={<CircleDot className="w-3 h-3" />}
             />
             <StatBadge
               label="Sources"
               value={sourcesConnected}
-              icon={<Database className="w-3.5 h-3.5" />}
+              icon={<Database className="w-3 h-3" />}
             />
             <StatBadge
               label="Memory"
               value={memoryUsage}
-              icon={<HardDrive className="w-3.5 h-3.5" />}
+              icon={<HardDrive className="w-3 h-3" />}
             />
           </div>
 
           {/* Right side */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             {/* Status */}
             {isLoadingStatus ? (
               <span className="text-xs text-[var(--color-text-muted)]">...</span>
             ) : (
               <div className="flex items-center gap-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-[var(--color-text-primary)]' : 'bg-[var(--color-text-faint)]'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-400' : 'bg-[var(--color-text-faint)]'}`} />
                 <span className="text-xs text-[var(--color-text-tertiary)]">
                   {isActive ? 'Active' : 'Idle'}
                 </span>
@@ -189,8 +138,8 @@ function HomePage({ onOpenSearch }: HomePageProps) {
 
             {/* User */}
             {user && (
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-[var(--color-text-muted)] hidden md:block">{user.email}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[var(--color-text-muted)] hidden lg:block">{user.email}</span>
 
                 {/* Manage Subscription - only show for Pro */}
                 {isPro && (
@@ -205,6 +154,7 @@ function HomePage({ onOpenSearch }: HomePageProps) {
                 <button
                   onClick={handleLogout}
                   className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+                  title="Logout"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                 </button>
@@ -214,26 +164,15 @@ function HomePage({ onOpenSearch }: HomePageProps) {
         </div>
       </header>
 
-      {/* Main - Chat-centric layout */}
-      <main className="flex-1 flex flex-col px-6 py-6 max-w-5xl mx-auto w-full">
-        {/* Greeting - compact */}
-        <div className="mb-4">
-          <h1 className="text-2xl font-brand tracking-wide text-[var(--color-text-primary)]">
-            {getGreeting()}
-          </h1>
-          <p className="text-sm text-[var(--color-text-tertiary)]">
-            Ask anything about your knowledge
-          </p>
-        </div>
+      {/* Main content with sidebar */}
+      <div className="flex-1 flex min-h-0">
+        {/* Sidebar */}
+        <Sidebar />
 
-        {/* Chat with Knowledge - HERO SECTION
-            Step 03: Conversational AI
-            Research Foundation:
-            - ProPerSim (2509.21730v1): Proactive + personalized
-            - Causal-Copilot (2504.13263v2): Natural language exploration
-        */}
-        <div className="flex-1 min-h-0 mb-6">
-          <div className="border border-[var(--color-border)] h-full" style={{ minHeight: '50vh' }}>
+        {/* Chat - Full width main area */}
+        <main className="flex-1 flex flex-col min-h-0">
+          {/* Chat Interface - Full height */}
+          <div className="flex-1 min-h-0">
             <ChatInterface
               sessionId="dashboard-main"
               onEntityClick={(entityId) => navigate(`/graph?select=${encodeURIComponent(entityId)}`)}
@@ -242,93 +181,30 @@ function HomePage({ onOpenSearch }: HomePageProps) {
               enableFiles
             />
           </div>
-        </div>
 
-        {/* Quick Actions - Compact inline row */}
-        <div className="flex flex-wrap items-center gap-3 mb-6">
-          <QuickAction
-            title="Search"
-            icon={<Search className="w-4 h-4" />}
-            primary
-            onClick={onOpenSearch}
-          />
-          <QuickAction
-            title="Add Source"
-            icon={<FolderPlus className="w-4 h-4" />}
-            onClick={() => navigate('/connectors')}
-          />
-          <QuickAction
-            title="Graph"
-            icon={<Network className="w-4 h-4" />}
-            onClick={() => navigate('/graph')}
-          />
-          <QuickAction
-            title="Settings"
-            icon={<Settings className="w-4 h-4" />}
-            onClick={() => navigate('/settings')}
-          />
-          <QuickAction
-            title="Activity"
-            icon={<Clock className="w-4 h-4" />}
-            onClick={() => navigate('/activity')}
-          />
-        </div>
-
-        {/* Activity Stream Widget - Step 08: Frontend Intelligence Integration
-            Research Foundation:
-            - AgentFlow: Activity tracking patterns
-            - RLHI: User interaction history
-        */}
-        <details className="group border border-[var(--color-border)] mb-4" open>
-          <summary className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-[var(--color-surface)] transition-colors">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-[var(--color-text-tertiary)]" />
-              <span className="text-sm font-medium text-[var(--color-text-primary)]">Activity Stream</span>
-            </div>
-            <span className="text-xs text-[var(--color-text-tertiary)] group-open:hidden">Click to expand</span>
-            <button
-              onClick={(e) => { e.preventDefault(); navigate('/activity'); }}
-              className="text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hidden group-open:block"
-            >
-              Open full view →
-            </button>
-          </summary>
-          <div className="border-t border-[var(--color-border)]">
-            <ActivityStreamWidget maxEvents={8} />
-          </div>
-        </details>
-
-        {/* Knowledge Graph Mini-View - Secondary, collapsible */}
-        <details className="group border border-[var(--color-border)]">
-          <summary className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-[var(--color-surface)] transition-colors">
-            <div className="flex items-center gap-2">
-              <Network className="w-4 h-4 text-[var(--color-text-tertiary)]" />
-              <span className="text-sm font-medium text-[var(--color-text-primary)]">Knowledge Graph</span>
-              <span className="text-xs text-[var(--color-text-muted)]">
-                {totalNodes} nodes · {sourcesConnected} sources
+          {/* Command hint */}
+          <div className="flex-shrink-0 px-4 py-2 border-t border-[var(--color-border)] bg-[var(--color-bg-secondary)]">
+            <div className="flex items-center justify-center gap-4 text-xs text-[var(--color-text-faint)]">
+              <button
+                onClick={openCommandPalette}
+                className="flex items-center gap-1.5 hover:text-[var(--color-text-tertiary)] transition-colors"
+              >
+                <kbd className="px-1.5 py-0.5 bg-[var(--color-surface)] border border-[var(--color-border)] rounded text-[10px]">
+                  ⌘K
+                </kbd>
+                <span>for commands</span>
+              </button>
+              <span className="text-[var(--color-text-faint)]">·</span>
+              <span className="flex items-center gap-1.5">
+                <kbd className="px-1.5 py-0.5 bg-[var(--color-surface)] border border-[var(--color-border)] rounded text-[10px]">
+                  /
+                </kbd>
+                <span>for quick actions</span>
               </span>
             </div>
-            <span className="text-xs text-[var(--color-text-tertiary)] group-open:hidden">Click to expand</span>
-            <button
-              onClick={(e) => { e.preventDefault(); navigate('/graph'); }}
-              className="text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hidden group-open:block"
-            >
-              Open full view →
-            </button>
-          </summary>
-          <div className="border-t border-[var(--color-border)]">
-            <GraphMiniView className="h-64" />
           </div>
-        </details>
-      </main>
-
-      {/* Footer - minimal */}
-      <footer className="border-t border-[var(--color-surface)] px-6 py-4 flex-shrink-0">
-        <div className="max-w-5xl mx-auto flex items-center justify-between text-xs text-[var(--color-text-faint)]">
-          <p>Futurnal v{import.meta.env.VITE_APP_VERSION ?? '0.1.0'}</p>
-          <p className="font-tagline italic">Know Yourself More</p>
-        </div>
-      </footer>
+        </main>
+      </div>
     </div>
   );
 }
@@ -387,7 +263,7 @@ function App() {
           path="/dashboard"
           element={
             <ProtectedRoute>
-              <HomePage onOpenSearch={openCommandPalette} />
+              <HomePage />
             </ProtectedRoute>
           }
         />

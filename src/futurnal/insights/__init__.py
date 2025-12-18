@@ -22,10 +22,14 @@ proactive, autonomous insight generation.
 
 from .emergent_insights import EmergentInsight, InsightGenerator
 from .curiosity_engine import CuriosityEngine, KnowledgeGap
+from .insight_storage import UserInsight, InsightStorageService, get_insight_service
 
 __all__ = [
     "EmergentInsight",
     "InsightGenerator",
     "CuriosityEngine",
     "KnowledgeGap",
+    "UserInsight",
+    "InsightStorageService",
+    "get_insight_service",
 ]
