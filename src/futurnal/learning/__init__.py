@@ -38,6 +38,15 @@ from futurnal.learning.token_priors import (
 from futurnal.learning.integration import (
     ExperientialLearningPipeline,
 )
+from futurnal.learning.reflective_reasoning import (
+    ReasoningStrategy,
+    ReasoningOutcome,
+    StrategyWeight,
+    AdaptivePolicyOptimizer,
+    ReasoningStep,
+    ReasoningTrace,
+    ReflectiveReasoner,
+)
 
 __all__ = [
     # World State
@@ -54,4 +63,12 @@ __all__ = [
     "TokenPriorStore",
     # Integration
     "ExperientialLearningPipeline",
+    # Reflective Reasoning (MM-HELIX AHPO)
+    "ReasoningStrategy",
+    "ReasoningOutcome",
+    "StrategyWeight",
+    "AdaptivePolicyOptimizer",
+    "ReasoningStep",
+    "ReasoningTrace",
+    "ReflectiveReasoner",
 ]

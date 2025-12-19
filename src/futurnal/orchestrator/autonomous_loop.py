@@ -34,6 +34,9 @@ from weakref import WeakSet
 if TYPE_CHECKING:
     from futurnal.insights.curiosity_engine import CuriosityEngine
     from futurnal.insights.emergent_insights import InsightGenerator
+    from futurnal.insights.hypothesis_generation import HypothesisPipeline
+    from futurnal.search.temporal.correlation import TemporalCorrelationDetector
+    from futurnal.search.causal.bradford_hill import BradfordHillValidator
     from futurnal.learning.token_priors import TokenPriorStore
     from futurnal.orchestrator.insight_jobs import InsightJobExecutor
 
@@ -55,6 +58,12 @@ class AutonomousEventType(str, Enum):
     CORRELATION_DETECTED = "correlation_detected"
     GAP_IDENTIFIED = "gap_identified"
     INSIGHT_GENERATED = "insight_generated"
+
+    # Causal discovery events
+    HYPOTHESIS_GENERATED = "hypothesis_generated"
+    HYPOTHESIS_VALIDATED = "hypothesis_validated"
+    ICDA_VERIFICATION_PENDING = "icda_verification_pending"
+    BRADFORD_HILL_COMPLETED = "bradford_hill_completed"
 
     # Learning events
     PRIOR_UPDATED = "prior_updated"
@@ -292,6 +301,9 @@ class AutonomousLoop:
         insight_executor: Optional["InsightJobExecutor"] = None,
         curiosity_engine: Optional["CuriosityEngine"] = None,
         insight_generator: Optional["InsightGenerator"] = None,
+        hypothesis_pipeline: Optional["HypothesisPipeline"] = None,
+        correlation_detector: Optional["TemporalCorrelationDetector"] = None,
+        bradford_hill_validator: Optional["BradfordHillValidator"] = None,
         token_prior_store: Optional["TokenPriorStore"] = None,
         pkg_graph: Optional[Any] = None,
         config: Optional[AutonomousLoopConfig] = None,
@@ -304,6 +316,9 @@ class AutonomousLoop:
             insight_executor: Executor for insight jobs
             curiosity_engine: CuriosityEngine for gap detection
             insight_generator: InsightGenerator for pattern discovery
+            hypothesis_pipeline: Pipeline for causal hypothesis generation
+            correlation_detector: Detector for temporal correlations
+            bradford_hill_validator: Validator for causal claims
             token_prior_store: Store for learned priors
             pkg_graph: Personal Knowledge Graph
             config: Loop configuration
@@ -313,6 +328,9 @@ class AutonomousLoop:
         self._insight_executor = insight_executor
         self._curiosity_engine = curiosity_engine
         self._insight_generator = insight_generator
+        self._hypothesis_pipeline = hypothesis_pipeline
+        self._correlation_detector = correlation_detector
+        self._bradford_hill_validator = bradford_hill_validator
         self._token_prior_store = token_prior_store
         self._pkg_graph = pkg_graph
         self._config = config or AutonomousLoopConfig()
@@ -479,8 +497,10 @@ class AutonomousLoop:
 
         This is the core of the autonomous loop:
         1. Run CuriosityEngine to detect gaps
-        2. Run InsightGenerator to find patterns
-        3. Update TokenPriors with discoveries
+        2. Run correlation detection for temporal patterns
+        3. Generate hypotheses from correlations
+        4. Validate with Bradford-Hill criteria
+        5. Update TokenPriors with discoveries
         """
         # Check concurrent job limit
         if self._active_insight_jobs >= self._config.max_concurrent_insight_jobs:
@@ -500,8 +520,11 @@ class AutonomousLoop:
             insights_generated = 0
             gaps_found = 0
             correlations_found = 0
+            hypotheses_generated = 0
+            hypotheses_validated = 0
 
             # Step 1: Run CuriosityEngine to find knowledge gaps
+            gaps = []
             if self._curiosity_engine and self._pkg_graph:
                 try:
                     gaps = self._curiosity_engine.detect_gaps(self._pkg_graph)
@@ -517,12 +540,107 @@ class AutonomousLoop:
                 except Exception as e:
                     logger.error(f"CuriosityEngine error: {e}")
 
-            # Step 2: Run insight generation (via executor or directly)
+            # Step 2: Run correlation detection
+            correlations = []
+            if self._correlation_detector:
+                try:
+                    if hasattr(self._correlation_detector, 'scan_all_correlations'):
+                        correlations = self._correlation_detector.scan_all_correlations()
+                    correlations_found = len(correlations)
+                    logger.info(f"Detected {correlations_found} temporal correlations")
+
+                    # Emit correlation events
+                    for corr in correlations[:5]:
+                        self._event_bus.emit(AutonomousEvent(
+                            event_type=AutonomousEventType.CORRELATION_DETECTED,
+                            payload={
+                                "event_a": corr.event_a_type if hasattr(corr, 'event_a_type') else str(corr),
+                                "event_b": corr.event_b_type if hasattr(corr, 'event_b_type') else "",
+                                "confidence": corr.confidence if hasattr(corr, 'confidence') else 0.0,
+                            },
+                        ))
+                except Exception as e:
+                    logger.error(f"Correlation detection error: {e}")
+
+            # Step 3: Generate hypotheses from correlations
+            hypotheses = []
+            if correlations and self._hypothesis_pipeline:
+                try:
+                    hypotheses = await self._hypothesis_pipeline.process_correlations(
+                        correlations=correlations,
+                        max_hypotheses=10,
+                    )
+                    hypotheses_generated = len(hypotheses)
+                    logger.info(f"Generated {hypotheses_generated} causal hypotheses")
+
+                    # Emit hypothesis generation events
+                    for hyp in hypotheses:
+                        self._event_bus.emit(AutonomousEvent(
+                            event_type=AutonomousEventType.HYPOTHESIS_GENERATED,
+                            payload={
+                                "hypothesis_id": hyp.hypothesis_id,
+                                "cause": hyp.cause_type,
+                                "effect": hyp.effect_type,
+                                "confidence": hyp.confidence,
+                            },
+                        ))
+                except Exception as e:
+                    logger.error(f"Hypothesis generation error: {e}")
+
+            # Step 4: Validate hypotheses with Bradford-Hill
+            validated_hypotheses = []
+            if hypotheses and self._bradford_hill_validator:
+                for hyp in hypotheses:
+                    try:
+                        corr = next(
+                            (c for c in correlations
+                             if hasattr(c, 'event_a_type') and c.event_a_type == hyp.cause_type
+                             and hasattr(c, 'event_b_type') and c.event_b_type == hyp.effect_type),
+                            None
+                        )
+                        if corr:
+                            report = await self._bradford_hill_validator.validate(
+                                correlation=corr,
+                                hypothesis=hyp,
+                            )
+                            self._event_bus.emit(AutonomousEvent(
+                                event_type=AutonomousEventType.BRADFORD_HILL_COMPLETED,
+                                payload={
+                                    "hypothesis_id": hyp.hypothesis_id,
+                                    "overall_score": report.overall_score,
+                                    "verdict": report.verdict.value if hasattr(report.verdict, 'value') else str(report.verdict),
+                                },
+                            ))
+                            if report.overall_score >= 0.6:
+                                validated_hypotheses.append(hyp)
+                                hyp.bradford_hill_score = report.overall_score
+                    except Exception as e:
+                        logger.warning(f"Bradford-Hill validation error: {e}")
+
+                hypotheses_validated = len(validated_hypotheses)
+                logger.info(f"Validated {hypotheses_validated} hypotheses with Bradford-Hill")
+
+                # Emit ICDA pending event for validated hypotheses
+                if validated_hypotheses:
+                    self._event_bus.emit(AutonomousEvent(
+                        event_type=AutonomousEventType.ICDA_VERIFICATION_PENDING,
+                        payload={
+                            "hypothesis_count": len(validated_hypotheses),
+                            "hypotheses": [
+                                {"id": h.hypothesis_id, "text": h.hypothesis_text[:100]}
+                                for h in validated_hypotheses[:5]
+                            ],
+                        },
+                    ))
+
+            # Step 5: Run insight generation (via executor or directly)
             if self._insight_executor:
                 try:
                     result = await self._insight_executor.execute_insight_generation()
                     insights_generated = result.insights_generated
-                    correlations_found = result.correlations_found
+                    # Use executor's correlation count if we didn't detect separately
+                    if correlations_found == 0:
+                        correlations_found = result.correlations_found
 
                     logger.info(
                         f"InsightGenerator produced {insights_generated} insights, "
@@ -534,8 +652,8 @@ class AutonomousLoop:
                 # Direct generation without executor
                 try:
                     insights = self._insight_generator.generate_insights(
-                        correlations=[],
-                        knowledge_gaps=gaps if 'gaps' in dir() else [],
+                        correlations=correlations,
+                        knowledge_gaps=gaps,
                     )
                     insights_generated = len(insights)
 
@@ -547,32 +665,48 @@ class AutonomousLoop:
                 except Exception as e:
                     logger.error(f"Direct insight generation error: {e}")
 
+            # Store validated hypotheses as priors
+            if validated_hypotheses and self._token_prior_store:
+                for hyp in validated_hypotheses:
+                    prior_text = f"Validated causal hypothesis: {hyp.hypothesis_text}"
+                    self._store_priors(prior_text)
+
             # Emit insight generated events
-            if insights_generated > 0:
+            if insights_generated > 0 or hypotheses_generated > 0:
                 self._event_bus.emit(AutonomousEvent(
                     event_type=AutonomousEventType.INSIGHT_GENERATED,
                     payload={
                         "insights_count": insights_generated,
                         "gaps_found": gaps_found,
                         "correlations_found": correlations_found,
+                        "hypotheses_generated": hypotheses_generated,
+                        "hypotheses_validated": hypotheses_validated,
                     },
                 ))
 
             # Notify user of significant discoveries
-            if self._notification_callback and (gaps_found > 3 or insights_generated > 2):
+            if self._notification_callback and (
+                gaps_found > 3 or insights_generated > 2 or hypotheses_validated > 0
+            ):
                 try:
                     await self._notification_callback({
                         "type": "autonomous_discovery",
                         "insights": insights_generated,
                         "gaps": gaps_found,
-                        "message": f"Discovered {insights_generated} new insights and {gaps_found} knowledge gaps",
+                        "hypotheses": hypotheses_validated,
+                        "message": (
+                            f"Discovered {insights_generated} insights, "
+                            f"{gaps_found} knowledge gaps, and "
+                            f"{hypotheses_validated} validated causal hypotheses"
+                        ),
                     })
                 except Exception as e:
                     logger.warning(f"Notification callback error: {e}")
 
             logger.info(
                 f"Autonomous analysis complete: "
-                f"{insights_generated} insights, {gaps_found} gaps, {correlations_found} correlations"
+                f"{insights_generated} insights, {gaps_found} gaps, "
+                f"{correlations_found} correlations, {hypotheses_validated} validated hypotheses"
             )
 
         finally:
@@ -661,6 +795,15 @@ class AutonomousLoop:
                 else None
             ),
             "active_insight_jobs": self._active_insight_jobs,
+            "components": {
+                "curiosity_engine": self._curiosity_engine is not None,
+                "insight_generator": self._insight_generator is not None,
+                "hypothesis_pipeline": self._hypothesis_pipeline is not None,
+                "correlation_detector": self._correlation_detector is not None,
+                "bradford_hill_validator": self._bradford_hill_validator is not None,
+                "token_prior_store": self._token_prior_store is not None,
+                "pkg_graph": self._pkg_graph is not None,
+            },
             "config": {
                 "min_batch_size": self._config.min_ingestion_batch_size,
                 "cooldown_seconds": self._config.insight_cooldown_seconds,
@@ -669,15 +812,48 @@ class AutonomousLoop:
             },
         }
 
+    async def trigger_manual_scan(self) -> Dict[str, Any]:
+        """Trigger a manual analysis scan.
+
+        Useful for testing or after significant data changes.
+
+        Returns:
+            Dictionary with scan results summary
+        """
+        logger.info("Manual scan triggered")
+
+        # Force trigger analysis regardless of pending count
+        original_count = self._pending_ingestion_count
+        self._pending_ingestion_count = self._config.min_ingestion_batch_size
+
+        await self._trigger_analysis()
+
+        # Restore count if nothing was actually processed
+        if original_count > 0:
+            self._pending_ingestion_count = original_count
+
+        return {
+            "triggered": True,
+            "last_analysis_time": (
+                self._last_analysis_time.isoformat()
+                if self._last_analysis_time
+                else None
+            ),
+        }
+
 
 def create_autonomous_loop(
     orchestrator: Any,
     curiosity_engine: Optional["CuriosityEngine"] = None,
     insight_generator: Optional["InsightGenerator"] = None,
     insight_executor: Optional["InsightJobExecutor"] = None,
+    hypothesis_pipeline: Optional["HypothesisPipeline"] = None,
+    correlation_detector: Optional["TemporalCorrelationDetector"] = None,
+    bradford_hill_validator: Optional["BradfordHillValidator"] = None,
     token_prior_store: Optional["TokenPriorStore"] = None,
     pkg_graph: Optional[Any] = None,
     config: Optional[AutonomousLoopConfig] = None,
+    notification_callback: Optional[Callable] = None,
 ) -> tuple[AutonomousEventBus, AutonomousLoop]:
     """Factory function to create and wire up the autonomous loop.
 
@@ -689,9 +865,13 @@ def create_autonomous_loop(
         curiosity_engine: CuriosityEngine instance
         insight_generator: InsightGenerator instance
         insight_executor: InsightJobExecutor instance
+        hypothesis_pipeline: HypothesisPipeline for causal hypothesis generation
+        correlation_detector: TemporalCorrelationDetector for pattern detection
+        bradford_hill_validator: BradfordHillValidator for causal validation
         token_prior_store: TokenPriorStore instance
         pkg_graph: Personal Knowledge Graph
         config: Loop configuration
+        notification_callback: Optional callback for user notifications
 
     Returns:
         Tuple of (AutonomousEventBus, AutonomousLoop)
@@ -701,6 +881,9 @@ def create_autonomous_loop(
             orchestrator=orchestrator,
             curiosity_engine=curiosity_engine,
             insight_generator=insight_generator,
+            hypothesis_pipeline=hypothesis_pipeline,
+            correlation_detector=correlation_detector,
+            bradford_hill_validator=bradford_hill_validator,
         )
 
         await loop.start()
@@ -712,14 +895,18 @@ def create_autonomous_loop(
         insight_executor=insight_executor,
         curiosity_engine=curiosity_engine,
         insight_generator=insight_generator,
+        hypothesis_pipeline=hypothesis_pipeline,
+        correlation_detector=correlation_detector,
+        bradford_hill_validator=bradford_hill_validator,
         token_prior_store=token_prior_store,
         pkg_graph=pkg_graph,
         config=config,
+        notification_callback=notification_callback,
     )
 
     logger.info(
         "Autonomous loop created and wired to orchestrator - "
-        "The Ghost now has a heartbeat"
+        "The Ghost now has a heartbeat (with causal discovery enabled)"
     )
 
     return event_bus, loop

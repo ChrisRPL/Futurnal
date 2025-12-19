@@ -30,6 +30,9 @@ from futurnal.search.answer_generator import AnswerGenerator, AnswerGeneratorCon
 if TYPE_CHECKING:
     from futurnal.search.api import HybridSearchAPI
     from futurnal.learning.integration import ExperientialLearningPipeline
+    from futurnal.insights.hypothesis_generation import HypothesisPipeline, CausalHypothesis
+    from futurnal.search.temporal.correlation import TemporalCorrelationDetector
+    from futurnal.orchestrator.insight_jobs import InsightJobExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +87,7 @@ more personalized and accurate responses.'''
         storage: Optional[SessionStorage] = None,
         context_window_size: int = 10,  # 5 turns = 10 messages
         enable_experiential_learning: bool = True,
+        enable_insight_surfacing: bool = True,
     ) -> None:
         """Initialize chat service.
 
@@ -93,6 +97,7 @@ more personalized and accurate responses.'''
             storage: Optional custom session storage
             context_window_size: Max messages to include in context (default: 10)
             enable_experiential_learning: Whether to inject learned priors into prompts
+            enable_insight_surfacing: Whether to automatically surface causal insights
         """
         self._search_api = search_api
         self._answer_generator = answer_generator
@@ -101,7 +106,17 @@ more personalized and accurate responses.'''
         self._context_window_size = context_window_size
         self._initialized = False
         self._enable_experiential_learning = enable_experiential_learning
+        self._enable_insight_surfacing = enable_insight_surfacing
         self._learning_pipeline: Optional["ExperientialLearningPipeline"] = None
+
+        # Causal discovery integration
+        self._icda_agent: Optional[Any] = None
+        self._hypothesis_pipeline: Optional["HypothesisPipeline"] = None
+        self._correlation_detector: Optional["TemporalCorrelationDetector"] = None
+        self._insight_executor: Optional["InsightJobExecutor"] = None
+
+        # Insight surfacing state
+        self._surfaced_insight_ids: set = set()  # Track which insights we've shown
 
     async def initialize(self) -> None:
         """Initialize service components.
@@ -122,13 +137,17 @@ more personalized and accurate responses.'''
 
         await self._answer_generator.initialize()
 
-        # Initialize search API lazily if needed
+        # Initialize search API lazily if needed - use factory for proper PKG connection
         if self._search_api is None:
             try:
-                from futurnal.search.api import HybridSearchAPI
+                from futurnal.search.api import create_hybrid_search_api
 
-                self._search_api = HybridSearchAPI()
-                logger.info("ChatService: Initialized HybridSearchAPI")
+                # Factory function properly initializes PKG connection for GraphRAG
+                self._search_api = create_hybrid_search_api(
+                    graphrag_enabled=True,
+                    experiential_learning=self._enable_experiential_learning,
+                )
+                logger.info("ChatService: Initialized HybridSearchAPI with GraphRAG")
             except Exception as e:
                 logger.warning(f"ChatService: Could not init search API: {e}")
 
@@ -594,6 +613,9 @@ more personalized and accurate responses.'''
     ) -> List[Dict[str, Any]]:
         """Execute search with conversation context.
 
+        Per ProPerSim: Uses multi-turn context to enhance search queries
+        for better retrieval in follow-up questions.
+
         Args:
             message: Current user message
             conversation_context: Previous conversation history
@@ -606,8 +628,15 @@ more personalized and accurate responses.'''
             logger.warning("Search API not available")
             return []
 
-        # Build search query - optionally enhanced with context
+        # Build context-enhanced search query (ProPerSim multi-turn enhancement)
         search_query = message
+        if conversation_context:
+            # Extract key terms from conversation context to improve search
+            context_terms = self._extract_context_terms(conversation_context)
+            if context_terms:
+                # Append context terms to help with follow-up questions
+                search_query = f"{message} (context: {context_terms})"
+                logger.debug(f"Context-enhanced query: {search_query[:100]}...")
 
         # If there's a context entity, prioritize it in search
         filters = None
@@ -624,6 +653,37 @@ more personalized and accurate responses.'''
         except Exception as e:
             logger.error(f"Search failed: {e}")
             return []
+
+    def _extract_context_terms(self, conversation_context: str) -> str:
+        """Extract key terms from conversation context for search enhancement.
+
+        Identifies important nouns, entities, and topics from recent conversation
+        to help the search engine understand follow-up questions.
+
+        Args:
+            conversation_context: Recent conversation history
+
+        Returns:
+            Space-separated string of key context terms
+        """
+        # Simple extraction: find capitalized words (likely entities/topics)
+        # and quoted phrases from recent conversation
+        import re
+
+        # Extract capitalized words (potential entities/proper nouns)
+        capitalized = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', conversation_context)
+
+        # Extract quoted phrases
+        quoted = re.findall(r'"([^"]+)"', conversation_context)
+        quoted += re.findall(r"'([^']+)'", conversation_context)
+
+        # Combine and deduplicate, limiting to most recent/important
+        all_terms = list(dict.fromkeys(capitalized + quoted))  # Preserve order, remove dupes
+
+        # Limit to 5 most relevant terms to avoid query bloat
+        key_terms = all_terms[:5]
+
+        return " ".join(key_terms)
 
     async def _generate_response(
         self,
@@ -863,3 +923,508 @@ more personalized and accurate responses.'''
         session.messages = []
         session.context_entities = []
         self._storage.save(session)
+
+    # ============================================================
+    # Causal Features Integration (Phase 3)
+    # ============================================================
+
+    async def get_causal_insights(
+        self,
+        session_id: str,
+        topic: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Get causal insights relevant to the conversation.
+
+        Research Foundation:
+        - Causal-Copilot (2504.13263v2): Natural language causal exploration
+        - ICDA: Interactive causal discovery
+
+        Returns relevant correlations, hypotheses, and causal chains
+        that may be useful for the current conversation context.
+
+        Args:
+            session_id: Current session ID
+            topic: Optional topic to focus on
+
+        Returns:
+            Dictionary with causal insights
+        """
+        insights = {
+            "correlations": [],
+            "hypotheses": [],
+            "causal_chains": [],
+            "pending_verifications": [],
+        }
+
+        # Get session context
+        session = self.get_session(session_id)
+        if session and session.messages:
+            # Extract topics from recent conversation
+            recent_text = " ".join(
+                m.content for m in session.messages[-6:]
+            )
+            topic = topic or self._extract_context_terms(recent_text)
+
+        # Try to get insights from various causal components
+        try:
+            # Get relevant correlations
+            if self._search_api and hasattr(self._search_api, '_temporal_engine'):
+                correlations = await self._get_relevant_correlations(topic)
+                insights["correlations"] = correlations[:5]
+
+            # Get pending ICDA verifications
+            icda_verifications = await self._get_pending_verifications()
+            insights["pending_verifications"] = icda_verifications[:3]
+
+            # Get relevant hypotheses
+            hypotheses = await self._get_relevant_hypotheses(topic)
+            insights["hypotheses"] = hypotheses[:3]
+
+        except Exception as e:
+            logger.debug(f"Failed to get causal insights: {e}")
+
+        return insights
+
+    async def _get_relevant_correlations(
+        self,
+        topic: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """Get correlations relevant to a topic."""
+        correlations = []
+
+        try:
+            # This would integrate with TemporalCorrelationDetector
+            # For now, return empty - will be populated when autonomous loop runs
+            pass
+        except Exception as e:
+            logger.debug(f"Correlation fetch failed: {e}")
+
+        return correlations
+
+    async def _get_pending_verifications(self) -> List[Dict[str, Any]]:
+        """Get pending ICDA verifications."""
+        verifications = []
+
+        try:
+            from futurnal.insights.interactive_causal import InteractiveCausalDiscoveryAgent
+
+            # Try to get global ICDA instance
+            # This would be set up by the autonomous loop
+            icda = getattr(self, '_icda_agent', None)
+            if icda:
+                pending = icda.get_pending_verifications(max_items=3)
+                verifications = [q.to_dict() for q in pending]
+        except Exception as e:
+            logger.debug(f"ICDA fetch failed: {e}")
+
+        return verifications
+
+    async def _get_relevant_hypotheses(
+        self,
+        topic: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        """Get hypotheses relevant to a topic."""
+        hypotheses = []
+
+        try:
+            # This would integrate with HypothesisGenerator
+            # Hypotheses are generated from correlations
+            pass
+        except Exception as e:
+            logger.debug(f"Hypothesis fetch failed: {e}")
+
+        return hypotheses
+
+    async def ask_causal(
+        self,
+        session_id: str,
+        cause: str,
+        effect: str,
+    ) -> ChatMessage:
+        """Ask about a specific causal relationship.
+
+        Specialized method for causal exploration queries.
+
+        Args:
+            session_id: Session ID
+            cause: Potential cause event/entity
+            effect: Potential effect event/entity
+
+        Returns:
+            ChatMessage with causal analysis
+        """
+        # Build causal query
+        causal_query = (
+            f"Analyze whether '{cause}' might cause '{effect}' "
+            f"based on the patterns in my personal knowledge graph. "
+            f"Consider temporal relationships, frequency of co-occurrence, "
+            f"and any evidence for or against this causal hypothesis."
+        )
+
+        # Use regular chat with causal-focused query
+        return await self.chat(session_id, causal_query)
+
+    async def explore_causal_chain(
+        self,
+        session_id: str,
+        start_event: str,
+        end_event: Optional[str] = None,
+    ) -> ChatMessage:
+        """Explore causal chains from a starting event.
+
+        Args:
+            session_id: Session ID
+            start_event: Starting event/entity
+            end_event: Optional target event/entity
+
+        Returns:
+            ChatMessage with causal chain exploration
+        """
+        if end_event:
+            query = (
+                f"Trace the causal chain from '{start_event}' to '{end_event}'. "
+                f"What intermediate events or factors connect them?"
+            )
+        else:
+            query = (
+                f"What are the downstream effects of '{start_event}'? "
+                f"What causal chains originate from this event?"
+            )
+
+        return await self.chat(session_id, query)
+
+    def surface_insight_in_response(
+        self,
+        response_text: str,
+        insights: Dict[str, Any],
+    ) -> str:
+        """Augment response with relevant causal insights.
+
+        Non-intrusively adds relevant insights to responses when
+        they would be helpful to the user.
+
+        Args:
+            response_text: Original response
+            insights: Causal insights from get_causal_insights
+
+        Returns:
+            Augmented response text
+        """
+        augmented = response_text
+
+        # Add correlation hints if relevant
+        if insights.get("correlations"):
+            top_corr = insights["correlations"][0]
+            hint = (
+                f"\n\n💡 *Insight*: I've noticed a pattern - "
+                f"{top_corr.get('description', 'a correlation exists')}. "
+                f"Would you like me to explore this further?"
+            )
+            augmented += hint
+
+        # Add verification prompts if pending
+        if insights.get("pending_verifications"):
+            verification = insights["pending_verifications"][0]
+            prompt = (
+                f"\n\n❓ *Quick question*: {verification.get('main_question', '')}"
+            )
+            augmented += prompt
+
+        return augmented
+
+    def set_icda_agent(self, icda_agent: Any) -> None:
+        """Set the ICDA agent for causal verification integration.
+
+        Called by the autonomous loop when it initializes.
+
+        Args:
+            icda_agent: InteractiveCausalDiscoveryAgent instance
+        """
+        self._icda_agent = icda_agent
+        logger.info("ChatService: ICDA agent integrated")
+
+    def set_causal_components(
+        self,
+        hypothesis_pipeline: Optional["HypothesisPipeline"] = None,
+        correlation_detector: Optional["TemporalCorrelationDetector"] = None,
+        insight_executor: Optional["InsightJobExecutor"] = None,
+        icda_agent: Optional[Any] = None,
+    ) -> None:
+        """Set all causal discovery components.
+
+        Called during system initialization to enable full causal features.
+
+        Args:
+            hypothesis_pipeline: Pipeline for generating causal hypotheses
+            correlation_detector: Detector for temporal correlations
+            insight_executor: Executor for insight jobs
+            icda_agent: Interactive causal discovery agent
+        """
+        if hypothesis_pipeline:
+            self._hypothesis_pipeline = hypothesis_pipeline
+        if correlation_detector:
+            self._correlation_detector = correlation_detector
+        if insight_executor:
+            self._insight_executor = insight_executor
+        if icda_agent:
+            self._icda_agent = icda_agent
+
+        logger.info(
+            f"ChatService: Causal components set - "
+            f"hypothesis_pipeline={hypothesis_pipeline is not None}, "
+            f"correlation_detector={correlation_detector is not None}, "
+            f"insight_executor={insight_executor is not None}, "
+            f"icda_agent={icda_agent is not None}"
+        )
+
+    async def chat_with_insights(
+        self,
+        session_id: str,
+        message: str,
+        context_entity_id: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> ChatMessage:
+        """Process a chat message with automatic insight surfacing.
+
+        Enhanced version of chat() that proactively surfaces relevant
+        causal insights when they would be helpful to the user.
+
+        Research Foundation:
+        - ZIA (2502.16124v1): Zero-input proactive AI
+        - Causal-Copilot: Natural language causal exploration
+
+        Args:
+            session_id: Unique session identifier
+            message: User's message
+            context_entity_id: Optional PKG entity to focus on
+            model: Optional model override
+
+        Returns:
+            ChatMessage with response and optional insights
+        """
+        # First get the regular response
+        response = await self.chat(session_id, message, context_entity_id, model)
+
+        # If insight surfacing is disabled, return as-is
+        if not self._enable_insight_surfacing:
+            return response
+
+        # Check for relevant insights to surface
+        try:
+            insights = await self.get_causal_insights(session_id, topic=message)
+
+            # Surface insights if relevant and not already shown
+            if self._should_surface_insights(insights):
+                augmented_content = self.surface_insight_in_response(
+                    response.content, insights
+                )
+
+                # Mark insights as surfaced
+                self._mark_insights_surfaced(insights)
+
+                # Return augmented response
+                return ChatMessage(
+                    role=response.role,
+                    content=augmented_content,
+                    sources=response.sources,
+                    entity_refs=response.entity_refs,
+                    confidence=response.confidence,
+                )
+        except Exception as e:
+            logger.debug(f"Insight surfacing failed: {e}")
+
+        return response
+
+    def _should_surface_insights(self, insights: Dict[str, Any]) -> bool:
+        """Determine if insights should be surfaced.
+
+        Prevents spamming the user with too many insights.
+
+        Args:
+            insights: Causal insights dict
+
+        Returns:
+            True if insights should be surfaced
+        """
+        # Check if there are any meaningful insights
+        has_insights = (
+            insights.get("correlations")
+            or insights.get("hypotheses")
+            or insights.get("pending_verifications")
+        )
+
+        if not has_insights:
+            return False
+
+        # Check if we've already surfaced these specific insights
+        insight_ids = set()
+        for corr in insights.get("correlations", []):
+            insight_ids.add(corr.get("id", str(corr)))
+        for hyp in insights.get("hypotheses", []):
+            insight_ids.add(hyp.get("hypothesis_id", str(hyp)))
+        for ver in insights.get("pending_verifications", []):
+            insight_ids.add(ver.get("question_id", str(ver)))
+
+        # Don't surface if all insights have been shown before
+        if insight_ids and insight_ids.issubset(self._surfaced_insight_ids):
+            return False
+
+        return True
+
+    def _mark_insights_surfaced(self, insights: Dict[str, Any]) -> None:
+        """Mark insights as surfaced to avoid repetition.
+
+        Args:
+            insights: Causal insights that were surfaced
+        """
+        for corr in insights.get("correlations", []):
+            self._surfaced_insight_ids.add(corr.get("id", str(corr)))
+        for hyp in insights.get("hypotheses", []):
+            self._surfaced_insight_ids.add(hyp.get("hypothesis_id", str(hyp)))
+        for ver in insights.get("pending_verifications", []):
+            self._surfaced_insight_ids.add(ver.get("question_id", str(ver)))
+
+        # Limit the size of surfaced set to prevent memory growth
+        if len(self._surfaced_insight_ids) > 1000:
+            # Keep only the most recent 500
+            self._surfaced_insight_ids = set(
+                list(self._surfaced_insight_ids)[-500:]
+            )
+
+    async def respond_to_icda(
+        self,
+        session_id: str,
+        question_id: str,
+        user_response: str,
+    ) -> ChatMessage:
+        """Process a user response to an ICDA verification question.
+
+        Handles user answers to causal hypothesis verification questions.
+
+        Args:
+            session_id: Current session ID
+            question_id: ID of the ICDA question being answered
+            user_response: User's answer (yes, no, partial, etc.)
+
+        Returns:
+            ChatMessage with acknowledgment and next steps
+        """
+        if not self._icda_agent:
+            return ChatMessage(
+                role="assistant",
+                content="I'm not currently set up for causal verification. Please try again later.",
+                confidence=0.5,
+            )
+
+        try:
+            # Process the response through ICDA
+            from futurnal.insights.interactive_causal import ICDAResponseType
+
+            # Parse user response
+            response_lower = user_response.lower().strip()
+            if response_lower in ["yes", "y", "correct", "true"]:
+                response_type = ICDAResponseType.YES_CAUSAL
+            elif response_lower in ["no", "n", "false", "not causal"]:
+                response_type = ICDAResponseType.NO_CONFOUNDER
+            elif response_lower in ["reverse", "backwards", "other way"]:
+                response_type = ICDAResponseType.REVERSE_CAUSATION
+            elif response_lower in ["partial", "partially", "sometimes"]:
+                response_type = ICDAResponseType.PARTIAL
+            else:
+                response_type = ICDAResponseType.UNSURE
+
+            # Record the response
+            result = self._icda_agent.record_response(
+                question_id=question_id,
+                response_type=response_type,
+                explanation=user_response,
+            )
+
+            # Generate acknowledgment
+            if result:
+                confidence_change = result.get("confidence_change", 0)
+                new_confidence = result.get("new_confidence", 0.5)
+
+                if confidence_change > 0:
+                    message = (
+                        f"Thanks! Your input increased my confidence in this causal relationship "
+                        f"(now {new_confidence:.0%}). "
+                    )
+                elif confidence_change < 0:
+                    message = (
+                        f"Noted! Your input decreased my confidence in this relationship "
+                        f"(now {new_confidence:.0%}). "
+                    )
+                else:
+                    message = "Thanks for your input! I've recorded your response. "
+
+                # Check if there are more questions
+                pending = self._icda_agent.get_pending_verifications(max_items=1)
+                if pending:
+                    message += f"\n\nI have another question when you're ready: {pending[0].main_question}"
+
+                return ChatMessage(
+                    role="assistant",
+                    content=message,
+                    confidence=0.9,
+                )
+
+        except Exception as e:
+            logger.error(f"ICDA response processing failed: {e}")
+
+        return ChatMessage(
+            role="assistant",
+            content="I've noted your response. Thank you for helping me understand the causal relationships in your data.",
+            confidence=0.7,
+        )
+
+    async def get_pending_icda_questions(self, max_items: int = 3) -> List[Dict[str, Any]]:
+        """Get pending ICDA verification questions.
+
+        Returns:
+            List of pending questions for user verification
+        """
+        if not self._icda_agent:
+            return []
+
+        try:
+            pending = self._icda_agent.get_pending_verifications(max_items=max_items)
+            return [
+                {
+                    "question_id": q.question_id,
+                    "main_question": q.main_question,
+                    "hypothesis_text": q.hypothesis_text if hasattr(q, 'hypothesis_text') else "",
+                    "current_confidence": q.current_confidence if hasattr(q, 'current_confidence') else 0.5,
+                }
+                for q in pending
+            ]
+        except Exception as e:
+            logger.debug(f"Failed to get pending ICDA questions: {e}")
+            return []
+
+    def get_insight_statistics(self) -> Dict[str, Any]:
+        """Get statistics about causal insight surfacing.
+
+        Returns:
+            Dictionary with insight statistics
+        """
+        stats = {
+            "surfaced_insights_count": len(self._surfaced_insight_ids),
+            "insight_surfacing_enabled": self._enable_insight_surfacing,
+            "components_available": {
+                "icda_agent": self._icda_agent is not None,
+                "hypothesis_pipeline": self._hypothesis_pipeline is not None,
+                "correlation_detector": self._correlation_detector is not None,
+                "insight_executor": self._insight_executor is not None,
+            },
+        }
+
+        # Get executor statistics if available
+        if self._insight_executor:
+            try:
+                executor_stats = self._insight_executor.get_statistics()
+                stats["executor_statistics"] = executor_stats
+            except Exception:
+                pass
+
+        return stats

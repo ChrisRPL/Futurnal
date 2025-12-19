@@ -42,6 +42,9 @@ if TYPE_CHECKING:
     from futurnal.search.temporal.correlation import TemporalCorrelationDetector
     from futurnal.insights.curiosity_engine import CuriosityEngine, KnowledgeGap
     from futurnal.insights.emergent_insights import EmergentInsight, InsightGenerator
+    from futurnal.insights.hypothesis_generation import HypothesisPipeline, CausalHypothesis
+    from futurnal.insights.interactive_causal import InteractiveCausalDiscoveryAgent
+    from futurnal.search.causal.bradford_hill import BradfordHillValidator
     from futurnal.learning.token_priors import TokenPriorStore
 
 logger = logging.getLogger(__name__)
@@ -72,6 +75,9 @@ class InsightJobResult:
     correlations_found: int = 0
     gaps_detected: int = 0
     priors_updated: int = 0
+    hypotheses_generated: int = 0
+    hypotheses_validated: int = 0
+    bradford_hill_reports: int = 0
 
     # Errors
     error_message: Optional[str] = None
@@ -140,6 +146,9 @@ class InsightJobExecutor:
         correlation_detector: Optional["TemporalCorrelationDetector"] = None,
         curiosity_engine: Optional["CuriosityEngine"] = None,
         insight_generator: Optional["InsightGenerator"] = None,
+        hypothesis_pipeline: Optional["HypothesisPipeline"] = None,
+        icda_agent: Optional["InteractiveCausalDiscoveryAgent"] = None,
+        bradford_hill_validator: Optional["BradfordHillValidator"] = None,
         token_prior_store: Optional["TokenPriorStore"] = None,
         pkg_graph: Optional[Any] = None,
         config: Optional[InsightScheduleConfig] = None,
@@ -151,6 +160,9 @@ class InsightJobExecutor:
             correlation_detector: For temporal correlation detection
             curiosity_engine: For knowledge gap detection
             insight_generator: For insight generation
+            hypothesis_pipeline: For generating causal hypotheses from correlations
+            icda_agent: For interactive causal discovery verification
+            bradford_hill_validator: For validating causal claims
             token_prior_store: For storing learned priors
             pkg_graph: Personal Knowledge Graph for analysis
             config: Schedule and threshold configuration
@@ -159,6 +171,9 @@ class InsightJobExecutor:
         self._correlation_detector = correlation_detector
         self._curiosity_engine = curiosity_engine
         self._insight_generator = insight_generator
+        self._hypothesis_pipeline = hypothesis_pipeline
+        self._icda_agent = icda_agent
+        self._bradford_hill_validator = bradford_hill_validator
         self._token_prior_store = token_prior_store
         self._pkg_graph = pkg_graph
         self._config = config or InsightScheduleConfig()
@@ -170,6 +185,9 @@ class InsightJobExecutor:
 
         # Running jobs
         self._running_jobs: Dict[str, InsightJobResult] = {}
+
+        # Pending hypotheses for ICDA verification
+        self._pending_hypotheses: List["CausalHypothesis"] = []
 
         logger.info("InsightJobExecutor initialized")
 
@@ -199,8 +217,15 @@ class InsightJobExecutor:
     ) -> InsightJobResult:
         """Execute a correlation scan job.
 
-        Scans for new temporal correlations in the PKG and generates
-        insights from significant findings.
+        Scans for new temporal correlations in the PKG, generates hypotheses,
+        validates with Bradford-Hill criteria, and queues for ICDA verification.
+
+        This is the core autonomous analysis pipeline:
+        1. Detect temporal correlations
+        2. Generate causal hypotheses via LLM
+        3. Validate with Bradford-Hill criteria
+        4. Queue high-confidence hypotheses for ICDA verification
+        5. Update token priors with validated insights
 
         Args:
             job_id: Optional job ID (generated if not provided)
@@ -226,17 +251,72 @@ class InsightJobExecutor:
             if not self._correlation_detector:
                 raise RuntimeError("Correlation detector not configured")
 
-            # Run correlation scan
+            # Step 1: Run correlation scan
             correlations = await self._run_correlation_scan()
-
             result.correlations_found = len(correlations)
+            logger.info(f"Found {len(correlations)} temporal correlations")
 
-            # Generate insights from correlations
+            # Step 2: Generate hypotheses from correlations
+            hypotheses = []
+            if correlations and self._hypothesis_pipeline:
+                hypotheses = await self._hypothesis_pipeline.process_correlations(
+                    correlations=correlations,
+                    max_hypotheses=10,
+                )
+                result.hypotheses_generated = len(hypotheses)
+                logger.info(f"Generated {len(hypotheses)} causal hypotheses")
+
+            # Step 3: Validate hypotheses with Bradford-Hill criteria
+            validated_hypotheses = []
+            if hypotheses and self._bradford_hill_validator:
+                for hypothesis in hypotheses:
+                    try:
+                        # Find the correlation that generated this hypothesis
+                        correlation = next(
+                            (c for c in correlations
+                             if c.event_a_type == hypothesis.cause_type
+                             and c.event_b_type == hypothesis.effect_type),
+                            None
+                        )
+                        if correlation:
+                            report = await self._bradford_hill_validator.validate(
+                                correlation=correlation,
+                                hypothesis=hypothesis,
+                            )
+                            result.bradford_hill_reports += 1
+
+                            # High-confidence hypotheses get queued for ICDA
+                            if report.overall_score >= 0.6:
+                                hypothesis.bradford_hill_score = report.overall_score
+                                validated_hypotheses.append(hypothesis)
+                                logger.info(
+                                    f"Hypothesis validated: {hypothesis.hypothesis_text[:50]}... "
+                                    f"(score: {report.overall_score:.2f})"
+                                )
+                    except Exception as e:
+                        logger.warning(f"Bradford-Hill validation failed: {e}")
+
+                result.hypotheses_validated = len(validated_hypotheses)
+
+            # Step 4: Queue validated hypotheses for ICDA verification
+            if validated_hypotheses:
+                self._pending_hypotheses.extend(validated_hypotheses)
+                logger.info(
+                    f"Queued {len(validated_hypotheses)} hypotheses for ICDA verification"
+                )
+
+                # If ICDA agent is available, notify it of pending hypotheses
+                if self._icda_agent and hasattr(self._icda_agent, 'queue_hypotheses'):
+                    try:
+                        await self._icda_agent.queue_hypotheses(validated_hypotheses)
+                    except Exception as e:
+                        logger.warning(f"Failed to queue hypotheses with ICDA: {e}")
+
+            # Step 5: Generate insights from correlations (legacy path)
             if correlations and self._insight_generator:
                 insights = self._insight_generator.generate_insights(
                     correlations=correlations,
                 )
-
                 result.insights_generated = len(insights)
 
                 # Update token priors with new insights
@@ -248,6 +328,11 @@ class InsightJobExecutor:
                 # Notify for high-priority insights
                 await self._notify_high_priority(insights)
 
+            # Also store validated hypotheses as priors
+            if validated_hypotheses and self._token_prior_store:
+                self._store_hypothesis_priors(validated_hypotheses)
+                result.priors_updated += len(validated_hypotheses)
+
             result.status = InsightJobStatus.COMPLETED
             result.completed_at = datetime.utcnow()
             result.duration_seconds = (
@@ -256,6 +341,8 @@ class InsightJobExecutor:
 
             logger.info(
                 f"Correlation scan completed: {result.correlations_found} correlations, "
+                f"{result.hypotheses_generated} hypotheses, "
+                f"{result.hypotheses_validated} validated, "
                 f"{result.insights_generated} insights"
             )
 
@@ -547,6 +634,73 @@ class InsightJobExecutor:
         except Exception as e:
             logger.warning(f"Failed to store insight priors: {e}")
 
+    def _store_hypothesis_priors(self, hypotheses: List["CausalHypothesis"]):
+        """Store validated hypotheses as token priors.
+
+        Args:
+            hypotheses: List of validated causal hypotheses
+        """
+        if not self._token_prior_store:
+            return
+
+        try:
+            from futurnal.learning.token_priors import TemporalPatternPrior
+
+            for hypothesis in hypotheses:
+                prior_text = (
+                    f"Causal hypothesis (confidence: {hypothesis.confidence:.2f}): "
+                    f"{hypothesis.hypothesis_text}\n"
+                    f"Cause: {hypothesis.cause_type} -> Effect: {hypothesis.effect_type}\n"
+                    f"Mechanism: {hypothesis.mechanism}"
+                )
+
+                prior = TemporalPatternPrior(
+                    pattern_type="causal_hypothesis",
+                    description=f"Validated causal hypothesis: {hypothesis.cause_type} -> {hypothesis.effect_type}",
+                    learned_weights=prior_text,
+                    confidence=hypothesis.confidence,
+                    observation_count=1,
+                )
+
+                self._token_prior_store.add_temporal_pattern(prior)
+
+        except Exception as e:
+            logger.warning(f"Failed to store hypothesis priors: {e}")
+
+    def get_pending_hypotheses(self) -> List["CausalHypothesis"]:
+        """Get hypotheses pending ICDA verification.
+
+        Returns:
+            List of pending hypotheses
+        """
+        return list(self._pending_hypotheses)
+
+    def clear_verified_hypothesis(self, hypothesis_id: str) -> bool:
+        """Remove a hypothesis from pending after verification.
+
+        Args:
+            hypothesis_id: ID of the hypothesis to remove
+
+        Returns:
+            True if hypothesis was found and removed
+        """
+        for i, h in enumerate(self._pending_hypotheses):
+            if h.hypothesis_id == hypothesis_id:
+                del self._pending_hypotheses[i]
+                return True
+        return False
+
+    async def trigger_immediate_scan(self) -> InsightJobResult:
+        """Trigger an immediate correlation scan.
+
+        Useful for manual triggering or after significant data changes.
+
+        Returns:
+            InsightJobResult from the scan
+        """
+        logger.info("Triggering immediate correlation scan")
+        return await self.execute_correlation_scan()
+
     async def _notify_high_priority(
         self,
         insights: List["EmergentInsight"],
@@ -623,6 +777,9 @@ class InsightJobExecutor:
         total_insights = sum(r.insights_generated for r in self._job_history)
         total_correlations = sum(r.correlations_found for r in self._job_history)
         total_gaps = sum(r.gaps_detected for r in self._job_history)
+        total_hypotheses = sum(r.hypotheses_generated for r in self._job_history)
+        total_validated = sum(r.hypotheses_validated for r in self._job_history)
+        total_bradford_hill = sum(r.bradford_hill_reports for r in self._job_history)
 
         return {
             "total_jobs": total_jobs,
@@ -632,6 +789,10 @@ class InsightJobExecutor:
             "total_insights_generated": total_insights,
             "total_correlations_found": total_correlations,
             "total_gaps_detected": total_gaps,
+            "total_hypotheses_generated": total_hypotheses,
+            "total_hypotheses_validated": total_validated,
+            "total_bradford_hill_reports": total_bradford_hill,
+            "pending_hypotheses_count": len(self._pending_hypotheses),
             "running_jobs": len(self._running_jobs),
         }
 

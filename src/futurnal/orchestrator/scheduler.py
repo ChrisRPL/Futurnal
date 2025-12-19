@@ -293,12 +293,96 @@ class IngestionOrchestrator:
         self._invariant_check_task = self._loop.create_task(self._invariant_check_loop())
 
         # Start the autonomous loop (Brain's Heartbeat)
+        # Initialize insight analysis components for proactive intelligence
+        curiosity_engine = None
+        insight_generator = None
+        insight_executor = None
+        token_prior_store = None
+        pkg_graph = None
+        temporal_graph_queries = None
+        correlation_detector = None
+
+        try:
+            # Initialize PKG connection for graph-based analysis
+            from futurnal.configuration.settings import bootstrap_settings
+            from futurnal.pkg.database.manager import PKGDatabaseManager
+
+            settings = bootstrap_settings()
+            if settings and settings.workspace and settings.workspace.storage:
+                pkg_manager = PKGDatabaseManager(settings.workspace.storage)
+                pkg_graph = pkg_manager.connect()
+                logger.info("AutonomousLoop: Connected to PKG database")
+
+                # Initialize TemporalGraphQueries for correlation detection
+                from futurnal.pkg.queries.temporal import TemporalGraphQueries
+                temporal_graph_queries = TemporalGraphQueries(db_manager=pkg_manager)
+        except Exception as e:
+            logger.warning(f"AutonomousLoop: Could not connect to PKG: {e}")
+
+        try:
+            # Initialize analysis engines
+            from futurnal.insights.curiosity_engine import CuriosityEngine
+            from futurnal.insights.emergent_insights import InsightGenerator
+            from futurnal.learning.token_priors import TokenPriorStore
+
+            curiosity_engine = CuriosityEngine()
+            insight_generator = InsightGenerator()
+            token_prior_store = TokenPriorStore()
+            logger.info("AutonomousLoop: Initialized analysis engines")
+        except Exception as e:
+            logger.warning(f"AutonomousLoop: Could not init analysis engines: {e}")
+
+        try:
+            # Initialize correlation detector (requires TemporalGraphQueries)
+            if temporal_graph_queries:
+                from futurnal.search.temporal.correlation import TemporalCorrelationDetector
+                correlation_detector = TemporalCorrelationDetector(
+                    pkg_queries=temporal_graph_queries
+                )
+                logger.info("AutonomousLoop: Initialized correlation detector")
+        except Exception as e:
+            logger.warning(f"AutonomousLoop: Could not init correlation detector: {e}")
+
+        try:
+            # Initialize InsightJobExecutor with all components
+            from futurnal.orchestrator.insight_jobs import InsightJobExecutor
+
+            insight_executor = InsightJobExecutor(
+                correlation_detector=correlation_detector,
+                curiosity_engine=curiosity_engine,
+                insight_generator=insight_generator,
+                token_prior_store=token_prior_store,
+                pkg_graph=pkg_graph,
+            )
+            logger.info("AutonomousLoop: Initialized InsightJobExecutor")
+        except Exception as e:
+            logger.warning(f"AutonomousLoop: Could not init insight executor: {e}")
+
         # create_autonomous_loop returns (event_bus, loop) tuple
         self._autonomous_event_bus, self._autonomous_loop = create_autonomous_loop(
             orchestrator=self,
+            curiosity_engine=curiosity_engine,
+            insight_generator=insight_generator,
+            insight_executor=insight_executor,
+            token_prior_store=token_prior_store,
+            pkg_graph=pkg_graph,
             config=AutonomousLoopConfig(),
         )
         self._autonomous_loop_task = self._loop.create_task(self._autonomous_loop.start())
+
+        # Log initialization status
+        components_ready = sum([
+            curiosity_engine is not None,
+            insight_generator is not None,
+            insight_executor is not None,
+            token_prior_store is not None,
+            pkg_graph is not None,
+        ])
+        logger.info(
+            f"AutonomousLoop: Started with {components_ready}/5 components ready "
+            f"(PKG={pkg_graph is not None}, Curiosity={curiosity_engine is not None}, "
+            f"Insights={insight_generator is not None}, Executor={insight_executor is not None})"
+        )
 
         self._running = True
         logger.info("Ingestion orchestrator started")

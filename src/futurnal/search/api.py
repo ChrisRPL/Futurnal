@@ -907,24 +907,24 @@ class HybridSearchAPI:
             self.last_embedding_model = "graphrag-causal"
             return graphrag_results
 
-        # Fallback: Placeholder results when CausalChainRetrieval unavailable
-        logger.debug("GraphRAG causal search unavailable, returning placeholder results")
-        return [
-            {
-                "id": f"causal_result_{i}",
-                "content": f"Causal search requires GraphRAG infrastructure. Query: {query[:50]}...",
-                "score": 0.85 - (i * 0.05),
-                "confidence": 0.5,
-                "causal_chain": {
-                    "anchor": f"event_{i}",
-                    "causes": [f"cause_{i}"] if i > 0 else [],
-                    "effects": [f"effect_{i}"],
-                },
-                "entity_type": "Event",
-                "source_type": "placeholder",
-            }
-            for i in range(min(top_k, 5))
-        ]
+        # Fallback: Return empty results with system message when GraphRAG unavailable
+        logger.warning("GraphRAG causal search unavailable - returning system notification")
+        return [{
+            "id": "causal_search_unavailable",
+            "content": (
+                "Causal analysis requires the knowledge graph to be connected. "
+                "Please ensure Neo4j is running and the PKG database is initialized. "
+                "You can check status with 'futurnal health check'."
+            ),
+            "score": 0.0,
+            "confidence": 0.0,
+            "entity_type": "SystemMessage",
+            "source_type": "system",
+            "metadata": {
+                "is_system_message": True,
+                "action_required": "Connect to PKG database",
+            },
+        }]
 
     async def _code_search(
         self,
@@ -932,17 +932,20 @@ class HybridSearchAPI:
         top_k: int,
         filters: Optional[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """Execute code-specific search."""
-        return [
-            {
-                "id": f"code_result_{i}",
-                "content": f"Code result for: {query}",
-                "score": 0.88 - (i * 0.05),
-                "source_type": "code",
-                "entity_type": "Code",
-            }
-            for i in range(min(top_k, 3))
-        ]
+        """Execute code-specific search.
+
+        Uses GraphRAG with code intent for semantic code search.
+        Falls back to legacy keyword search on code files if GraphRAG unavailable.
+        """
+        # Try GraphRAG with code intent
+        graphrag_results = await self._graphrag_search(query, top_k, filters, intent="code")
+        if graphrag_results:
+            self.last_embedding_model = "graphrag-code"
+            return graphrag_results
+
+        # Fallback to legacy keyword search filtered for code files
+        logger.debug("GraphRAG code search unavailable, falling back to keyword search")
+        return await self._legacy_keyword_search(query, top_k, filters)
 
     async def _general_search(
         self,

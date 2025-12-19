@@ -313,3 +313,379 @@ def delete_session(
     except Exception as e:
         logger.exception("Chat delete failed")
         _output_error(str(e), as_json=output_json)
+
+
+@chat_app.command("status")
+def check_status(
+    output_json: bool = typer.Option(True, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Check intelligence infrastructure health.
+
+    Shows status of all components required for intelligent conversations:
+    - PKG Database (Neo4j)
+    - GraphRAG Pipeline
+    - Ollama LLM
+    - ChromaDB Vector Store
+    - Experiential Learning
+    - Autonomous Analysis Loop
+
+    Example:
+        futurnal chat status --json
+    """
+    try:
+        from futurnal.chat.health import check_intelligence_health
+
+        async def run():
+            return await check_intelligence_health()
+
+        report = asyncio.run(run())
+
+        if output_json:
+            _output_json({
+                "success": True,
+                **report.to_dict(),
+            })
+        else:
+            # Pretty print for terminal
+            status_icon = {
+                "connected": "[OK]",
+                "disconnected": "[X]",
+                "error": "[!]",
+                "degraded": "[~]",
+                "not_initialized": "[-]",
+            }
+
+            typer.echo(f"\nIntelligence Infrastructure Status: {report.overall_status.upper()}")
+            typer.echo("=" * 50)
+
+            for comp in report.components:
+                icon = status_icon.get(comp.status, "[?]")
+                typer.echo(f"\n{icon} {comp.name}")
+                typer.echo(f"    Status: {comp.status}")
+                if comp.details:
+                    typer.echo(f"    Details: {comp.details}")
+                if comp.metrics:
+                    for key, value in comp.metrics.items():
+                        typer.echo(f"    {key}: {value}")
+
+            if report.recommendations:
+                typer.echo("\nRecommendations:")
+                for rec in report.recommendations:
+                    typer.echo(f"  - {rec}")
+
+    except Exception as e:
+        logger.exception("Health check failed")
+        _output_error(str(e), as_json=output_json)
+
+
+# ============================================================
+# Causal Discovery CLI Commands (Phase 3)
+# ============================================================
+
+
+@chat_app.command("insights")
+def get_causal_insights(
+    session_id: str = typer.Argument(..., help="Session identifier"),
+    topic: Optional[str] = typer.Option(None, "--topic", "-t", help="Topic to focus insights on"),
+    output_json: bool = typer.Option(True, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Get causal insights for a conversation.
+
+    Returns correlations, hypotheses, and pending verifications
+    relevant to the current session context.
+
+    Example:
+        futurnal chat insights session-1 --topic "productivity"
+    """
+    try:
+        from futurnal.chat import ChatService
+
+        service = ChatService()
+
+        async def run():
+            await service.initialize()
+            try:
+                return await service.get_causal_insights(session_id, topic)
+            finally:
+                await service.close()
+
+        insights = asyncio.run(run())
+
+        if output_json:
+            _output_json({
+                "success": True,
+                "sessionId": session_id,
+                "insights": insights,
+            })
+        else:
+            typer.echo(f"\nCausal Insights for session: {session_id}")
+            typer.echo("=" * 50)
+
+            if insights.get("correlations"):
+                typer.echo("\nDetected Correlations:")
+                for corr in insights["correlations"]:
+                    typer.echo(f"  - {corr.get('description', str(corr))}")
+
+            if insights.get("hypotheses"):
+                typer.echo("\nCausal Hypotheses:")
+                for hyp in insights["hypotheses"]:
+                    typer.echo(f"  - {hyp.get('hypothesis_text', str(hyp))}")
+
+            if insights.get("pending_verifications"):
+                typer.echo("\nPending Verification Questions:")
+                for ver in insights["pending_verifications"]:
+                    typer.echo(f"  ? {ver.get('main_question', str(ver))}")
+
+            if not any(insights.values()):
+                typer.echo("\nNo causal insights available yet.")
+
+    except Exception as e:
+        logger.exception("Get insights failed")
+        _output_error(str(e), as_json=output_json)
+
+
+@chat_app.command("ask-causal")
+def ask_causal(
+    session_id: str = typer.Argument(..., help="Session identifier"),
+    cause: str = typer.Argument(..., help="Potential cause event/entity"),
+    effect: str = typer.Argument(..., help="Potential effect event/entity"),
+    output_json: bool = typer.Option(True, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Ask about a specific causal relationship.
+
+    Analyzes whether cause might lead to effect based on PKG patterns.
+
+    Example:
+        futurnal chat ask-causal session-1 "morning exercise" "productivity"
+    """
+    try:
+        from futurnal.chat import ChatService
+
+        service = ChatService()
+
+        async def run():
+            await service.initialize()
+            try:
+                return await service.ask_causal(session_id, cause, effect)
+            finally:
+                await service.close()
+
+        response = asyncio.run(run())
+
+        if output_json:
+            _output_json({
+                "success": True,
+                "sessionId": session_id,
+                "cause": cause,
+                "effect": effect,
+                "response": {
+                    "content": response.content,
+                    "confidence": response.confidence,
+                    "sources": response.sources,
+                },
+            })
+        else:
+            typer.echo(f"\nCausal Analysis: '{cause}' -> '{effect}'")
+            typer.echo("=" * 50)
+            typer.echo(response.content)
+            typer.echo(f"\nConfidence: {response.confidence:.0%}")
+
+    except Exception as e:
+        logger.exception("Causal query failed")
+        _output_error(str(e), as_json=output_json)
+
+
+@chat_app.command("explore-chain")
+def explore_causal_chain(
+    session_id: str = typer.Argument(..., help="Session identifier"),
+    start_event: str = typer.Argument(..., help="Starting event/entity"),
+    end_event: Optional[str] = typer.Option(None, "--to", "-t", help="Target event/entity"),
+    output_json: bool = typer.Option(True, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Explore causal chains from a starting event.
+
+    Traces the chain of effects from start_event, optionally to end_event.
+
+    Example:
+        futurnal chat explore-chain session-1 "project deadline" --to "stress"
+    """
+    try:
+        from futurnal.chat import ChatService
+
+        service = ChatService()
+
+        async def run():
+            await service.initialize()
+            try:
+                return await service.explore_causal_chain(session_id, start_event, end_event)
+            finally:
+                await service.close()
+
+        response = asyncio.run(run())
+
+        if output_json:
+            _output_json({
+                "success": True,
+                "sessionId": session_id,
+                "startEvent": start_event,
+                "endEvent": end_event,
+                "response": {
+                    "content": response.content,
+                    "confidence": response.confidence,
+                    "sources": response.sources,
+                },
+            })
+        else:
+            if end_event:
+                typer.echo(f"\nCausal Chain: '{start_event}' -> ... -> '{end_event}'")
+            else:
+                typer.echo(f"\nCausal Chain from: '{start_event}'")
+            typer.echo("=" * 50)
+            typer.echo(response.content)
+            typer.echo(f"\nConfidence: {response.confidence:.0%}")
+
+    except Exception as e:
+        logger.exception("Causal chain exploration failed")
+        _output_error(str(e), as_json=output_json)
+
+
+@chat_app.command("pending-icda")
+def get_pending_icda_questions(
+    limit: int = typer.Option(5, "--limit", "-l", help="Maximum questions to return"),
+    output_json: bool = typer.Option(True, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Get pending ICDA verification questions.
+
+    Returns questions that need user verification to validate causal hypotheses.
+
+    Example:
+        futurnal chat pending-icda --limit 3
+    """
+    try:
+        from futurnal.chat import ChatService
+
+        service = ChatService()
+
+        async def run():
+            await service.initialize()
+            try:
+                return await service.get_pending_icda_questions(max_items=limit)
+            finally:
+                await service.close()
+
+        questions = asyncio.run(run())
+
+        if output_json:
+            _output_json({
+                "success": True,
+                "questions": questions,
+                "count": len(questions),
+            })
+        else:
+            if not questions:
+                typer.echo("\nNo pending verification questions.")
+                return
+
+            typer.echo(f"\nPending ICDA Verification Questions ({len(questions)})")
+            typer.echo("=" * 50)
+
+            for i, q in enumerate(questions, 1):
+                typer.echo(f"\n[{i}] {q.get('main_question', 'Unknown question')}")
+                if q.get('hypothesis_text'):
+                    typer.echo(f"    Hypothesis: {q['hypothesis_text'][:80]}...")
+                typer.echo(f"    Question ID: {q.get('question_id', 'N/A')}")
+
+    except Exception as e:
+        logger.exception("Get pending ICDA failed")
+        _output_error(str(e), as_json=output_json)
+
+
+@chat_app.command("respond-icda")
+def respond_to_icda(
+    session_id: str = typer.Argument(..., help="Session identifier"),
+    question_id: str = typer.Argument(..., help="Question ID to respond to"),
+    response: str = typer.Argument(..., help="Your response (yes/no/partial/unsure)"),
+    output_json: bool = typer.Option(True, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Respond to an ICDA verification question.
+
+    Valid responses: yes, no, partial, reverse, unsure
+
+    Example:
+        futurnal chat respond-icda session-1 q123 "yes"
+    """
+    try:
+        from futurnal.chat import ChatService
+
+        service = ChatService()
+
+        async def run():
+            await service.initialize()
+            try:
+                return await service.respond_to_icda(session_id, question_id, response)
+            finally:
+                await service.close()
+
+        result = asyncio.run(run())
+
+        if output_json:
+            _output_json({
+                "success": True,
+                "sessionId": session_id,
+                "questionId": question_id,
+                "userResponse": response,
+                "acknowledgment": result.content,
+            })
+        else:
+            typer.echo(f"\n{result.content}")
+
+    except Exception as e:
+        logger.exception("ICDA response failed")
+        _output_error(str(e), as_json=output_json)
+
+
+@chat_app.command("insight-stats")
+def get_insight_statistics(
+    output_json: bool = typer.Option(True, "--json", "-j", help="Output as JSON"),
+) -> None:
+    """Get causal insight statistics.
+
+    Shows statistics about insight surfacing and causal discovery.
+
+    Example:
+        futurnal chat insight-stats --json
+    """
+    try:
+        from futurnal.chat import ChatService
+
+        service = ChatService()
+        stats = service.get_insight_statistics()
+
+        if output_json:
+            _output_json({
+                "success": True,
+                "statistics": stats,
+            })
+        else:
+            typer.echo("\nCausal Insight Statistics")
+            typer.echo("=" * 50)
+            typer.echo(f"\nSurfaced Insights: {stats.get('surfaced_insights_count', 0)}")
+            typer.echo(f"Insight Surfacing: {'Enabled' if stats.get('insight_surfacing_enabled') else 'Disabled'}")
+
+            components = stats.get("components_available", {})
+            typer.echo("\nComponents:")
+            for name, available in components.items():
+                status = "[OK]" if available else "[X]"
+                typer.echo(f"  {status} {name}")
+
+            if stats.get("executor_statistics"):
+                exec_stats = stats["executor_statistics"]
+                typer.echo("\nExecutor Statistics:")
+                typer.echo(f"  Total Jobs: {exec_stats.get('total_jobs', 0)}")
+                typer.echo(f"  Correlations Found: {exec_stats.get('total_correlations_found', 0)}")
+                typer.echo(f"  Hypotheses Generated: {exec_stats.get('total_hypotheses_generated', 0)}")
+                typer.echo(f"  Hypotheses Validated: {exec_stats.get('total_hypotheses_validated', 0)}")
+
+    except Exception as e:
+        logger.exception("Get insight stats failed")
+        _output_error(str(e), as_json=output_json)

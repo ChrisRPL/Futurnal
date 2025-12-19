@@ -23,13 +23,46 @@ proactive, autonomous insight generation.
 from .emergent_insights import EmergentInsight, InsightGenerator
 from .curiosity_engine import CuriosityEngine, KnowledgeGap
 from .insight_storage import UserInsight, InsightStorageService, get_insight_service
+from .hypothesis_generation import (
+    HypothesisGenerator,
+    HypothesisPipeline,
+    CausalHypothesis,
+    HypothesisType,
+    MechanismCategory,
+    CausalMechanism,
+    AlternativeExplanation,
+)
+from .interactive_causal import (
+    InteractiveCausalDiscoveryAgent,
+    CausalVerificationQuestion,
+    CausalResponse,
+    VerificationStatus,
+    CausalCandidate,
+)
 
 __all__ = [
+    # Emergent Insights
     "EmergentInsight",
     "InsightGenerator",
+    # Curiosity Engine
     "CuriosityEngine",
     "KnowledgeGap",
+    # Insight Storage
     "UserInsight",
     "InsightStorageService",
     "get_insight_service",
+    # Hypothesis Generation (Phase 3)
+    "HypothesisGenerator",
+    "HypothesisPipeline",
+    "CausalHypothesis",
+    "HypothesisType",
+    "MechanismCategory",
+    "CausalMechanism",
+    "AlternativeExplanation",
+    # Interactive Causal Discovery (Phase 3)
+    "InteractiveCausalDiscoveryAgent",
+    "CausalVerificationQuestion",
+    "CausalResponse",
+    "VerificationStatus",
+    "CausalCandidate",
 ]

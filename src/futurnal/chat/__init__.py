@@ -27,10 +27,20 @@ from futurnal.chat.models import (
     SessionStorage,
 )
 from futurnal.chat.service import ChatService
+from futurnal.chat.health import (
+    check_intelligence_health,
+    ComponentHealth,
+    IntelligenceHealthReport,
+)
 
 __all__ = [
+    # Core Chat
     "ChatService",
     "ChatMessage",
     "ChatSession",
     "SessionStorage",
+    # Health Checks
+    "check_intelligence_health",
+    "ComponentHealth",
+    "IntelligenceHealthReport",
 ]

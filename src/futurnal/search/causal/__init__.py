@@ -54,6 +54,23 @@ from futurnal.search.causal.exceptions import (
     InvalidCausalQueryError,
     TemporalOrderingViolation,
 )
+from futurnal.search.causal.bradford_hill import (
+    BradfordHillValidator,
+    BradfordHillReport,
+    CriterionAssessment,
+    CausalityVerdict,
+    CriterionStrength,
+)
+from futurnal.search.causal.chain_inference import (
+    CausalChainInference,
+    CausalChain,
+    CausalNode,
+    CausalEdge,
+    ChainInferenceResult,
+    ChainType,
+    InferenceMethod,
+    CausalStructureLearner,
+)
 
 __all__ = [
     # Engine
@@ -79,4 +96,19 @@ __all__ = [
     "EventNotFoundError",
     "InvalidCausalQueryError",
     "TemporalOrderingViolation",
+    # Bradford-Hill
+    "BradfordHillValidator",
+    "BradfordHillReport",
+    "CriterionAssessment",
+    "CausalityVerdict",
+    "CriterionStrength",
+    # Chain Inference
+    "CausalChainInference",
+    "CausalChain",
+    "CausalNode",
+    "CausalEdge",
+    "ChainInferenceResult",
+    "ChainType",
+    "InferenceMethod",
+    "CausalStructureLearner",
 ]

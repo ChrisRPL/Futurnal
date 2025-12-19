@@ -71,6 +71,16 @@ from .local_llm_client import (
     get_test_llm_client,
 )
 
+# Link Prediction and Knowledge Base Completion (Phase 3)
+from .link_prediction import (
+    LinkPredictor,
+    KnowledgeBaseCompleter,
+    PredictedLink,
+    PredictionMethod,
+    LinkType,
+    CompletionCandidate,
+)
+
 
 __all__ = [
     # Unified API
@@ -106,4 +116,11 @@ __all__ = [
     "QuantizedLocalLLM",
     "LocalLLMBackend",
     "get_test_llm_client",
+    # Link Prediction (Phase 3)
+    "LinkPredictor",
+    "KnowledgeBaseCompleter",
+    "PredictedLink",
+    "PredictionMethod",
+    "LinkType",
+    "CompletionCandidate",
 ]
