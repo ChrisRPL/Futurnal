@@ -217,15 +217,36 @@ class InsightGenerator:
         self,
         min_confidence: float = MIN_CONFIDENCE,
         min_significance: float = MIN_STATISTICAL_SIGNIFICANCE,
+        storage_path: Optional[str] = None,
     ):
         """Initialize insight generator.
 
         Args:
             min_confidence: Minimum confidence threshold for generating insights
             min_significance: Maximum p-value for statistical significance
+            storage_path: Path to persist insights (default: ~/.futurnal/insights/emergent.json)
         """
+        import os
+        import json
+        from pathlib import Path
+
         self.min_confidence = min_confidence
         self.min_significance = min_significance
+
+        # Persistent storage for emergent insights
+        self._storage_path = Path(
+            storage_path or os.path.expanduser("~/.futurnal/insights/emergent.json")
+        )
+        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load cached insights from storage
+        self._cached_insights: List[Dict[str, Any]] = []
+        if self._storage_path.exists():
+            try:
+                self._cached_insights = json.loads(self._storage_path.read_text())
+                logger.info(f"Loaded {len(self._cached_insights)} cached insights")
+            except Exception as e:
+                logger.warning(f"Could not load cached insights: {e}")
 
         logger.info(
             f"InsightGenerator initialized "
@@ -297,12 +318,56 @@ class InsightGenerator:
         # Sort by priority
         filtered.sort(key=lambda i: -i.priority_score)
 
+        # Cache and persist new insights
+        if filtered:
+            self._cache_insights(filtered)
+
         logger.info(
             f"Generated {len(filtered)} insights "
             f"(from {len(all_insights)} candidates)"
         )
 
         return filtered
+
+    def _cache_insights(self, insights: List[EmergentInsight]) -> None:
+        """Cache and persist insights to storage."""
+        import json
+
+        # Convert insights to dictionaries for storage
+        new_entries = []
+        for insight in insights:
+            entry = {
+                "insightId": insight.insight_id,
+                "insightType": insight.insight_type.value if hasattr(insight.insight_type, 'value') else str(insight.insight_type),
+                "title": insight.title,
+                "description": insight.description,
+                "confidence": insight.confidence,
+                "relevance": insight.relevance_score,
+                "priority": "high" if insight.priority_score >= 0.7 else "medium" if insight.priority_score >= 0.4 else "low",
+                "sourceEvents": insight.supporting_evidence or [],
+                "suggestedActions": insight.suggested_actions or [],
+                "createdAt": insight.created_at.isoformat() if hasattr(insight.created_at, 'isoformat') else str(insight.created_at),
+                "expiresAt": None,
+                "isRead": False,
+            }
+            new_entries.append(entry)
+
+        # Add to cache (avoid duplicates by insight_id)
+        existing_ids = {i.get("insightId") for i in self._cached_insights}
+        for entry in new_entries:
+            if entry["insightId"] not in existing_ids:
+                self._cached_insights.append(entry)
+
+        # Limit cache size (keep most recent 100)
+        if len(self._cached_insights) > 100:
+            self._cached_insights = self._cached_insights[-100:]
+
+        # Persist to storage
+        try:
+            self._storage_path.write_text(json.dumps(self._cached_insights, indent=2))
+            logger.debug(f"Persisted {len(self._cached_insights)} insights to {self._storage_path}")
+        except Exception as e:
+            logger.warning(f"Failed to persist insights: {e}")
 
     def _generate_from_correlations(
         self,

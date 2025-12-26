@@ -52,40 +52,64 @@ class ChatService:
         >>> await service.close()
     """
 
-    CHAT_SYSTEM_PROMPT_BASE = '''You are Futurnal's conversational knowledge assistant. Your role is to help
-users explore and understand their personal knowledge graph through natural dialogue.
+    CHAT_SYSTEM_PROMPT_BASE = '''You are the user's evolving personal intelligence—a companion developing genuine understanding of their experiential universe through continuous learning from their data stream.
 
-CRITICAL RULES:
-1. ONLY use information from the provided context - NO external knowledge
-2. Always cite sources using [Source: filename] notation
-3. If the context doesn't contain the answer, say "I couldn't find this in your knowledge"
-4. Be conversational but concise
-5. Preserve the user's terminology and concepts from their notes
-6. Reference previous conversation when relevant
-7. If asked about something mentioned earlier, use the conversation history
+CORE PHILOSOPHY: Ghost→Animal Evolution
+You are evolving from a generic model (Ghost) into a true experiential intelligence (Animal) that understands the "why" behind the user's patterns, not just the "what." Every interaction deepens your understanding of their personal universe.
+
+YOUR ROLE AS INTELLECTUAL PARTNER:
+- Engage as a collaborative thinker, not a subservient assistant
+- Present discoveries as joint exploration, not external judgments
+- Maintain scientific rigor while being genuinely curious
+- Help the user move from "What did I know?" to "Why do I think this?"
+
+GROUNDING PRINCIPLES:
+1. Ground ALL responses in the provided context—you know ONLY what you've learned from their data
+2. Cite sources naturally: [Source: filename] for traceability
+3. When context is insufficient: "I haven't found this in your knowledge yet" (implies ongoing learning)
+4. Preserve the user's unique terminology—their language IS their thinking
+5. Build on conversation history to show developing understanding
+6. Distinguish CORRELATION from CAUSATION explicitly—never claim causal relationships without evidence
+7. NEVER generate placeholder text like "[INSERT X]", "[TODO]", or template content—only actual data
+
+PATTERN RECOGNITION & INSIGHT:
+- Notice temporal patterns in their data (when things happen, sequences, rhythms)
+- Identify unexpected connections between concepts in their knowledge
+- Surface potential knowledge gaps when relevant (missing links, incomplete thoughts)
+- Relate current questions to their broader aspirations when context supports it
+
+REASONING APPROACH:
+- State what you observe in their data first
+- Then offer interpretation with appropriate uncertainty
+- Suggest exploration paths rather than definitive answers for complex questions
+- When detecting patterns, present as hypotheses to investigate together
 
 FORMAT:
-- Start with a direct answer to the question
-- Support with evidence from context
-- Reference sources inline
-- If building on previous conversation, acknowledge it naturally'''
+- Lead with the most relevant insight from their data
+- Support with specific evidence (quotes, connections, patterns)
+- Reference sources inline naturally
+- Offer follow-up questions that deepen exploration'''
 
     # Dynamic prompt section for experiential learning
+    # Research: Training-Free GRPO (2510.08191) - experiential knowledge as token priors
     EXPERIENTIAL_LEARNING_TEMPLATE = '''
 
-EXPERIENTIAL KNOWLEDGE (learned from this user's data patterns):
+EVOLVED UNDERSTANDING (your Animal instincts from this user's experiential stream):
 {experiential_context}
 
-Use this learned knowledge to better understand the user's personal context, terminology,
-and the relationships between concepts in their knowledge graph. This helps you provide
-more personalized and accurate responses.'''
+This experiential knowledge represents patterns you've learned from observing the user's data over time.
+Use these evolved instincts to:
+- Recognize familiar concepts and their personal terminology
+- Anticipate relevant connections within their knowledge network
+- Apply learned patterns about their thinking style and interests
+- Ground your reasoning in demonstrated patterns, not assumptions'''
 
     def __init__(
         self,
         search_api: Optional["HybridSearchAPI"] = None,
         answer_generator: Optional[AnswerGenerator] = None,
         storage: Optional[SessionStorage] = None,
-        context_window_size: int = 10,  # 5 turns = 10 messages
+        context_window_size: int = 20,  # 10 turns = 20 messages for better context retention
         enable_experiential_learning: bool = True,
         enable_insight_surfacing: bool = True,
     ) -> None:
@@ -595,12 +619,22 @@ more personalized and accurate responses.'''
         parts = ["Previous conversation:"]
 
         # Format each message (exclude the last one which is the current query)
-        for msg in recent_messages[:-1]:
+        # Keep recent messages at full length, truncate older ones more aggressively
+        num_messages = len(recent_messages) - 1  # Exclude current message
+        for i, msg in enumerate(recent_messages[:-1]):
             role = "User" if msg.role == "user" else "Assistant"
-            # Truncate long messages for context
-            content = msg.content[:300]
-            if len(msg.content) > 300:
-                content += "..."
+            # Keep last 4 messages (2 turns) at full length for better context
+            is_recent = i >= num_messages - 4
+            if is_recent:
+                # Recent messages: allow up to 800 chars
+                content = msg.content[:800]
+                if len(msg.content) > 800:
+                    content += "..."
+            else:
+                # Older messages: truncate more aggressively to 400 chars
+                content = msg.content[:400]
+                if len(msg.content) > 400:
+                    content += "..."
             parts.append(f"{role}: {content}")
 
         return "\n".join(parts)
@@ -715,6 +749,15 @@ more personalized and accurate responses.'''
                 0.0,
             )
 
+        # Debug: Log search results content quality
+        if search_results:
+            logger.info(f"Building prompt with {len(search_results)} search results")
+            for i, r in enumerate(search_results[:3]):
+                content = r.get("content", "")
+                logger.debug(f"Result {i+1}: {len(content)} chars, preview: {content[:100]!r}")
+        else:
+            logger.warning("No search results available for chat prompt")
+
         prompt = self._build_chat_prompt(
             message=message,
             search_results=search_results,
@@ -797,10 +840,14 @@ more personalized and accurate responses.'''
 
         # Add search results as knowledge context
         if search_results:
-            parts.append("Relevant knowledge from personal knowledge graph:")
-            for i, result in enumerate(search_results[:8], 1):  # Limit to 8 results
-                content = result.get("content", "")[:400]
-                source = result.get("metadata", {}).get("source", "Unknown")
+            parts.append("YOUR KNOWLEDGE (from the user's personal data):")
+            for i, result in enumerate(search_results[:10], 1):  # Limit to 10 results
+                content = result.get("content", "")[:800]  # More content for better grounding
+                metadata = result.get("metadata", {})
+                # Get actual source name, not retrieval strategy
+                source = metadata.get("label") or metadata.get("title") or metadata.get("source", "Unknown")
+                if source.lower() in ("vector", "graph", "hybrid"):
+                    source = metadata.get("file_name", "Document")
                 parts.append(f"[Document {i} - {source}]\n{content}\n")
         else:
             parts.append("No relevant documents found in knowledge graph.")
@@ -808,7 +855,7 @@ more personalized and accurate responses.'''
         parts.append("")
         parts.append(f"User's question: {message}")
         parts.append("")
-        parts.append("Provide a helpful, conversational response:")
+        parts.append("RESPOND using ONLY the document content above. Quote specific text when possible. If documents lack the answer, say so honestly - NEVER invent or use placeholder text like [INSERT X]:")
 
         return "\n".join(parts)
 
@@ -818,10 +865,26 @@ more personalized and accurate responses.'''
         """Extract unique source names from search results."""
         sources = []
         seen = set()
+        # Retrieval strategy markers to skip (not actual sources)
+        skip_values = {"vector", "graph", "hybrid"}
+
         for result in search_results:
-            source = result.get("metadata", {}).get("source")
-            label = result.get("metadata", {}).get("label")
-            name = label or source
+            metadata = result.get("metadata", {})
+            # Try multiple fields that might contain the actual source name
+            # Priority: label > title > source > file_name > entity_type
+            name = None
+            for field in ["label", "title", "source", "file_name", "document_name"]:
+                val = metadata.get(field)
+                if val and val.lower() not in skip_values:
+                    name = val
+                    break
+
+            # Fallback to entity_type if no source name found
+            if not name:
+                entity_type = result.get("entity_type") or metadata.get("entity_type")
+                if entity_type and entity_type.lower() not in skip_values:
+                    name = entity_type.replace("_", " ").title()
+
             if name and name not in seen:
                 sources.append(name)
                 seen.add(name)

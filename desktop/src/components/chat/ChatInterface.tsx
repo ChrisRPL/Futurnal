@@ -18,11 +18,19 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { MessageSquare, X, Link2, Trash2, FileText, Loader2 } from 'lucide-react';
+import { MessageSquare, X, Link2, Trash2, FileText, Loader2, Globe, BookOpen, Zap, ExternalLink, CheckCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useChatStore } from '@/stores/chatStore';
 import { multimodalApi } from '@/lib/multimodalApi';
-import { papersApi, type AgenticSearchResponse, type ScoredPaper } from '@/lib/api';
+import {
+  papersApi,
+  researchApi,
+  type AgenticSearchResponse,
+  type ScoredPaper,
+  type WebSearchResponse,
+  type DeepResearchResponse,
+  type QuickSearchResponse,
+} from '@/lib/api';
 import { ChatBubble } from './ChatBubble';
 import { MessageLoading } from './MessageLoading';
 import { ChatInput, type Attachment } from './ChatInput';
@@ -64,6 +72,12 @@ export function ChatInterface({
   const [agenticSearchResults, setAgenticSearchResults] = useState<AgenticSearchResponse | null>(null);
   const [isPaperSearching, setIsPaperSearching] = useState(false);
   const [searchProgress, setSearchProgress] = useState<string>('');
+  // Research state
+  const [webSearchResult, setWebSearchResult] = useState<WebSearchResponse | null>(null);
+  const [deepResearchResult, setDeepResearchResult] = useState<DeepResearchResponse | null>(null);
+  const [quickSearchResult, setQuickSearchResult] = useState<QuickSearchResponse | null>(null);
+  const [isResearching, setIsResearching] = useState(false);
+  const [researchProgress, setResearchProgress] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
@@ -293,7 +307,10 @@ export function ChatInterface({
             // Use agentic search for intelligent multi-strategy search
             const response = await papersApi.agenticSearch(args.trim());
 
-            if (response.success && response.papers.length > 0) {
+            // Check for API errors first
+            if (!response.success) {
+              await sendMessage(`Paper search failed: ${response.error || 'Unknown error'}`);
+            } else if (response.papers.length > 0) {
               // Store the full agentic results (includes synthesis, suggestions)
               setAgenticSearchResults(response);
 
@@ -338,6 +355,102 @@ export function ChatInterface({
         case 'show_insights':
           // Send a special message to show insights
           await sendMessage('[SYSTEM: Show insights] Show me the emergent insights from my data');
+          break;
+
+        case 'web_search':
+          // Web search with autonomous browsing
+          if (!args.trim()) {
+            await sendMessage('[Web Search] Please provide a search query. Example: /web what is causal inference');
+            break;
+          }
+
+          setIsResearching(true);
+          setWebSearchResult(null);
+          setDeepResearchResult(null);
+          setQuickSearchResult(null);
+          setResearchProgress('Searching the web...');
+
+          try {
+            console.log('[Chat] Web search for:', args);
+            const response = await researchApi.webSearch({ query: args.trim() });
+
+            if (response.success) {
+              setWebSearchResult(response);
+            } else {
+              await sendMessage(`Web search failed: ${response.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            console.error('[Chat] Web search failed:', error);
+            await sendMessage(`Web search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          } finally {
+            setIsResearching(false);
+            setResearchProgress('');
+          }
+          break;
+
+        case 'deep_research':
+          // Deep research combining PKG and web
+          if (!args.trim()) {
+            await sendMessage('[Deep Research] Please provide a research topic. Example: /research impact of sleep on productivity');
+            break;
+          }
+
+          setIsResearching(true);
+          setWebSearchResult(null);
+          setDeepResearchResult(null);
+          setQuickSearchResult(null);
+          setResearchProgress('Conducting deep research...');
+
+          try {
+            console.log('[Chat] Deep research for:', args);
+            const response = await researchApi.deepResearch({
+              query: args.trim(),
+              depth: 'detailed',
+            });
+
+            if (response.success) {
+              setDeepResearchResult(response);
+            } else {
+              await sendMessage(`Deep research failed: ${response.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            console.error('[Chat] Deep research failed:', error);
+            await sendMessage(`Deep research failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          } finally {
+            setIsResearching(false);
+            setResearchProgress('');
+          }
+          break;
+
+        case 'quick_search':
+          // Quick web search without synthesis
+          if (!args.trim()) {
+            await sendMessage('[Quick Search] Please provide a search query. Example: /quick python async tutorial');
+            break;
+          }
+
+          setIsResearching(true);
+          setWebSearchResult(null);
+          setDeepResearchResult(null);
+          setQuickSearchResult(null);
+          setResearchProgress('Searching...');
+
+          try {
+            console.log('[Chat] Quick search for:', args);
+            const response = await researchApi.quickSearch(args.trim());
+
+            if (response.success) {
+              setQuickSearchResult(response);
+            } else {
+              await sendMessage(`Quick search failed: ${response.error || 'Unknown error'}`);
+            }
+          } catch (error) {
+            console.error('[Chat] Quick search failed:', error);
+            await sendMessage(`Quick search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          } finally {
+            setIsResearching(false);
+            setResearchProgress('');
+          }
           break;
 
         default:
@@ -566,6 +679,199 @@ export function ChatInterface({
                 Search completed in {(agenticSearchResults.searchTimeMs / 1000).toFixed(1)}s
               </div>
             )}
+          </div>
+        )}
+
+        {/* Research loading indicator */}
+        {isResearching && (
+          <div className="flex items-center gap-3 px-4 py-3 bg-white/5 border border-white/10 rounded-lg">
+            <Loader2 className="h-4 w-4 text-white/60 animate-spin" />
+            <div className="flex flex-col">
+              <span className="text-sm text-white/70">{researchProgress || 'Researching...'}</span>
+              <span className="text-xs text-white/40">This may take a moment</span>
+            </div>
+          </div>
+        )}
+
+        {/* Web Search Results */}
+        {webSearchResult && (
+          <div className="p-4 bg-white/[0.02] border border-white/10 rounded-lg space-y-4">
+            {/* Header */}
+            <div className="flex items-center gap-2 pb-2 border-b border-white/10">
+              <Globe className="h-4 w-4 text-white/60" />
+              <span className="text-sm font-medium text-white/80">
+                Web Search: "{webSearchResult.query}"
+              </span>
+              <button
+                onClick={() => setWebSearchResult(null)}
+                className="ml-auto p-1 text-white/40 hover:text-white/60 transition-colors"
+                title="Dismiss results"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Answer */}
+            {webSearchResult.answer && (
+              <div className="p-3 bg-white/5 rounded-lg border border-white/10">
+                <p className="text-sm text-white/80 leading-relaxed whitespace-pre-wrap">
+                  {webSearchResult.answer}
+                </p>
+              </div>
+            )}
+
+            {/* Sources */}
+            {webSearchResult.sources.length > 0 && (
+              <div>
+                <div className="text-xs font-medium text-white/50 uppercase tracking-wider mb-2">
+                  Sources ({webSearchResult.sources.length})
+                </div>
+                <div className="space-y-2">
+                  {webSearchResult.sources.slice(0, 5).map((source, i) => (
+                    <a
+                      key={i}
+                      href={source.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 p-2 bg-white/5 rounded border border-white/10 hover:bg-white/10 transition-colors"
+                    >
+                      <ExternalLink className="h-3 w-3 text-white/40 flex-shrink-0" />
+                      <span className="text-xs text-white/70 truncate flex-1">{source.title || source.url}</span>
+                      <span className={cn(
+                        "text-[10px] px-1.5 py-0.5 rounded",
+                        source.reliability === 'high' ? 'bg-emerald-500/20 text-emerald-400' :
+                        source.reliability === 'medium' ? 'bg-amber-500/20 text-amber-400' :
+                        'bg-white/10 text-white/40'
+                      )}>
+                        {source.reliability}
+                      </span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Confidence */}
+            <div className="flex items-center gap-4 text-xs text-white/40">
+              <span>Confidence: {Math.round(webSearchResult.confidence * 100)}%</span>
+              <span>Pages visited: {webSearchResult.totalPages}</span>
+              <span className="ml-auto">{(webSearchResult.searchTimeMs / 1000).toFixed(1)}s</span>
+            </div>
+          </div>
+        )}
+
+        {/* Deep Research Results */}
+        {deepResearchResult && (
+          <div className="p-4 bg-white/[0.02] border border-white/10 rounded-lg space-y-4">
+            {/* Header */}
+            <div className="flex items-center gap-2 pb-2 border-b border-white/10">
+              <BookOpen className="h-4 w-4 text-white/60" />
+              <span className="text-sm font-medium text-white/80">
+                Deep Research: "{deepResearchResult.query}"
+              </span>
+              <button
+                onClick={() => setDeepResearchResult(null)}
+                className="ml-auto p-1 text-white/40 hover:text-white/60 transition-colors"
+                title="Dismiss results"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Summary */}
+            {deepResearchResult.summary && (
+              <div className="p-3 bg-white/5 rounded-lg border border-white/10">
+                <div className="text-xs font-medium text-white/50 uppercase tracking-wider mb-2">
+                  Summary
+                </div>
+                <p className="text-sm text-white/80 leading-relaxed whitespace-pre-wrap">
+                  {deepResearchResult.summary}
+                </p>
+              </div>
+            )}
+
+            {/* Key Points */}
+            {deepResearchResult.keyPoints.length > 0 && (
+              <div>
+                <div className="text-xs font-medium text-white/50 uppercase tracking-wider mb-2">
+                  Key Points
+                </div>
+                <ul className="space-y-1.5">
+                  {deepResearchResult.keyPoints.map((point, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm text-white/70">
+                      <CheckCircle className="h-3.5 w-3.5 text-emerald-400/60 mt-0.5 flex-shrink-0" />
+                      <span>{point}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Metadata */}
+            <div className="flex items-center gap-4 text-xs text-white/40 pt-2 border-t border-white/10">
+              <span>Depth: {deepResearchResult.depthUsed}</span>
+              <span>Sources: {deepResearchResult.numSourcesConsulted}</span>
+              <span>Confidence: {Math.round(deepResearchResult.confidence * 100)}%</span>
+              <span className="ml-auto">{(deepResearchResult.researchTimeMs / 1000).toFixed(1)}s</span>
+            </div>
+          </div>
+        )}
+
+        {/* Quick Search Results */}
+        {quickSearchResult && quickSearchResult.results.length > 0 && (
+          <div className="p-4 bg-white/[0.02] border border-white/10 rounded-lg space-y-4">
+            {/* Header */}
+            <div className="flex items-center gap-2 pb-2 border-b border-white/10">
+              <Zap className="h-4 w-4 text-white/60" />
+              <span className="text-sm font-medium text-white/80">
+                Quick Search: "{quickSearchResult.query}"
+              </span>
+              <span className="text-xs text-white/40">
+                ({quickSearchResult.total} results)
+              </span>
+              <button
+                onClick={() => setQuickSearchResult(null)}
+                className="ml-auto p-1 text-white/40 hover:text-white/60 transition-colors"
+                title="Dismiss results"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Results */}
+            <div className="space-y-3">
+              {quickSearchResult.results.map((result, i) => (
+                <a
+                  key={i}
+                  href={result.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block p-3 bg-white/5 rounded border border-white/10 hover:bg-white/10 transition-colors"
+                >
+                  <div className="flex items-start gap-2">
+                    <ExternalLink className="h-3.5 w-3.5 text-white/40 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-white/80 truncate">
+                        {result.title || 'Untitled'}
+                      </div>
+                      {result.snippet && (
+                        <p className="text-xs text-white/50 mt-1 line-clamp-2">
+                          {result.snippet}
+                        </p>
+                      )}
+                      <div className="text-[10px] text-white/30 mt-1 truncate">
+                        {result.url}
+                      </div>
+                    </div>
+                  </div>
+                </a>
+              ))}
+            </div>
+
+            {/* Search time */}
+            <div className="text-xs text-white/30 text-right">
+              Search completed in {quickSearchResult.searchTimeMs}ms
+            </div>
           </div>
         )}
 

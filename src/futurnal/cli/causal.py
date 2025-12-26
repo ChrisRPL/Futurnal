@@ -19,21 +19,47 @@ from typing import Optional
 
 from typer import Typer, Argument, Option
 
+from futurnal.search.causal.exceptions import EventNotFoundError
+
 logger = logging.getLogger(__name__)
 
 causal_app = Typer(help="Causal chain exploration commands")
+
+
+def _get_pkg_database():
+    """Factory function to get PKG database instance.
+
+    Lazy initialization to avoid circular imports.
+    Returns None if PKG module is not available or Neo4j not running.
+    """
+    try:
+        from futurnal.configuration.settings import bootstrap_settings
+        from futurnal.pkg.database import PKGDatabaseManager
+
+        settings = bootstrap_settings()
+        manager = PKGDatabaseManager(settings.workspace.storage)
+        manager.connect()
+        return manager
+    except ImportError as e:
+        logger.warning(f"PKG database module not available: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"PKG database connection failed: {e}")
+        return None
 
 
 def _get_causal_retrieval():
     """Factory function to get CausalChainRetrieval instance.
 
     Lazy initialization to avoid circular imports.
+    Returns None if PKG database is not available.
     """
     from futurnal.pkg.queries.temporal import TemporalGraphQueries
     from futurnal.search.causal.retrieval import CausalChainRetrieval
-    from futurnal.pkg.db import get_pkg_database
 
-    db = get_pkg_database()
+    db = _get_pkg_database()
+    if db is None:
+        return None
     pkg_queries = TemporalGraphQueries(db)
     return CausalChainRetrieval(pkg_queries)
 
@@ -55,6 +81,14 @@ def find_causes(
     """
     try:
         retrieval = _get_causal_retrieval()
+        if retrieval is None:
+            error_msg = "PKG database not available. Start Neo4j and ingest data first."
+            if output_json:
+                print(json.dumps({"success": False, "error": error_msg, "causes": []}))
+            else:
+                print(f"Error: {error_msg}")
+            return
+
         result = retrieval.find_causes(
             event_id=event_id,
             max_hops=max_hops,
@@ -65,7 +99,7 @@ def find_causes(
             output = {
                 "success": True,
                 "targetEventId": result.target_event_id,
-                "targetEvent": result.target_event.model_dump() if result.target_event else None,
+                "targetEvent": result.target_event.model_dump(mode='json') if result.target_event else None,
                 "causes": [
                     {
                         "causeId": c.cause_id,
@@ -98,6 +132,18 @@ def find_causes(
                         f"(distance: {cause.distance}, conf: {cause.aggregate_confidence:.2f})"
                     )
 
+    except EventNotFoundError as e:
+        logger.warning(f"Find causes failed: node not in causal graph: {e}")
+        error_msg = (
+            f"Document not found in causal graph. "
+            f"This document may not have been indexed to Neo4j yet. "
+            f"Try re-syncing sources or running the indexer."
+        )
+        if output_json:
+            print(json.dumps({"success": False, "error": error_msg, "causes": []}))
+        else:
+            print(f"Info: {error_msg}")
+        raise SystemExit(1)
     except Exception as e:
         logger.exception("Find causes failed")
         if output_json:
@@ -124,6 +170,14 @@ def find_effects(
     """
     try:
         retrieval = _get_causal_retrieval()
+        if retrieval is None:
+            error_msg = "PKG database not available. Start Neo4j and ingest data first."
+            if output_json:
+                print(json.dumps({"success": False, "error": error_msg, "effects": []}))
+            else:
+                print(f"Error: {error_msg}")
+            return
+
         result = retrieval.find_effects(
             event_id=event_id,
             max_hops=max_hops,
@@ -134,7 +188,7 @@ def find_effects(
             output = {
                 "success": True,
                 "sourceEventId": result.source_event_id,
-                "sourceEvent": result.source_event.model_dump() if result.source_event else None,
+                "sourceEvent": result.source_event.model_dump(mode='json') if result.source_event else None,
                 "effects": [
                     {
                         "effectId": e.effect_id,
@@ -167,6 +221,18 @@ def find_effects(
                         f"(distance: {effect.distance}, conf: {effect.aggregate_confidence:.2f})"
                     )
 
+    except EventNotFoundError as e:
+        logger.warning(f"Find effects failed: node not in causal graph: {e}")
+        error_msg = (
+            f"Document not found in causal graph. "
+            f"This document may not have been indexed to Neo4j yet. "
+            f"Try re-syncing sources or running the indexer."
+        )
+        if output_json:
+            print(json.dumps({"success": False, "error": error_msg, "effects": []}))
+        else:
+            print(f"Info: {error_msg}")
+        raise SystemExit(1)
     except Exception as e:
         logger.exception("Find effects failed")
         if output_json:
@@ -193,6 +259,14 @@ def find_causal_path(
     """
     try:
         retrieval = _get_causal_retrieval()
+        if retrieval is None:
+            error_msg = "PKG database not available. Start Neo4j and ingest data first."
+            if output_json:
+                print(json.dumps({"success": False, "error": error_msg, "pathFound": False, "path": None}))
+            else:
+                print(f"Error: {error_msg}")
+            return
+
         result = retrieval.find_causal_path(
             start_event_id=start_id,
             end_event_id=end_id,
@@ -249,3 +323,47 @@ def find_causal_path(
         else:
             print(f"Error: {e}")
         raise SystemExit(1)
+
+
+@causal_app.command("relationships")
+def export_relationships(
+    output_json: bool = Option(True, "--json", help="Output as JSON (always true)"),
+) -> None:
+    """Export RELATED_TO relationships from Neo4j for graph visualization.
+
+    Returns document-to-document relationships based on shared entities.
+    Used by the desktop app to show causal connections in the graph.
+    """
+    try:
+        db = _get_pkg_database()
+        if db is None:
+            print(json.dumps({"success": False, "error": "Neo4j not available", "relationships": []}))
+            return
+
+        with db._driver.session() as session:
+            result = session.run("""
+                MATCH (d1:Document)-[r:RELATED_TO]->(d2:Document)
+                RETURN d1.id AS source, d2.id AS target,
+                       r.shared_entity_count AS shared_count,
+                       r.relationship_type AS rel_type
+            """)
+
+            relationships = []
+            for record in result:
+                relationships.append({
+                    "source": record["source"],
+                    "target": record["target"],
+                    "relationship": "related_to",
+                    "weight": record["shared_count"] or 1,
+                    "confidence": 0.5,
+                })
+
+        print(json.dumps({
+            "success": True,
+            "relationships": relationships,
+            "count": len(relationships),
+        }))
+
+    except Exception as e:
+        logger.exception("Export relationships failed")
+        print(json.dumps({"success": False, "error": str(e), "relationships": []}))

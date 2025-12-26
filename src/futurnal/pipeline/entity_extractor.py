@@ -78,6 +78,7 @@ class DocumentEntities:
     document_id: str
     source: Optional[str] = None
     title: Optional[str] = None  # Extracted document title
+    content: Optional[str] = None  # Full document content for search/retrieval
     extracted_at: Optional[str] = None
     entities: List[ExtractedEntity] = field(default_factory=list)
     relationships: List[ExtractedRelationship] = field(default_factory=list)
@@ -87,7 +88,7 @@ class DocumentEntities:
             self.extracted_at = datetime.utcnow().isoformat()
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "document_id": self.document_id,
             "source": self.source,
             "title": self.title,
@@ -95,6 +96,10 @@ class DocumentEntities:
             "entities": [e.to_dict() for e in self.entities],
             "relationships": [r.to_dict() for r in self.relationships],
         }
+        # Store content for retrieval (truncate to 10KB for reasonable file sizes)
+        if self.content:
+            result["content"] = self.content[:10000]
+        return result
 
 
 # LLM prompt for entity extraction
@@ -296,7 +301,8 @@ class EntityExtractor:
         source = metadata.get("source")
         content = element.get("text", "") or element.get("content", "")
 
-        result = DocumentEntities(document_id=doc_id, source=source)
+        # Include content for search/retrieval
+        result = DocumentEntities(document_id=doc_id, source=source, content=content)
 
         # Extract title from subject
         result.title = metadata.get("subject")
@@ -380,7 +386,8 @@ class EntityExtractor:
         source = metadata.get("source")
         content = element.get("text", "") or element.get("content", "")
 
-        result = DocumentEntities(document_id=doc_id, source=source)
+        # Include content for search/retrieval
+        result = DocumentEntities(document_id=doc_id, source=source, content=content)
 
         # Extract title from content/metadata first
         result.title = self._extract_title_from_content(content, metadata)

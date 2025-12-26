@@ -126,6 +126,7 @@ const NODE_OPACITIES: Record<EntityType, number> = {
 const LINK_STYLES: Record<string, { color: string; width: number; dashed: boolean }> = {
   contains: { color: 'rgba(168, 85, 247, 0.35)', width: 1, dashed: true },   // Purple, structural
   mentions: { color: 'rgba(59, 130, 246, 0.5)', width: 2, dashed: false },   // Blue, semantic
+  related_to: { color: 'rgba(16, 185, 129, 0.6)', width: 2, dashed: false }, // Green, causal (document-to-document)
   default: { color: 'rgba(255, 255, 255, 0.25)', width: 1.5, dashed: false },
 };
 
@@ -1041,6 +1042,10 @@ function GraphLegend() {
         <div className="flex items-center gap-2">
           <div className="w-6 border-t-2" style={{ borderColor: 'rgba(59, 130, 246, 0.7)' }} />
           <span className="text-xs text-white/70">mentions</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-6 border-t-2" style={{ borderColor: 'rgba(16, 185, 129, 0.8)' }} />
+          <span className="text-xs text-white/70">related to</span>
         </div>
       </div>
     </div>

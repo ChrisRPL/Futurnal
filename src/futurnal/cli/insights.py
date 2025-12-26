@@ -80,33 +80,11 @@ def list_insights(
     try:
         generator = _get_insight_generator()
 
-        # Generate sample insights for demo (in production, load from storage)
+        # Load insights from storage or insight generator
         insights = []
         if generator is not None:
             # Get cached insights from generator
             insights = getattr(generator, '_cached_insights', [])
-
-        # If no cached insights, generate placeholder
-        if not insights:
-            insights = [
-                {
-                    "insightId": str(uuid4()),
-                    "insightType": "correlation",
-                    "title": "Late coding sessions correlate with poor sleep",
-                    "description": "Analysis shows a 75% correlation between coding past midnight and reported poor sleep quality the following day.",
-                    "confidence": 0.75,
-                    "relevance": 0.85,
-                    "priority": "high",
-                    "sourceEvents": ["late_coding", "sleep_quality"],
-                    "suggestedActions": [
-                        "Consider setting a coding cutoff time",
-                        "Try using blue light filters after 9pm",
-                    ],
-                    "createdAt": datetime.utcnow().isoformat(),
-                    "expiresAt": None,
-                    "isRead": False,
-                },
-            ]
 
         # Filter by type if specified
         if insight_type:
@@ -211,44 +189,11 @@ def list_knowledge_gaps(
     try:
         engine = _get_curiosity_engine()
 
-        # Generate sample gaps for demo
+        # Load knowledge gaps from curiosity engine
         gaps = []
         if engine is not None:
-            # Would call: gaps = engine.detect_gaps(pkg_graph)
-            pass
-
-        # Placeholder gaps
-        if not gaps:
-            gaps = [
-                {
-                    "gapId": str(uuid4()),
-                    "gapType": "isolated_cluster",
-                    "title": "Disconnected project documentation",
-                    "description": "Found 12 documents about 'project-alpha' with no connections to main knowledge graph.",
-                    "informationGain": 0.72,
-                    "relatedTopics": ["project-alpha", "documentation", "architecture"],
-                    "explorationPrompts": [
-                        "What is the main purpose of project-alpha?",
-                        "How does project-alpha relate to the core system?",
-                    ],
-                    "createdAt": datetime.utcnow().isoformat(),
-                    "isAddressed": False,
-                },
-                {
-                    "gapId": str(uuid4()),
-                    "gapType": "forgotten_memory",
-                    "title": "Stale meeting notes from Q3",
-                    "description": "Meeting notes from Q3 haven't been accessed in 90+ days and may contain valuable context.",
-                    "informationGain": 0.45,
-                    "relatedTopics": ["meetings", "Q3-planning", "decisions"],
-                    "explorationPrompts": [
-                        "What key decisions were made in Q3?",
-                        "Review action items from Q3 meetings",
-                    ],
-                    "createdAt": datetime.utcnow().isoformat(),
-                    "isAddressed": False,
-                },
-            ]
+            # Get cached gaps from engine
+            gaps = getattr(engine, '_cached_gaps', [])
 
         gaps = gaps[:limit]
 
@@ -324,29 +269,6 @@ def get_pending_verifications(
         if agent is not None:
             pending = agent.get_pending_verifications(max_items=limit)
             questions = [q.to_dict() for q in pending]
-
-        # Placeholder if no real data
-        if not questions:
-            questions = [
-                {
-                    "questionId": str(uuid4()),
-                    "candidateId": str(uuid4()),
-                    "causeEvent": "late_night_coding",
-                    "effectEvent": "poor_sleep",
-                    "mainQuestion": "I've noticed a pattern: when 'late night coding' happens, 'poor sleep' tends to follow. Do you think late night coding actually causes poor sleep?",
-                    "context": "This pattern was observed 8 times in your data. The correlation strength is 65%.",
-                    "evidenceSummary": "Pattern: late_night_coding -> poor_sleep\nAverage gap: 0.5 days\nOccurrences: 8\nCorrelation: 65%",
-                    "responseOptions": [
-                        {"value": "yes_causal", "label": "Yes, late_night_coding causes poor_sleep"},
-                        {"value": "no_correlation", "label": "No, they just happen together by coincidence"},
-                        {"value": "reverse_causation", "label": "No, actually poor_sleep causes late_night_coding"},
-                        {"value": "confounder", "label": "No, something else causes both"},
-                        {"value": "uncertain", "label": "I'm not sure"},
-                        {"value": "skip", "label": "Skip this question"},
-                    ],
-                    "initialConfidence": 0.55,
-                },
-            ]
 
         questions = questions[:limit]
 
@@ -466,15 +388,30 @@ def get_insight_stats(
         futurnal insights stats --json
     """
     try:
-        # Aggregate stats from components
+        # Aggregate stats from real components
+        generator = _get_insight_generator()
+        engine = _get_curiosity_engine()
+        agent = _get_icda_agent()
+
+        # Get real counts from components
+        insights = getattr(generator, '_cached_insights', []) if generator else []
+        gaps = getattr(engine, '_cached_gaps', []) if engine else []
+        pending = agent.get_pending_verifications(max_items=100) if agent else []
+
+        total_insights = len(insights)
+        unread_insights = sum(1 for i in insights if not i.get("isRead", False))
+        total_gaps = len(gaps)
+        pending_verifications = len(pending)
+        verified_count = getattr(agent, '_verified_count', 0) if agent else 0
+
         stats = {
             "success": True,
-            "totalInsights": 5,
-            "unreadInsights": 2,
-            "totalGaps": 3,
-            "pendingVerifications": 1,
-            "verifiedCausalCount": 4,
-            "lastScanAt": datetime.utcnow().isoformat(),
+            "totalInsights": total_insights,
+            "unreadInsights": unread_insights,
+            "totalGaps": total_gaps,
+            "pendingVerifications": pending_verifications,
+            "verifiedCausalCount": verified_count,
+            "lastScanAt": None,  # Will be set when a real scan runs
         }
 
         if output_json:
@@ -516,17 +453,34 @@ def trigger_insight_scan(
         futurnal insights scan --json
     """
     try:
-        # In production, this would trigger the InsightJobExecutor
         logger.info("Triggering insight scan...")
 
-        # Simulate scan results
+        # Get components
+        generator = _get_insight_generator()
+        engine = _get_curiosity_engine()
+        agent = _get_icda_agent()
+
+        # TODO: In production, trigger actual insight generation
+        # For now, return current stats after "scan"
+
+        # Get real counts from components
+        insights = getattr(generator, '_cached_insights', []) if generator else []
+        gaps = getattr(engine, '_cached_gaps', []) if engine else []
+        pending = agent.get_pending_verifications(max_items=100) if agent else []
+
+        total_insights = len(insights)
+        unread_insights = sum(1 for i in insights if not i.get("isRead", False))
+        total_gaps = len(gaps)
+        pending_verifications = len(pending)
+        verified_count = getattr(agent, '_verified_count', 0) if agent else 0
+
         stats = {
             "success": True,
-            "totalInsights": 7,
-            "unreadInsights": 3,
-            "totalGaps": 4,
-            "pendingVerifications": 2,
-            "verifiedCausalCount": 4,
+            "totalInsights": total_insights,
+            "unreadInsights": unread_insights,
+            "totalGaps": total_gaps,
+            "pendingVerifications": pending_verifications,
+            "verifiedCausalCount": verified_count,
             "lastScanAt": datetime.utcnow().isoformat(),
         }
 

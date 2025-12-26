@@ -205,7 +205,7 @@ def _default_settings() -> Settings:
             "storage": {
                 "neo4j_uri": "bolt://localhost:7687",
                 "neo4j_username": "neo4j",
-                "neo4j_password": "NEO4J_PASSWORD_PLACEHOLDER",
+                "neo4j_password": "futurnal_local",
                 "neo4j_encrypted": False,
                 "chroma_path": str(chroma_dir),
             },

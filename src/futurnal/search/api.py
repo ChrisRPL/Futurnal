@@ -643,9 +643,9 @@ class HybridSearchAPI:
                         "vector_score": r.vector_score,
                         "graph_score": r.graph_score,
                         "schema_version": r.schema_version,
-                        "source": r.source,
+                        "retrieval_source": r.source,  # "vector"/"graph"/"hybrid" - retrieval strategy
                         "graph_enhanced": True,  # Flag for frontend to show graph badge
-                        **(r.metadata if r.metadata else {}),
+                        **(r.metadata if r.metadata else {}),  # Preserve actual document source
                     },
                 }
 

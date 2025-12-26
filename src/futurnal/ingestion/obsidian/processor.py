@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 # Try to import partition with graceful fallback
 try:
-    from unstructured.partition.md import partition
+    from unstructured.partition.md import partition_md as partition
     UNSTRUCTURED_AVAILABLE = True
 except ImportError:
     logger.warning("Unstructured.io not available - document processing will use fallback")

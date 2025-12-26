@@ -9,10 +9,20 @@
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use sha2::{Sha256, Digest};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use tauri::command;
+
+/// Compute document ID matching Neo4j's format: SHA256(path)[:16]
+/// This ensures graph visualization nodes have the same IDs as Neo4j documents
+fn compute_neo4j_doc_id(path: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(path.as_bytes());
+    let result = hasher.finalize();
+    hex::encode(&result[..8])  // 8 bytes = 16 hex chars
+}
 
 /// Regex for extracting markdown headings (# Title)
 static HEADING_REGEX: OnceLock<Regex> = OnceLock::new();
@@ -361,10 +371,10 @@ fn load_entity_files(
         }
 
         // Create relationship links (document → entity)
-        // Note: rel.source is the document hash, but document nodes use "doc:{hash}" format
+        // Note: rel.source is the document hash, matching document node IDs directly
         for rel in doc_entities.relationships {
             entity_links.push(GraphLink {
-                source: format!("doc:{}", rel.source),
+                source: rel.source,
                 target: rel.target,
                 relationship: rel.relationship,
                 weight: Some(rel.confidence),
@@ -381,6 +391,60 @@ fn load_entity_files(
     );
 
     (entity_nodes, entity_links, entity_node_ids, document_titles)
+}
+
+/// Response from causal relationships CLI command.
+#[derive(Debug, Deserialize)]
+struct CausalRelationshipsResponse {
+    success: bool,
+    #[serde(default)]
+    relationships: Vec<CausalRelationship>,
+    #[serde(default)]
+    count: usize,
+}
+
+/// Causal relationship between documents.
+#[derive(Debug, Deserialize)]
+struct CausalRelationship {
+    source: String,
+    target: String,
+    relationship: String,
+    #[serde(default)]
+    weight: f64,
+    #[serde(default)]
+    confidence: f64,
+}
+
+/// Load RELATED_TO relationships from Neo4j via CLI command.
+/// These are document-to-document relationships based on shared entities.
+async fn load_causal_relationships() -> Vec<GraphLink> {
+    let args = vec!["causal", "relationships", "--json"];
+
+    match crate::python::execute_cli::<CausalRelationshipsResponse>(&args).await {
+        Ok(response) if response.success => {
+            let links: Vec<GraphLink> = response.relationships
+                .into_iter()
+                .map(|rel| GraphLink {
+                    source: rel.source,
+                    target: rel.target,
+                    relationship: rel.relationship,
+                    weight: Some(rel.weight),
+                    confidence: Some(rel.confidence),
+                })
+                .collect();
+
+            log::info!("Loaded {} causal relationships from Neo4j", links.len());
+            links
+        }
+        Ok(_) => {
+            log::warn!("Causal relationships command returned success=false");
+            Vec::new()
+        }
+        Err(e) => {
+            log::debug!("Failed to load causal relationships: {}", e);
+            Vec::new()
+        }
+    }
 }
 
 /// Map Unstructured.io element types to our EntityType.
@@ -448,9 +512,24 @@ fn aggregate_element(
     element: &ParsedElement,
 ) {
     let doc = documents.entry(key.clone()).or_insert_with(|| {
+        // Compute ID matching Neo4j's format for consistency
+        // Neo4j uses: SHA256(path)[:16] or SHA256(content)[:16]
         let id = match &key {
             DocumentKey::ImapEmail { source, uid } => format!("email:{}:{}", source, uid),
-            DocumentKey::UnstructuredDoc { parent_id } => format!("doc:{}", parent_id),
+            DocumentKey::UnstructuredDoc { parent_id: _ } => {
+                // Use path from metadata to compute Neo4j-compatible ID
+                let path = element.metadata.extra.get("path")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| element.metadata.extra.get("source_file").and_then(|v| v.as_str()))
+                    .unwrap_or_else(|| element.metadata.filename.as_deref().unwrap_or(""));
+
+                if !path.is_empty() {
+                    compute_neo4j_doc_id(path)
+                } else {
+                    // Fallback: hash the element text
+                    compute_neo4j_doc_id(&element.text)
+                }
+            },
             DocumentKey::RawEmail { sha256 } => sha256.clone(),
         };
 
@@ -687,6 +766,16 @@ pub async fn get_knowledge_graph(limit: Option<u32>) -> Result<GraphData, String
     let node_ids: std::collections::HashSet<String> = nodes.iter().map(|n| n.id.clone()).collect();
     for link in entity_links {
         // Check if both source and target nodes exist in the graph
+        if node_ids.contains(&link.source) && node_ids.contains(&link.target) {
+            links.push(link);
+        }
+    }
+
+    // Load causal (RELATED_TO) relationships from Neo4j
+    // These connect documents that share entities
+    let causal_links = load_causal_relationships().await;
+    for link in causal_links {
+        // Only add if both nodes exist in the graph
         if node_ids.contains(&link.source) && node_ids.contains(&link.target) {
             links.push(link);
         }

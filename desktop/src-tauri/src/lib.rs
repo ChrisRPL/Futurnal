@@ -24,6 +24,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         // IPC Command Handlers
         .invoke_handler(tauri::generate_handler![
+            // Infrastructure commands (auto-start services)
+            commands::infrastructure::get_infrastructure_status,
+            commands::infrastructure::start_infrastructure,
+            commands::infrastructure::stop_infrastructure,
+            commands::infrastructure::ensure_infrastructure_running,
             // Search commands
             commands::search::search_query,
             commands::search::get_search_history,
@@ -116,6 +121,11 @@ pub fn run() {
             commands::papers::ingest_papers,
             commands::papers::get_paper_status,
             commands::papers::get_all_papers_status,
+            // Research commands (Web Search & Deep Research)
+            commands::research::web_search,
+            commands::research::deep_research,
+            commands::research::quick_search,
+            commands::research::get_research_status,
         ])
         .setup(|app| {
             log::info!("Futurnal Desktop Shell initialized");

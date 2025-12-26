@@ -302,17 +302,25 @@ class TestContextBuilding:
         self,
         chat_service: ChatService,
     ):
-        """Test that long messages are truncated in context."""
+        """Test that long messages are truncated in context.
+
+        Recent messages (last 4) are truncated at 800 chars.
+        Older messages are truncated at 400 chars.
+        """
         session = ChatSession(id="test")
-        long_content = "A" * 500  # 500 chars
+        # Create a message longer than 800 chars
+        long_content = "A" * 1000  # 1000 chars - should be truncated
         session.add_message(ChatMessage(role="user", content=long_content))
         session.add_message(ChatMessage(role="assistant", content="Response"))
         session.add_message(ChatMessage(role="user", content="Next"))
 
         context = chat_service._build_conversation_context(session)
 
-        # Should be truncated to 300 chars with "..."
+        # Should be truncated to 800 chars with "..." (recent message limit)
         assert "..." in context
+        # Should contain truncated version of the long message (800 chars + ...)
+        assert "A" * 800 in context
+        assert "A" * 1000 not in context
 
 
 # ---------------------------------------------------------------------------

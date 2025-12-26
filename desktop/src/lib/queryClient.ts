@@ -62,4 +62,7 @@ export const queryKeys = {
   telemetryQualityGates: () => ['telemetry', 'quality-gates'] as const,
   telemetryAlerts: (query?: unknown) => ['telemetry', 'alerts', query] as const,
   telemetryStorageStats: () => ['telemetry', 'storage-stats'] as const,
+
+  // Infrastructure
+  infrastructureStatus: ['infrastructureStatus'] as const,
 };

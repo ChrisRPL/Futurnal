@@ -101,7 +101,9 @@ def test_obsidian_to_local_source_conversion(tmp_path: Path) -> None:
     assert local_source["max_workers"] == 2
     assert local_source["schedule"] == "0 */12 * * *"
     assert local_source["priority"] == "high"
-    assert local_source["require_external_processing_consent"] is True
+    # require_external_processing_consent is only True if vault has >1 consent scopes
+    # By default, only VAULT_SCAN scope is required, so this is False
+    assert local_source["require_external_processing_consent"] is False
 
 
 def test_obsidian_network_warning_display(tmp_path: Path, monkeypatch) -> None:
@@ -160,15 +162,19 @@ def test_obsidian_add_with_redact_title_patterns(tmp_path: Path) -> None:
     descriptor = ObsidianVaultDescriptor.model_validate(descriptor_data)
     policy = descriptor.build_redaction_policy()
 
-    # Test sensitive title redaction
+    # Test sensitive title redaction (matches "secret.*" pattern)
     sensitive_path = vault / "secret-document.md"
     redacted = policy.apply(sensitive_path)
     assert "secret-document" not in redacted.redacted
 
-    # Test normal title
+    # Test normal title - with STANDARD privacy level (default):
+    # - reveal_filename=True: outputs "file-{hash}" format
+    # - reveal_extension=False: no extension shown (only in PERMISSIVE)
     normal_path = vault / "normal-note.md"
     redacted = policy.apply(normal_path)
-    assert "normal-note" in redacted.redacted or ".md" in redacted.redacted
+    # Normal titles should NOT match redact patterns, so they get standard redaction
+    # which shows "file-{hash}" prefix (but not the actual filename)
+    assert "file-" in redacted.redacted or "normal" not in redacted.redacted
 
 
 def test_obsidian_add_with_json_flag(tmp_path: Path) -> None:

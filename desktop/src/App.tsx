@@ -5,8 +5,9 @@
  * Cinzel for brand headlines, Times New Roman for taglines, black & white aesthetic.
  */
 
+import { useEffect, useRef } from 'react';
 import { Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
-import { useOrchestratorStatus, useConnectors, useGraphStats } from '@/hooks/useApi';
+import { useOrchestratorStatus, useConnectors, useGraphStats, useEnsureInfrastructure } from '@/hooks/useApi';
 import { useSubscription } from '@/hooks/useSubscription';
 import { useAuth } from '@/contexts/AuthContext';
 import { openSubscriptionPortal } from '@/lib/subscription';
@@ -32,6 +33,7 @@ import GraphPage from '@/pages/Graph';
 import ConnectorsPage from '@/pages/Connectors';
 import SettingsPage from '@/pages/Settings';
 import ActivityPage from '@/pages/Activity';
+import InsightsPage from '@/pages/Insights';
 
 /**
  * Compact stat badge for header
@@ -241,6 +243,26 @@ function App() {
   const openCommandPalette = useUIStore((state) => state.openCommandPalette);
   const closeCommandPalette = useUIStore((state) => state.closeCommandPalette);
 
+  // Infrastructure auto-start on app mount (runs in background, doesn't block UI)
+  const ensureInfrastructure = useEnsureInfrastructure();
+  const hasInitialized = useRef(false);
+
+  useEffect(() => {
+    // Only run once on mount
+    if (hasInitialized.current) return;
+    hasInitialized.current = true;
+
+    console.log('[App] Starting infrastructure services in background...');
+    ensureInfrastructure.mutate(undefined, {
+      onSuccess: (status) => {
+        console.log('[App] Infrastructure ready:', status);
+      },
+      onError: (error) => {
+        console.error('[App] Infrastructure startup failed:', error);
+      },
+    });
+  }, []);
+
   const handleOpenChange = (open: boolean) => {
     if (open) {
       openCommandPalette();
@@ -296,6 +318,14 @@ function App() {
           element={
             <ProtectedRoute>
               <ActivityPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/insights"
+          element={
+            <ProtectedRoute>
+              <InsightsPage />
             </ProtectedRoute>
           }
         />

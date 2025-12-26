@@ -26,6 +26,7 @@ import {
   CheckCircle2,
   AlertCircle,
   PauseCircle,
+  Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
@@ -224,12 +225,26 @@ export function Sidebar({ className }: SidebarProps) {
 
       {/* Bottom Actions */}
       <div className="flex-shrink-0 border-t border-white/10 py-2">
-        <div className={cn('flex', isCollapsed ? 'flex-col items-center gap-1 px-2' : 'gap-1 px-2')}>
+        <div className={cn('flex flex-col gap-1 px-2', isCollapsed && 'items-center')}>
+          <button
+            onClick={() => navigate('/insights')}
+            className={cn(
+              'flex items-center gap-2 transition-colors hover:bg-white/5 rounded',
+              isCollapsed ? 'p-2.5 justify-center' : 'px-3 py-2'
+            )}
+            title={isCollapsed ? 'Intelligence Insights' : undefined}
+          >
+            <Sparkles className="w-4 h-4 text-white/60" />
+            {!isCollapsed && (
+              <span className="text-xs text-white/70">Insights</span>
+            )}
+          </button>
+
           <button
             onClick={() => navigate('/graph')}
             className={cn(
               'flex items-center gap-2 transition-colors hover:bg-white/5 rounded',
-              isCollapsed ? 'p-2.5' : 'flex-1 px-3 py-2'
+              isCollapsed ? 'p-2.5 justify-center' : 'px-3 py-2'
             )}
             title={isCollapsed ? 'Knowledge Graph' : undefined}
           >
@@ -243,7 +258,7 @@ export function Sidebar({ className }: SidebarProps) {
             onClick={() => navigate('/settings')}
             className={cn(
               'flex items-center gap-2 transition-colors hover:bg-white/5 rounded',
-              isCollapsed ? 'p-2.5' : 'flex-1 px-3 py-2'
+              isCollapsed ? 'p-2.5 justify-center' : 'px-3 py-2'
             )}
             title={isCollapsed ? 'Settings' : undefined}
           >

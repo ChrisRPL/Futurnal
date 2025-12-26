@@ -18,6 +18,9 @@ import {
   HelpCircle,
   GitBranch,
   Lightbulb,
+  Globe,
+  BookOpen,
+  Zap,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -154,6 +157,41 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     category: 'action',
     handlerType: 'chat',
     chatAction: 'show_help',
+  },
+
+  // Research commands
+  {
+    name: 'web',
+    label: 'Web Search',
+    description: 'Search the web and synthesize information',
+    icon: Globe,
+    category: 'query',
+    hasArgs: true,
+    argPlaceholder: '<query>',
+    handlerType: 'chat',
+    chatAction: 'web_search',
+  },
+  {
+    name: 'research',
+    label: 'Deep Research',
+    description: 'Conduct deep research combining PKG and web sources',
+    icon: BookOpen,
+    category: 'query',
+    hasArgs: true,
+    argPlaceholder: '<topic>',
+    handlerType: 'chat',
+    chatAction: 'deep_research',
+  },
+  {
+    name: 'quick',
+    label: 'Quick Search',
+    description: 'Quick web search without deep analysis',
+    icon: Zap,
+    category: 'query',
+    hasArgs: true,
+    argPlaceholder: '<query>',
+    handlerType: 'chat',
+    chatAction: 'quick_search',
   },
 ];
 

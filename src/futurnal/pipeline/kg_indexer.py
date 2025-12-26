@@ -302,18 +302,21 @@ class KnowledgeGraphIndexer:
             logger.warning(f"Failed to index document {doc_id} to Neo4j: {e}")
             return False
 
-    def index_entity_to_stores(self, entity: Dict[str, Any], doc_id: str) -> Tuple[bool, bool]:
+    def index_entity_to_stores(
+        self, entity: Dict[str, Any], doc_id: str, doc_title: Optional[str] = None
+    ) -> Tuple[bool, bool]:
         """Index an extracted entity to both stores.
 
         Args:
             entity: Entity dictionary with name, type, etc.
             doc_id: Parent document ID
+            doc_title: Document title for matching (more reliable than ID)
 
         Returns:
             Tuple of (chroma_success, neo4j_success)
         """
         entity_name = entity.get("name", "")
-        entity_type = entity.get("type", "Entity")
+        entity_type = entity.get("entity_type", entity.get("type", "Entity"))
         entity_id = f"entity_{hashlib.sha256(f'{entity_type}:{entity_name}'.encode()).hexdigest()[:12]}"
 
         chroma_success = False
@@ -352,6 +355,13 @@ class KnowledgeGraphIndexer:
                 def _create_entity_node(tx):
                     # Create entity node with dynamic label based on type
                     label = entity_type.replace(" ", "_")
+
+                    # Try multiple matching strategies (priority order):
+                    # 1. Match by title (most reliable across different ID systems)
+                    # 2. Match by full doc_id
+                    # 3. Match by truncated 16-char ID
+                    doc_id_16 = doc_id[:16] if len(doc_id) > 16 else doc_id
+
                     tx.run(
                         f"""
                         MERGE (e:{label} {{name: $name}})
@@ -359,13 +369,20 @@ class KnowledgeGraphIndexer:
                         SET e.entity_type = $entity_type,
                             e.updated_at = datetime()
                         WITH e
-                        MATCH (d:Document {{id: $doc_id}})
+                        OPTIONAL MATCH (d:Document)
+                        WHERE ($doc_title IS NOT NULL AND (d.title = $doc_title OR d.title CONTAINS $doc_title))
+                           OR d.id = $doc_id
+                           OR d.id = $doc_id_16
+                        WITH e, d
+                        WHERE d IS NOT NULL
                         MERGE (d)-[:MENTIONS]->(e)
                         """,
                         {
                             "name": entity_name,
                             "entity_type": entity_type,
                             "doc_id": doc_id,
+                            "doc_id_16": doc_id_16,
+                            "doc_title": doc_title,
                         },
                     )
 
@@ -427,7 +444,7 @@ class KnowledgeGraphIndexer:
             if self.index_document_to_neo4j(doc, doc_id):
                 stats["neo4j_indexed"] += 1
 
-        # Process extracted entities
+        # Process extracted entities AND their document content
         if self._entities_dir.exists():
             for json_file in self._entities_dir.glob("*.json"):
                 try:
@@ -437,8 +454,24 @@ class KnowledgeGraphIndexer:
                     doc_id = entity_doc.get("document_id", json_file.stem)
                     entities = entity_doc.get("entities", [])
 
+                    # Index document content if available (new: content field)
+                    content = entity_doc.get("content", "")
+                    if content and len(content.strip()) > 10:
+                        # Build a pseudo-document for indexing
+                        pseudo_doc = {
+                            "text": content,
+                            "metadata": {
+                                "source": entity_doc.get("source", "unknown"),
+                                "title": entity_doc.get("title"),
+                                "source_type": "document",
+                            }
+                        }
+                        if self.index_document_to_chroma(pseudo_doc, doc_id):
+                            stats["chroma_indexed"] += 1
+
+                    doc_title = entity_doc.get("title")
                     for entity in entities:
-                        chroma_ok, neo4j_ok = self.index_entity_to_stores(entity, doc_id)
+                        chroma_ok, neo4j_ok = self.index_entity_to_stores(entity, doc_id, doc_title)
                         if chroma_ok or neo4j_ok:
                             stats["entities_indexed"] += 1
 
@@ -492,6 +525,253 @@ class KnowledgeGraphIndexer:
                         stats["neo4j"]["relationship_count"] = record["rels"]
             except Exception:
                 pass
+
+        return stats
+
+    def create_wikilink_relationships(self) -> int:
+        """Create LINKS_TO relationships between documents based on wikilinks.
+
+        Reads parsed documents and creates Neo4j relationships for any
+        obsidian_links found in the metadata.
+
+        Returns:
+            Number of relationships created
+        """
+        driver = self._get_neo4j_driver()
+        if driver is None:
+            logger.warning("No Neo4j driver available for wikilink relationships")
+            return 0
+
+        relationships_created = 0
+
+        # Build a mapping of filename -> doc_id for link resolution
+        doc_id_map: Dict[str, str] = {}
+
+        # First pass: build the document ID map
+        for json_file in self._parsed_dir.glob("*.json"):
+            try:
+                with open(json_file, "r", encoding="utf-8") as f:
+                    doc_data = json.load(f)
+
+                # Get document path/filename
+                metadata = doc_data.get("metadata", {})
+                source_path = metadata.get("source_path") or metadata.get("filename", "")
+                if source_path:
+                    # Use filename without extension as key
+                    filename = Path(source_path).stem
+                    doc_id = self._compute_doc_id_from_path(source_path)
+                    doc_id_map[filename.lower()] = doc_id
+                    # Also store with full path
+                    doc_id_map[source_path.lower()] = doc_id
+            except Exception as e:
+                logger.debug(f"Failed to read {json_file} for doc_id map: {e}")
+
+        logger.info(f"Built document ID map with {len(doc_id_map)} entries")
+
+        # Second pass: create relationships
+        for json_file in self._parsed_dir.glob("*.json"):
+            try:
+                with open(json_file, "r", encoding="utf-8") as f:
+                    doc_data = json.load(f)
+
+                metadata = doc_data.get("metadata", {})
+                source_path = metadata.get("source_path") or metadata.get("filename", "")
+                source_doc_id = self._compute_doc_id_from_path(source_path)
+
+                # Process obsidian_links
+                obsidian_links = metadata.get("obsidian_links", [])
+                for link in obsidian_links:
+                    target = link.get("target", "")
+                    if not target:
+                        continue
+
+                    # Resolve target to doc_id
+                    target_key = target.lower()
+                    target_stem = Path(target).stem.lower()
+
+                    target_doc_id = doc_id_map.get(target_key) or doc_id_map.get(target_stem)
+                    if not target_doc_id:
+                        # Create ID from target path
+                        target_doc_id = self._compute_doc_id_from_path(target)
+
+                    # Determine relationship type
+                    is_embed = link.get("is_embed", False)
+                    rel_type = "EMBEDS" if is_embed else "LINKS_TO"
+
+                    try:
+                        with driver.session() as session:
+                            session.run(
+                                f"""
+                                MATCH (source:Document {{id: $source_id}})
+                                MERGE (target:Document {{id: $target_id}})
+                                ON CREATE SET target.title = $target_title, target.created_at = datetime()
+                                MERGE (source)-[r:{rel_type}]->(target)
+                                SET r.created_at = coalesce(r.created_at, datetime()),
+                                    r.section = $section,
+                                    r.is_broken = $is_broken
+                                """,
+                                {
+                                    "source_id": source_doc_id,
+                                    "target_id": target_doc_id,
+                                    "target_title": target,
+                                    "section": link.get("section"),
+                                    "is_broken": link.get("is_broken", False),
+                                },
+                            )
+                        relationships_created += 1
+                    except Exception as e:
+                        logger.debug(f"Failed to create relationship {source_doc_id} -> {target_doc_id}: {e}")
+
+            except Exception as e:
+                logger.debug(f"Failed to process {json_file} for wikilinks: {e}")
+
+        logger.info(f"Created {relationships_created} wikilink relationships")
+        return relationships_created
+
+    def create_content_based_mentions(self) -> int:
+        """Create MENTIONS relationships by matching entity names in document content.
+
+        This is a fallback approach when document IDs don't match between
+        entity files and Neo4j documents. It finds documents whose content
+        contains the entity name.
+
+        Returns:
+            Number of relationships created
+        """
+        driver = self._get_neo4j_driver()
+        if driver is None:
+            logger.warning("No Neo4j driver for content-based mentions")
+            return 0
+
+        # Load all entities from entity files
+        entities_to_match = []
+        if self._entities_dir.exists():
+            for json_file in self._entities_dir.glob("*.json"):
+                try:
+                    with open(json_file) as f:
+                        data = json.load(f)
+                    for entity in data.get("entities", []):
+                        name = entity.get("name", "")
+                        entity_type = entity.get("entity_type", entity.get("type", "Entity"))
+                        if name and len(name) > 2:  # Skip very short names
+                            entities_to_match.append((name, entity_type))
+                except Exception:
+                    pass
+
+        logger.info(f"Matching {len(entities_to_match)} entities to documents by content")
+
+        relationships_created = 0
+        with driver.session() as session:
+            for entity_name, entity_type in entities_to_match:
+                try:
+                    label = entity_type.replace(" ", "_")
+                    # Match documents containing this entity name
+                    result = session.run(
+                        f"""
+                        MERGE (e:{label} {{name: $name}})
+                        ON CREATE SET e.created_at = datetime(), e.entity_type = $entity_type
+                        WITH e
+                        MATCH (d:Document)
+                        WHERE d.content IS NOT NULL AND d.content CONTAINS $name
+                        MERGE (d)-[:MENTIONS]->(e)
+                        RETURN count(*) as cnt
+                        """,
+                        {"name": entity_name, "entity_type": entity_type},
+                    )
+                    cnt = result.single()["cnt"]
+                    relationships_created += cnt
+                except Exception as e:
+                    logger.debug(f"Failed to match entity {entity_name}: {e}")
+
+        logger.info(f"Created {relationships_created} content-based MENTIONS relationships")
+        return relationships_created
+
+    def create_shared_entity_relationships(self, min_shared: int = 1) -> int:
+        """Create RELATED_TO relationships between documents sharing entities.
+
+        Documents that mention the same entities are considered related.
+        Creates bidirectional relationships for causal exploration.
+
+        Args:
+            min_shared: Minimum number of shared entities to create relationship
+
+        Returns:
+            Number of relationships created
+        """
+        driver = self._get_neo4j_driver()
+        if driver is None:
+            logger.warning("No Neo4j driver available for shared entity relationships")
+            return 0
+
+        try:
+            with driver.session() as session:
+                # Find document pairs that share entities and create BIDIRECTIONAL relationships
+                # This ensures both documents can be found as causes/effects of each other
+                result = session.run(
+                    """
+                    MATCH (d1:Document)-[:MENTIONS]->(e)<-[:MENTIONS]-(d2:Document)
+                    WHERE d1.id < d2.id
+                    WITH d1, d2, count(e) as shared_entities, collect(e.name) as shared_names
+                    WHERE shared_entities >= $min_shared
+                    // Create relationship in both directions for causal exploration
+                    MERGE (d1)-[r1:RELATED_TO]->(d2)
+                    SET r1.shared_entity_count = shared_entities,
+                        r1.relationship_type = 'shared_entities',
+                        r1.shared_entities = shared_names[0..5],
+                        r1.created_at = coalesce(r1.created_at, datetime())
+                    WITH d1, d2, shared_entities, shared_names
+                    MERGE (d2)-[r2:RELATED_TO]->(d1)
+                    SET r2.shared_entity_count = shared_entities,
+                        r2.relationship_type = 'shared_entities',
+                        r2.shared_entities = shared_names[0..5],
+                        r2.created_at = coalesce(r2.created_at, datetime())
+                    RETURN count(DISTINCT d1) + count(DISTINCT d2) as docs_connected
+                    """,
+                    {"min_shared": min_shared},
+                )
+                record = result.single()
+                docs_connected = record["docs_connected"] if record else 0
+                logger.info(f"Created bidirectional shared-entity relationships for {docs_connected} documents")
+                return docs_connected
+        except Exception as e:
+            logger.warning(f"Failed to create shared entity relationships: {e}")
+            return 0
+
+    def _compute_doc_id_from_path(self, path: str) -> str:
+        """Compute document ID from path matching Neo4j format: SHA256(path)[:16]."""
+        return hashlib.sha256(path.encode()).hexdigest()[:16]
+
+    def index_all_with_relationships(self) -> Dict[str, int]:
+        """Index all documents and create all relationships.
+
+        This is the comprehensive indexing method that:
+        1. Indexes documents to ChromaDB and Neo4j
+        2. Indexes entities
+        3. Creates wikilink relationships
+        4. Creates shared-entity relationships
+
+        Returns:
+            Complete indexing statistics
+        """
+        # First, index all documents and entities
+        stats = self.index_all_parsed()
+
+        # Then create relationships
+        stats["wikilink_relationships"] = self.create_wikilink_relationships()
+
+        # Create MENTIONS relationships by matching entity names in document content
+        stats["content_based_mentions"] = self.create_content_based_mentions()
+
+        # Create RELATED_TO between documents sharing entities
+        stats["shared_entity_relationships"] = self.create_shared_entity_relationships()
+
+        logger.info(
+            f"Full indexing complete: {stats['chroma_indexed']} ChromaDB, "
+            f"{stats['neo4j_indexed']} Neo4j docs, {stats['entities_indexed']} entities, "
+            f"{stats['wikilink_relationships']} wikilinks, "
+            f"{stats['content_based_mentions']} content mentions, "
+            f"{stats['shared_entity_relationships']} shared-entity relations"
+        )
 
         return stats
 

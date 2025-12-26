@@ -162,6 +162,7 @@ class CuriosityEngine:
         min_severity: float = MIN_SEVERITY,
         min_info_gain: float = MIN_INFO_GAIN,
         community_detector: Optional[PKGCommunityDetector] = None,
+        storage_path: Optional[str] = None,
     ):
         """Initialize curiosity engine.
 
@@ -169,10 +170,30 @@ class CuriosityEngine:
             min_severity: Minimum severity threshold for reporting gaps
             min_info_gain: Minimum information gain to consider gap valuable
             community_detector: Optional custom community detector
+            storage_path: Path to persist gaps (default: ~/.futurnal/insights/gaps.json)
         """
+        import os
+        import json
+        from pathlib import Path
+
         self.min_severity = min_severity
         self.min_info_gain = min_info_gain
         self._detector = community_detector or PKGCommunityDetector()
+
+        # Persistent storage for knowledge gaps
+        self._storage_path = Path(
+            storage_path or os.path.expanduser("~/.futurnal/insights/gaps.json")
+        )
+        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load cached gaps from storage
+        self._cached_gaps: List[Dict[str, Any]] = []
+        if self._storage_path.exists():
+            try:
+                self._cached_gaps = json.loads(self._storage_path.read_text())
+                logger.info(f"Loaded {len(self._cached_gaps)} cached knowledge gaps")
+            except Exception as e:
+                logger.warning(f"Could not load cached gaps: {e}")
 
         logger.info(
             f"CuriosityEngine initialized "
@@ -255,12 +276,53 @@ class CuriosityEngine:
         # Sort by priority score
         filtered_gaps.sort(key=lambda g: -g.priority_score)
 
+        # Cache and persist new gaps
+        if filtered_gaps:
+            self._cache_gaps(filtered_gaps)
+
         logger.info(
             f"Detected {len(filtered_gaps)} gaps "
             f"(from {len(all_gaps)} candidates)"
         )
 
         return filtered_gaps
+
+    def _cache_gaps(self, gaps: List[KnowledgeGap]) -> None:
+        """Cache and persist knowledge gaps to storage."""
+        import json
+
+        # Convert gaps to dictionaries for storage
+        new_entries = []
+        for gap in gaps:
+            entry = {
+                "gapId": gap.gap_id,
+                "gapType": gap.gap_type.value if hasattr(gap.gap_type, 'value') else str(gap.gap_type),
+                "title": gap.title,
+                "description": gap.description,
+                "informationGain": gap.information_gain,
+                "relatedTopics": gap.related_topics or [],
+                "explorationPrompts": gap.exploration_prompts or [],
+                "createdAt": gap.created_at.isoformat() if hasattr(gap.created_at, 'isoformat') else str(gap.created_at),
+                "isAddressed": gap.is_addressed,
+            }
+            new_entries.append(entry)
+
+        # Add to cache (avoid duplicates by gap_id)
+        existing_ids = {g.get("gapId") for g in self._cached_gaps}
+        for entry in new_entries:
+            if entry["gapId"] not in existing_ids:
+                self._cached_gaps.append(entry)
+
+        # Limit cache size (keep most recent 50)
+        if len(self._cached_gaps) > 50:
+            self._cached_gaps = self._cached_gaps[-50:]
+
+        # Persist to storage
+        try:
+            self._storage_path.write_text(json.dumps(self._cached_gaps, indent=2))
+            logger.debug(f"Persisted {len(self._cached_gaps)} gaps to {self._storage_path}")
+        except Exception as e:
+            logger.warning(f"Failed to persist gaps: {e}")
 
     def detect_isolated_clusters(
         self,

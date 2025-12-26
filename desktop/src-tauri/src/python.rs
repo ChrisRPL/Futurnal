@@ -127,7 +127,12 @@ pub async fn execute_cli_with_timeout<T: DeserializeOwned>(
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let result: T = serde_json::from_str(&stdout)?;
+
+    // Extract JSON from stdout - find the JSON object/array in the output
+    // Neo4j driver warnings may appear before the actual JSON output
+    let json_str = extract_json_from_output(&stdout).unwrap_or(&stdout);
+
+    let result: T = serde_json::from_str(json_str)?;
     Ok(result)
 }
 
@@ -295,4 +300,23 @@ pub async fn spawn_cli_background(args: &[&str]) -> Result<(), PythonError> {
     log::info!("Spawned background process: python3 -m futurnal.cli {}", args.join(" "));
 
     Ok(())
+}
+
+/// Extract JSON object or array from command output.
+///
+/// Handles cases where non-JSON text (like Neo4j warnings) appears before the JSON.
+/// Finds the first `{` or `[` that marks the start of JSON and returns from there.
+fn extract_json_from_output(output: &str) -> Option<&str> {
+    // Find the start of a JSON object or array
+    let obj_start = output.find('{');
+    let arr_start = output.find('[');
+
+    let start = match (obj_start, arr_start) {
+        (Some(o), Some(a)) => Some(o.min(a)),
+        (Some(o), None) => Some(o),
+        (None, Some(a)) => Some(a),
+        (None, None) => None,
+    };
+
+    start.map(|i| &output[i..])
 }

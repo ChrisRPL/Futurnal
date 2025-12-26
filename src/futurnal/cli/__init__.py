@@ -18,6 +18,8 @@ from .schema import schema_app
 from .learning import learning_app
 from .insights import insights_app
 from .papers import papers_app
+from .infrastructure import infrastructure_app
+from .research import research_app
 
 
 cli = Typer(help="Futurnal command line tools")
@@ -38,7 +40,9 @@ cli.add_typer(schema_app, name="schema")
 cli.add_typer(learning_app, name="learning")
 cli.add_typer(insights_app, name="insights")
 cli.add_typer(papers_app, name="papers")
+cli.add_typer(infrastructure_app, name="infrastructure")
+cli.add_typer(research_app, name="research")
 
-__all__ = ["cli", "sources_app", "config_app", "health_app", "imap_app", "github_app", "orchestrator_app", "search_app", "privacy_app", "cloud_sync_app", "chat_app", "multimodal_app", "causal_app", "activity_app", "schema_app", "learning_app", "insights_app", "papers_app"]
+__all__ = ["cli", "sources_app", "config_app", "health_app", "imap_app", "github_app", "orchestrator_app", "search_app", "privacy_app", "cloud_sync_app", "chat_app", "multimodal_app", "causal_app", "activity_app", "schema_app", "learning_app", "insights_app", "papers_app", "infrastructure_app", "research_app"]
 
 

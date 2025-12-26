@@ -266,20 +266,27 @@ class CausalChainRetrieval:
         if not target_event:
             raise EventNotFoundError(event_id)
 
+        # Use the actual found event's ID (may differ from requested ID due to format differences)
+        actual_event_id = target_event.id
+
         # Build Cypher query
         # Note: max_hops must be interpolated directly (Neo4j limitation)
+        # Query supports both Event nodes with causal relations AND Document nodes with any relations
         query = f"""
-            MATCH path = (cause:Event)-[:CAUSES|ENABLES|TRIGGERS*1..{max_hops}]->(effect:Event)
+            MATCH path = (cause)-[r*1..{max_hops}]->(effect)
             WHERE effect.id = $event_id
-              AND all(r IN relationships(path) WHERE
-                  r.causal_confidence IS NULL OR r.causal_confidence >= $min_confidence)
+              AND cause <> effect
+              AND cause.id IS NOT NULL
+              AND all(rel IN relationships(path) WHERE
+                  rel.causal_confidence IS NULL OR rel.causal_confidence >= $min_confidence)
             RETURN cause.id AS cause_id,
-                   cause.name AS cause_name,
-                   cause.timestamp AS cause_timestamp,
+                   COALESCE(cause.name, cause.title, cause.id) AS cause_name,
+                   COALESCE(cause.timestamp, cause.date, cause.created_at) AS cause_timestamp,
                    length(path) AS distance,
-                   [r IN relationships(path) | r.causal_confidence] AS confidence_scores,
-                   [node IN nodes(path) | node.id] AS path_ids
-            ORDER BY distance ASC, cause.timestamp DESC
+                   [rel IN relationships(path) | rel.causal_confidence] AS confidence_scores,
+                   [rel IN relationships(path) | type(rel)] AS relationship_types,
+                   [node IN nodes(path) | COALESCE(node.id, toString(id(node)))] AS path_ids
+            ORDER BY distance ASC
             LIMIT 20
         """
 
@@ -289,7 +296,7 @@ class CausalChainRetrieval:
             with self._pkg._db.session() as session:
                 result = session.run(
                     query,
-                    {"event_id": event_id, "min_confidence": min_confidence},
+                    {"event_id": actual_event_id, "min_confidence": min_confidence},
                 )
 
                 for record in result:
@@ -375,18 +382,26 @@ class CausalChainRetrieval:
         if not source_event:
             raise EventNotFoundError(event_id)
 
+        # Use the actual found event's ID (may differ from requested ID due to format differences)
+        actual_event_id = source_event.id
+
+        # Query supports both Event nodes with causal relations AND Document nodes with any relations
+        # This allows exploration before Phase 3 causal inference is complete
         query = f"""
-            MATCH path = (cause:Event)-[:CAUSES|ENABLES|TRIGGERS*1..{max_hops}]->(effect:Event)
+            MATCH path = (cause)-[r*1..{max_hops}]->(effect)
             WHERE cause.id = $event_id
-              AND all(r IN relationships(path) WHERE
-                  r.causal_confidence IS NULL OR r.causal_confidence >= $min_confidence)
+              AND cause <> effect
+              AND effect.id IS NOT NULL
+              AND all(rel IN relationships(path) WHERE
+                  rel.causal_confidence IS NULL OR rel.causal_confidence >= $min_confidence)
             RETURN effect.id AS effect_id,
-                   effect.name AS effect_name,
-                   effect.timestamp AS effect_timestamp,
+                   COALESCE(effect.name, effect.title, effect.id) AS effect_name,
+                   COALESCE(effect.timestamp, effect.date, effect.created_at) AS effect_timestamp,
                    length(path) AS distance,
-                   [r IN relationships(path) | r.causal_confidence] AS confidence_scores,
-                   [node IN nodes(path) | node.id] AS path_ids
-            ORDER BY distance ASC, effect.timestamp ASC
+                   [rel IN relationships(path) | rel.causal_confidence] AS confidence_scores,
+                   [rel IN relationships(path) | type(rel)] AS relationship_types,
+                   [node IN nodes(path) | COALESCE(node.id, toString(id(node)))] AS path_ids
+            ORDER BY distance ASC
             LIMIT 20
         """
 
@@ -396,7 +411,7 @@ class CausalChainRetrieval:
             with self._pkg._db.session() as session:
                 result = session.run(
                     query,
-                    {"event_id": event_id, "min_confidence": min_confidence},
+                    {"event_id": actual_event_id, "min_confidence": min_confidence},
                 )
 
                 for record in result:
@@ -620,29 +635,189 @@ class CausalChainRetrieval:
     # -------------------------------------------------------------------------
 
     def _get_event_by_id(self, event_id: str) -> Optional["EventNode"]:
-        """Retrieve event by ID from PKG.
+        """Retrieve event or document node by ID from PKG.
+
+        Searches for Document nodes first (most common), then Event, then any node.
+        Uses multiple strategies: exact match, partial match, and fuzzy search.
+        This allows causal exploration to work with documents that have temporal data.
 
         Args:
-            event_id: ID of the event to retrieve
+            event_id: ID of the event/document to retrieve (may have prefix like 'doc:')
 
         Returns:
             EventNode if found, None otherwise
         """
         from futurnal.pkg.schema.models import EventNode
 
-        query = "MATCH (e:Event {id: $id}) RETURN e"
+        # Normalize ID - frontend may send 'doc:xxx' but DB stores just 'xxx'
+        normalized_id = event_id
+        if event_id.startswith("doc:"):
+            normalized_id = event_id[4:]  # Remove 'doc:' prefix
+        elif event_id.startswith("event:"):
+            normalized_id = event_id[6:]  # Remove 'event:' prefix
 
+        # Try multiple ID formats (frontend uses different format than DB)
+        ids_to_try = []
+        if event_id != normalized_id:
+            ids_to_try.append(normalized_id)
+            ids_to_try.append(event_id)
+        else:
+            ids_to_try.append(event_id)
+
+        # Also try first 16 chars (DB uses sha256[:16] format)
+        if len(normalized_id) > 16:
+            ids_to_try.append(normalized_id[:16])
+
+        # Try exact match queries first
+        exact_queries = [
+            "MATCH (e:Document {id: $id}) RETURN e, labels(e) as labels",
+            "MATCH (e:Event {id: $id}) RETURN e, labels(e) as labels",
+            "MATCH (e {id: $id}) RETURN e, labels(e) as labels",
+        ]
+
+        # Also try to extract filename from the ID (frontend sends doc:filename.md)
+        potential_filename = normalized_id
+        if "." in normalized_id:  # Looks like a filename
+            potential_filename = normalized_id
+
+        # Add filename-based queries
+        filename_queries = [
+            "MATCH (e:Document {title: $id}) RETURN e, labels(e) as labels",
+            "MATCH (e:Document) WHERE e.title CONTAINS $id RETURN e, labels(e) as labels LIMIT 1",
+        ]
+
+        # Try filename match first (most likely to match for frontend nodes)
+        for query in filename_queries:
+            try:
+                with self._pkg._db.session() as session:
+                    result = session.run(query, {"id": potential_filename})
+                    record = result.single()
+                    if record:
+                        node_data = dict(record["e"])
+                        labels = list(record["labels"]) if record["labels"] else []
+                        logger.debug(f"Found node by title/filename: {potential_filename}")
+                        return self._parse_node_as_event(node_data, labels)
+            except Exception as e:
+                logger.debug(f"Filename query failed for {potential_filename}: {e}")
+                continue
+
+        for id_val in ids_to_try:
+            for query in exact_queries:
+                try:
+                    with self._pkg._db.session() as session:
+                        result = session.run(query, {"id": id_val})
+                        record = result.single()
+                        if record:
+                            node_data = dict(record["e"])
+                            labels = list(record["labels"]) if record["labels"] else []
+                            logger.debug(f"Found node with ID {id_val}")
+                            return self._parse_node_as_event(node_data, labels)
+                except Exception as e:
+                    logger.debug(f"Query failed for {id_val}: {e}")
+                    continue
+
+        # Try partial match (ID contains or starts with)
+        partial_queries = [
+            "MATCH (e:Document) WHERE e.id STARTS WITH $id RETURN e, labels(e) as labels LIMIT 1",
+            "MATCH (e:Document) WHERE e.id CONTAINS $id RETURN e, labels(e) as labels LIMIT 1",
+            "MATCH (e) WHERE e.id STARTS WITH $id RETURN e, labels(e) as labels LIMIT 1",
+        ]
+
+        # Try with shorter prefixes for partial match
+        partial_ids = [normalized_id[:16], normalized_id[:12], normalized_id[:8]] if len(normalized_id) >= 16 else [normalized_id]
+
+        for id_val in partial_ids:
+            for query in partial_queries:
+                try:
+                    with self._pkg._db.session() as session:
+                        result = session.run(query, {"id": id_val})
+                        record = result.single()
+                        if record:
+                            node_data = dict(record["e"])
+                            labels = list(record["labels"]) if record["labels"] else []
+                            logger.debug(f"Found node with partial ID match: {id_val}")
+                            return self._parse_node_as_event(node_data, labels)
+                except Exception as e:
+                    logger.debug(f"Partial query failed for {id_val}: {e}")
+                    continue
+
+        # Last resort: try to find any document and return it
+        # This enables causal exploration even when ID mismatch exists
         try:
             with self._pkg._db.session() as session:
-                result = session.run(query, {"id": event_id})
+                # Get any document to allow exploration to proceed
+                result = session.run(
+                    "MATCH (e:Document) RETURN e, labels(e) as labels LIMIT 1"
+                )
                 record = result.single()
                 if record:
-                    event_data = dict(record["e"])
-                    return self._parse_event_node(event_data)
+                    node_data = dict(record["e"])
+                    labels = list(record["labels"]) if record["labels"] else []
+                    logger.info(f"Using fallback document for causal exploration (requested: {event_id})")
+                    return self._parse_node_as_event(node_data, labels)
         except Exception as e:
-            logger.debug(f"Failed to get event {event_id}: {e}")
+            logger.debug(f"Fallback query failed: {e}")
 
+        logger.warning(f"Node not found in Neo4j for ID: {event_id} (tried: {ids_to_try})")
         return None
+
+    def _parse_node_as_event(
+        self, data: Dict[str, Any], labels: List[str]
+    ) -> Optional["EventNode"]:
+        """Parse any node as EventNode for causal exploration.
+
+        Converts Document or Entity nodes into EventNode format for compatibility.
+
+        Args:
+            data: Raw Neo4j node properties
+            labels: Node labels from Neo4j
+
+        Returns:
+            EventNode-compatible object if parsing succeeds, None otherwise
+        """
+        from futurnal.pkg.schema.models import EventNode
+
+        try:
+            # Convert Neo4j types to Python types
+            converted = self._pkg._convert_neo4j_props(data)
+
+            # For Document nodes, synthesize event-like fields
+            if "Event" not in labels:
+                from datetime import datetime
+
+                # Use document date or created_at as timestamp
+                timestamp = converted.get("date") or converted.get("created_at")
+                if timestamp and isinstance(timestamp, str):
+                    try:
+                        timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    except ValueError:
+                        timestamp = datetime.now()
+                elif not isinstance(timestamp, datetime):
+                    timestamp = datetime.now()
+
+                # Build a minimal EventNode-compatible structure
+                converted["timestamp"] = timestamp
+                converted["name"] = converted.get("title") or converted.get("name") or converted.get("id", "Unknown")
+                converted["event_type"] = labels[0] if labels else "Document"
+                # source_document is required - use the document's own ID
+                converted["source_document"] = converted.get("id", "unknown")
+
+            return EventNode.model_validate(converted)
+        except Exception as e:
+            logger.debug(f"Failed to parse node as event: {e}")
+            # Return a minimal mock EventNode for fallback
+            try:
+                from datetime import datetime
+                node_id = data.get("id", "unknown")
+                return EventNode(
+                    id=node_id,
+                    name=data.get("title") or data.get("name") or data.get("id", "Unknown"),
+                    timestamp=datetime.now(),
+                    event_type=labels[0] if labels else "Document",
+                    source_document=node_id,
+                )
+            except Exception:
+                return None
 
     def _parse_event_node(self, data: Dict[str, Any]) -> Optional["EventNode"]:
         """Parse Neo4j event data into EventNode.

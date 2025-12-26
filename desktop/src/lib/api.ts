@@ -888,3 +888,345 @@ export interface AllPapersStatusResponse {
   papers: PaperStatusInfo[];
   error?: string;
 }
+
+// ============================================================================
+// Infrastructure API (Auto-start services)
+// ============================================================================
+
+export interface ServiceStatus {
+  running: boolean;
+  status: string;
+  port?: number;
+  pid?: number;
+  available?: boolean;
+}
+
+export interface DockerStatus {
+  available: boolean;
+  status: string;
+}
+
+export interface InfrastructureServices {
+  docker: DockerStatus;
+  neo4j: ServiceStatus;
+  orchestrator: ServiceStatus;
+}
+
+export interface InfrastructureStatus {
+  success: boolean;
+  services: InfrastructureServices;
+  allHealthy: boolean;
+}
+
+export interface ServiceStartResult {
+  started: boolean;
+  alreadyRunning?: boolean;
+  error?: string;
+  port?: number;
+  pid?: number;
+  available?: boolean;
+  ready?: boolean;
+}
+
+export interface InfrastructureStartResponse {
+  success: boolean;
+  services: Record<string, ServiceStartResult>;
+  errors: string[];
+}
+
+export const infrastructureApi = {
+  /**
+   * Get current infrastructure status.
+   */
+  async getStatus(): Promise<InfrastructureStatus> {
+    try {
+      return await invokeWithTimeout<InfrastructureStatus>('get_infrastructure_status');
+    } catch (error) {
+      console.error('[Infrastructure API] Failed to get status:', error);
+      return {
+        success: false,
+        services: {
+          docker: { available: false, status: 'unknown' },
+          neo4j: { running: false, status: 'unknown' },
+          orchestrator: { running: false, status: 'unknown' },
+        },
+        allHealthy: false,
+      };
+    }
+  },
+
+  /**
+   * Start all infrastructure services (Neo4j, orchestrator).
+   * Called on app startup to ensure services are running.
+   */
+  async start(): Promise<InfrastructureStartResponse> {
+    try {
+      // Use longer timeout as Neo4j can take time to start
+      return await invokeWithTimeout<InfrastructureStartResponse>(
+        'start_infrastructure',
+        {},
+        120000 // 2 minute timeout
+      );
+    } catch (error) {
+      console.error('[Infrastructure API] Failed to start:', error);
+      return {
+        success: false,
+        services: {},
+        errors: [String(error)],
+      };
+    }
+  },
+
+  /**
+   * Stop all infrastructure services.
+   */
+  async stop(): Promise<{ success: boolean; services: Record<string, unknown> }> {
+    try {
+      return await invokeWithTimeout('stop_infrastructure');
+    } catch (error) {
+      console.error('[Infrastructure API] Failed to stop:', error);
+      return { success: false, services: {} };
+    }
+  },
+
+  /**
+   * Ensure all infrastructure is running, starting if needed.
+   * This is the main entry point for app initialization.
+   */
+  async ensureRunning(): Promise<InfrastructureStatus> {
+    try {
+      return await invokeWithTimeout<InfrastructureStatus>(
+        'ensure_infrastructure_running',
+        {},
+        120000 // 2 minute timeout
+      );
+    } catch (error) {
+      console.error('[Infrastructure API] Failed to ensure running:', error);
+      return {
+        success: false,
+        services: {
+          docker: { available: false, status: 'error' },
+          neo4j: { running: false, status: 'error' },
+          orchestrator: { running: false, status: 'error' },
+        },
+        allHealthy: false,
+      };
+    }
+  },
+};
+
+// ============================================================================
+// Research API (Web Search & Deep Research)
+// ============================================================================
+
+export interface WebSearchRequest {
+  query: string;
+  maxPages?: number;
+}
+
+export interface WebFinding {
+  fact: string;
+  sourceUrl: string;
+  sourceTitle: string;
+  reliability: string;
+}
+
+export interface WebSource {
+  url: string;
+  title: string;
+  reliability: string;
+  relevance: number;
+}
+
+export interface WebSearchResponse {
+  success: boolean;
+  query: string;
+  answer: string;
+  sources: WebSource[];
+  confidence: number;
+  coverage: number;
+  numSources: number;
+  totalSteps: number;
+  totalPages: number;
+  searchTimeMs: number;
+  findings: WebFinding[];
+  error?: string;
+}
+
+export interface DeepResearchRequest {
+  query: string;
+  depth?: 'overview' | 'standard' | 'detailed' | 'exhaustive';
+  userId?: string;
+}
+
+export interface ResearchFinding {
+  content: string;
+  type: string;
+  relevance: number;
+}
+
+export interface DeepResearchResponse {
+  success: boolean;
+  query: string;
+  userId: string;
+  summary: string;
+  keyPoints: string[];
+  sources: unknown[];
+  numSourcesConsulted: number;
+  expertiseLevelUsed: string;
+  depthUsed: string;
+  confidence: number;
+  relevanceScore: number;
+  researchTimeMs: number;
+  detailedFindings: ResearchFinding[];
+  error?: string;
+}
+
+export interface QuickSearchResult {
+  url: string;
+  title: string;
+  snippet: string;
+}
+
+export interface QuickSearchResponse {
+  success: boolean;
+  query: string;
+  results: QuickSearchResult[];
+  total: number;
+  searchTimeMs: number;
+  error?: string;
+}
+
+export interface ComponentStatus {
+  available: boolean;
+  status: string;
+}
+
+export interface ResearchStatusResponse {
+  success: boolean;
+  components: Record<string, ComponentStatus>;
+  availableCount: number;
+  totalCount: number;
+  allHealthy: boolean;
+  error?: string;
+}
+
+/**
+ * Research API for web search and deep research.
+ *
+ * Research Foundation:
+ * - WebDancer (2505.22648v3): End-to-end web agents
+ * - Personalized Deep Research (2509.25106v1): User-centric research
+ */
+export const researchApi = {
+  /**
+   * Search the web for information.
+   *
+   * Uses WebDancer-style autonomous web browsing to find and synthesize
+   * information from multiple web sources.
+   */
+  async webSearch(request: WebSearchRequest): Promise<WebSearchResponse> {
+    try {
+      return await invokeWithTimeout<WebSearchResponse>(
+        'web_search',
+        { request },
+        120000 // 2 minute timeout for web browsing
+      );
+    } catch (error) {
+      console.error('[Research API] Web search failed:', error);
+      return {
+        success: false,
+        query: request.query,
+        answer: '',
+        sources: [],
+        confidence: 0,
+        coverage: 0,
+        numSources: 0,
+        totalSteps: 0,
+        totalPages: 0,
+        searchTimeMs: 0,
+        findings: [],
+        error: String(error),
+      };
+    }
+  },
+
+  /**
+   * Conduct deep personalized research.
+   *
+   * Combines knowledge graph, vector search, and web research
+   * to provide comprehensive, personalized research results.
+   */
+  async deepResearch(request: DeepResearchRequest): Promise<DeepResearchResponse> {
+    try {
+      return await invokeWithTimeout<DeepResearchResponse>(
+        'deep_research',
+        { request },
+        180000 // 3 minute timeout for comprehensive research
+      );
+    } catch (error) {
+      console.error('[Research API] Deep research failed:', error);
+      return {
+        success: false,
+        query: request.query,
+        userId: request.userId || 'default',
+        summary: '',
+        keyPoints: [],
+        sources: [],
+        numSourcesConsulted: 0,
+        expertiseLevelUsed: 'intermediate',
+        depthUsed: 'standard',
+        confidence: 0,
+        relevanceScore: 0,
+        researchTimeMs: 0,
+        detailedFindings: [],
+        error: String(error),
+      };
+    }
+  },
+
+  /**
+   * Quick web search without deep analysis.
+   *
+   * Returns raw search results from DuckDuckGo without
+   * visiting pages or synthesizing answers.
+   */
+  async quickSearch(query: string): Promise<QuickSearchResponse> {
+    try {
+      return await invokeWithTimeout<QuickSearchResponse>(
+        'quick_search',
+        { query },
+        30000 // 30 second timeout
+      );
+    } catch (error) {
+      console.error('[Research API] Quick search failed:', error);
+      return {
+        success: false,
+        query,
+        results: [],
+        total: 0,
+        searchTimeMs: 0,
+        error: String(error),
+      };
+    }
+  },
+
+  /**
+   * Get research infrastructure status.
+   */
+  async getStatus(): Promise<ResearchStatusResponse> {
+    try {
+      return await invokeWithTimeout<ResearchStatusResponse>('get_research_status');
+    } catch (error) {
+      console.error('[Research API] Status check failed:', error);
+      return {
+        success: false,
+        components: {},
+        availableCount: 0,
+        totalCount: 0,
+        allHealthy: false,
+        error: String(error),
+      };
+    }
+  },
+};

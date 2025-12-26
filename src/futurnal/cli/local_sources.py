@@ -2293,20 +2293,33 @@ def sync_source(
                 typer.echo(f"Warning: Entity extraction failed: {exc}", err=True)
 
     # Index documents to knowledge graph (ChromaDB + Neo4j) for GraphRAG search
+    # This also creates relationships (MENTIONS, RELATED_TO) for causal exploration
     kg_indexed = 0
+    relationships_created = 0
     if files_processed > 0:
         if not json_output:
             typer.echo("Indexing to knowledge graph (ChromaDB + Neo4j)...")
         try:
             from futurnal.pipeline.kg_indexer import KnowledgeGraphIndexer
             indexer = KnowledgeGraphIndexer(workspace_dir=workspace)
-            index_stats = indexer.index_all_parsed()
+            # Use comprehensive indexing that creates relationships
+            index_stats = indexer.index_all_with_relationships()
             kg_indexed = index_stats.get("chroma_indexed", 0) + index_stats.get("neo4j_indexed", 0)
+            relationships_created = (
+                index_stats.get("content_based_mentions", 0) +
+                index_stats.get("shared_entity_relationships", 0) +
+                index_stats.get("wikilink_relationships", 0)
+            )
             if not json_output:
                 typer.echo(
                     f"  Indexed {index_stats.get('chroma_indexed', 0)} to ChromaDB, "
                     f"{index_stats.get('neo4j_indexed', 0)} to Neo4j, "
                     f"{index_stats.get('entities_indexed', 0)} entities"
+                )
+                typer.echo(
+                    f"  Created {relationships_created} relationships "
+                    f"(mentions: {index_stats.get('content_based_mentions', 0)}, "
+                    f"related: {index_stats.get('shared_entity_relationships', 0)})"
                 )
             indexer.close()
         except Exception as exc:
@@ -2330,6 +2343,7 @@ def sync_source(
             "files_failed": files_failed,
             "entities_extracted": entities_extracted,
             "kg_indexed": kg_indexed,
+            "relationships_created": relationships_created,
         }
         print(json.dumps(result))
     else:

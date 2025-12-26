@@ -12,6 +12,7 @@ import {
   privacyApi,
   orchestratorApi,
   graphApi,
+  infrastructureApi,
 } from '@/lib/api';
 import { queryKeys } from '@/lib/queryClient';
 import type {
@@ -288,5 +289,50 @@ export function useGraphStats() {
     queryKey: queryKeys.graphStats,
     queryFn: () => graphApi.getStats(),
     staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+}
+
+// ============================================================================
+// Infrastructure Hooks
+// ============================================================================
+
+/**
+ * Hook to get infrastructure status (Docker, Neo4j, Orchestrator).
+ */
+export function useInfrastructureStatus() {
+  return useQuery({
+    queryKey: queryKeys.infrastructureStatus,
+    queryFn: infrastructureApi.getStatus,
+    refetchInterval: 10000, // Poll every 10s
+  });
+}
+
+/**
+ * Hook to start all infrastructure services.
+ */
+export function useStartInfrastructure() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => infrastructureApi.start(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.infrastructureStatus });
+      queryClient.invalidateQueries({ queryKey: queryKeys.orchestratorStatus });
+    },
+  });
+}
+
+/**
+ * Hook to ensure infrastructure is running (starts if needed).
+ */
+export function useEnsureInfrastructure() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => infrastructureApi.ensureRunning(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.infrastructureStatus });
+      queryClient.invalidateQueries({ queryKey: queryKeys.orchestratorStatus });
+    },
   });
 }
