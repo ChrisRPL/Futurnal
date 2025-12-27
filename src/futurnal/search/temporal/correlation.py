@@ -654,3 +654,205 @@ class TemporalCorrelationDetector:
             "avg_strength": avg_strength,
             "strongest": strongest.temporal_pattern if strongest else None,
         }
+
+    def detect_day_of_week_patterns(
+        self,
+        time_range: Tuple[datetime, datetime],
+        event_type: Optional[str] = None,
+        min_events_per_day: int = 3,
+    ) -> List[Dict[str, any]]:
+        """Detect day-of-week patterns in event frequency.
+
+        Identifies patterns like "productivity peaks on Tuesdays" or
+        "commits are 2x more frequent on Mondays".
+
+        Phase 2 Feature: Weekly rhythm pattern detection.
+
+        Args:
+            time_range: (start, end) time range to analyze
+            event_type: Optional filter for specific event type
+            min_events_per_day: Minimum events per day for significance
+
+        Returns:
+            List of day-of-week patterns with statistics
+
+        Example:
+            >>> patterns = detector.detect_day_of_week_patterns(
+            ...     time_range=(start, end),
+            ...     event_type="note_created",
+            ... )
+            >>> for p in patterns:
+            ...     print(f"{p['day_name']}: {p['event_count']} events ({p['deviation_pct']:+.0f}%)")
+        """
+        start_time, end_time = time_range
+
+        # Get all events in range
+        all_events = self._pkg.query_events_in_timerange(
+            start=start_time,
+            end=end_time,
+            event_type=event_type,
+        )
+
+        if len(all_events) < min_events_per_day * 7:
+            logger.debug(f"Insufficient events ({len(all_events)}) for day-of-week analysis")
+            return []
+
+        # Group events by day of week (0=Monday, 6=Sunday)
+        day_counts: Dict[int, int] = defaultdict(int)
+        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+        for event in all_events:
+            dt = self._normalize_datetime(event.timestamp)
+            day_of_week = dt.weekday()
+            day_counts[day_of_week] += 1
+
+        # Calculate statistics
+        total_events = sum(day_counts.values())
+        avg_per_day = total_events / 7.0 if total_events > 0 else 0
+
+        patterns = []
+        for day_idx in range(7):
+            count = day_counts[day_idx]
+            deviation = ((count - avg_per_day) / avg_per_day * 100) if avg_per_day > 0 else 0
+
+            patterns.append({
+                "day_index": day_idx,
+                "day_name": day_names[day_idx],
+                "event_count": count,
+                "average_count": avg_per_day,
+                "deviation_pct": deviation,
+                "is_peak": deviation > 25,  # 25% above average
+                "is_trough": deviation < -25,  # 25% below average
+                "event_type": event_type or "all",
+            })
+
+        # Sort by deviation (peaks first)
+        patterns.sort(key=lambda p: p["deviation_pct"], reverse=True)
+
+        # Log significant patterns
+        peaks = [p for p in patterns if p["is_peak"]]
+        troughs = [p for p in patterns if p["is_trough"]]
+        if peaks:
+            logger.info(f"Detected peak days: {[p['day_name'] for p in peaks]}")
+        if troughs:
+            logger.info(f"Detected trough days: {[p['day_name'] for p in troughs]}")
+
+        return patterns
+
+    def detect_time_lagged_correlations(
+        self,
+        event_type_a: str,
+        event_type_b: str,
+        time_range: Tuple[datetime, datetime],
+        lag_hours_range: Tuple[int, int] = (1, 72),
+        lag_bucket_hours: int = 6,
+    ) -> List[Dict[str, any]]:
+        """Detect time-lagged correlations between event types.
+
+        Finds patterns where event A precedes event B by a specific time lag.
+        Example: "Meeting notes precede decision documents by 24-48 hours"
+
+        Phase 2 Feature: Time-lagged correlation detection.
+
+        Args:
+            event_type_a: First event type (potential precursor)
+            event_type_b: Second event type (potential consequent)
+            time_range: (start, end) time range to analyze
+            lag_hours_range: (min, max) hours to analyze for lag
+            lag_bucket_hours: Size of time buckets for analysis
+
+        Returns:
+            List of lag patterns with frequency and strength
+
+        Example:
+            >>> lags = detector.detect_time_lagged_correlations(
+            ...     event_type_a="meeting",
+            ...     event_type_b="decision",
+            ...     time_range=(start, end),
+            ... )
+            >>> for lag in lags:
+            ...     print(f"{lag['lag_hours']}h: {lag['occurrence_count']} occurrences")
+        """
+        start_time, end_time = time_range
+        min_lag_hours, max_lag_hours = lag_hours_range
+
+        # Get events of both types
+        events_a = self._pkg.query_events_in_timerange(
+            start=start_time,
+            end=end_time,
+            event_type=event_type_a,
+        )
+        events_b = self._pkg.query_events_in_timerange(
+            start=start_time,
+            end=end_time,
+            event_type=event_type_b,
+        )
+
+        if len(events_a) < 3 or len(events_b) < 3:
+            logger.debug(f"Insufficient events for time-lagged analysis: A={len(events_a)}, B={len(events_b)}")
+            return []
+
+        # Sort by timestamp
+        events_a = sorted(events_a, key=lambda e: e.timestamp)
+        events_b = sorted(events_b, key=lambda e: e.timestamp)
+
+        # Create lag buckets
+        num_buckets = (max_lag_hours - min_lag_hours) // lag_bucket_hours + 1
+        lag_buckets: Dict[int, List[Tuple[str, str, float]]] = defaultdict(list)
+
+        # Find A→B pairs within lag range
+        used_b = set()
+        for event_a in events_a:
+            a_time = self._normalize_datetime(event_a.timestamp)
+
+            for event_b in events_b:
+                if event_b.id in used_b:
+                    continue
+
+                b_time = self._normalize_datetime(event_b.timestamp)
+                lag_hours = (b_time - a_time).total_seconds() / 3600.0
+
+                # Check if within lag range
+                if min_lag_hours <= lag_hours <= max_lag_hours:
+                    # Determine bucket
+                    bucket_idx = int((lag_hours - min_lag_hours) // lag_bucket_hours)
+                    bucket_hours = min_lag_hours + bucket_idx * lag_bucket_hours
+                    lag_buckets[bucket_hours].append((event_a.id, event_b.id, lag_hours))
+                    used_b.add(event_b.id)
+                    break  # Move to next A event
+
+        # Calculate statistics for each bucket
+        patterns = []
+        total_pairs = sum(len(pairs) for pairs in lag_buckets.values())
+
+        for bucket_hours in sorted(lag_buckets.keys()):
+            pairs = lag_buckets[bucket_hours]
+            if not pairs:
+                continue
+
+            avg_lag = sum(lag for _, _, lag in pairs) / len(pairs)
+            proportion = len(pairs) / total_pairs if total_pairs > 0 else 0
+
+            patterns.append({
+                "lag_hours": bucket_hours,
+                "lag_range": f"{bucket_hours}-{bucket_hours + lag_bucket_hours}h",
+                "occurrence_count": len(pairs),
+                "avg_actual_lag_hours": avg_lag,
+                "proportion": proportion,
+                "event_type_a": event_type_a,
+                "event_type_b": event_type_b,
+                "is_significant": len(pairs) >= 3 and proportion > 0.15,
+            })
+
+        # Sort by occurrence count
+        patterns.sort(key=lambda p: p["occurrence_count"], reverse=True)
+
+        # Log significant patterns
+        significant = [p for p in patterns if p["is_significant"]]
+        if significant:
+            logger.info(
+                f"Detected significant lag patterns for {event_type_a}→{event_type_b}: "
+                f"{[p['lag_range'] for p in significant]}"
+            )
+
+        return patterns

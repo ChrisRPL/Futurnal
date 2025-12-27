@@ -10,3 +10,4 @@ export { ConsentManager } from './ConsentManager';
 export { AuditLogViewer } from './AuditLogViewer';
 export { PrivacySection } from './PrivacySection';
 export { DataSection } from './DataSection';
+export { NotificationSettings } from './NotificationSettings';

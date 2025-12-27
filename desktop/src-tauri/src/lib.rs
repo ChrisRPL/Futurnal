@@ -111,7 +111,20 @@ pub fn run() {
             commands::insights::submit_causal_verification,
             commands::insights::get_insight_stats,
             commands::insights::trigger_insight_scan,
+            commands::insights::detect_patterns,
             commands::insights::save_user_insight,
+            // Phase 2C: User Feedback Integration
+            commands::insights::submit_insight_feedback,
+            commands::insights::get_feedback_stats,
+            // Phase 2D: Notification System
+            commands::notifications::get_notification_preferences,
+            commands::notifications::set_notification_frequency,
+            commands::notifications::set_notification_dnd,
+            commands::notifications::get_notification_history,
+            commands::notifications::mark_notification_read,
+            commands::notifications::clear_notifications,
+            commands::notifications::get_notification_status,
+            commands::notifications::deliver_notifications,
             // Paper search commands (Phase D: Academic Paper Agent)
             commands::papers::search_papers,
             commands::papers::download_paper,
@@ -126,6 +139,18 @@ pub fn run() {
             commands::research::deep_research,
             commands::research::quick_search,
             commands::research::get_research_status,
+            // Phase 2E: AgentFlow Architecture
+            commands::agents::get_memory_stats,
+            commands::agents::get_memory_recent,
+            commands::agents::search_memory,
+            commands::agents::clear_memory,
+            commands::agents::get_hypotheses,
+            commands::agents::generate_hypotheses,
+            commands::agents::investigate_hypothesis,
+            commands::agents::verify_hypothesis,
+            commands::agents::get_verification_history,
+            commands::agents::get_agentflow_status,
+            commands::agents::export_token_priors,
         ])
         .setup(|app| {
             log::info!("Futurnal Desktop Shell initialized");

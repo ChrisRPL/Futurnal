@@ -9,7 +9,7 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, User, Shield, Palette, Database, HardDrive, Info, GitBranch, Brain, BarChart3 } from 'lucide-react';
+import { ArrowLeft, User, Shield, Palette, Database, HardDrive, Info, GitBranch, Brain, BarChart3, Bell } from 'lucide-react';
 import { ProfileSection } from '@/components/settings/ProfileSection';
 import { PrivacySection } from '@/components/settings/PrivacySection';
 import { AppearanceSection } from '@/components/settings/AppearanceSection';
@@ -19,12 +19,14 @@ import { AboutSection } from '@/components/settings/AboutSection';
 import { SchemaEvolution } from '@/components/settings/SchemaEvolution';
 import { LearningProgress } from '@/components/settings/LearningProgress';
 import { TelemetrySettings } from '@/components/settings/TelemetrySettings';
+import { NotificationSettings } from '@/components/settings/NotificationSettings';
 
-type SectionId = 'profile' | 'privacy' | 'appearance' | 'connectors' | 'data' | 'schema' | 'learning' | 'telemetry' | 'about';
+type SectionId = 'profile' | 'privacy' | 'notifications' | 'appearance' | 'connectors' | 'data' | 'schema' | 'learning' | 'telemetry' | 'about';
 
 const SECTIONS = [
   { id: 'profile' as const, label: 'Profile', icon: User },
   { id: 'privacy' as const, label: 'Privacy', icon: Shield },
+  { id: 'notifications' as const, label: 'Notifications', icon: Bell },
   { id: 'appearance' as const, label: 'Appearance', icon: Palette },
   { id: 'connectors' as const, label: 'Data Sources', icon: Database },
   { id: 'data' as const, label: 'Data Management', icon: HardDrive },
@@ -44,6 +46,8 @@ export default function SettingsPage() {
         return <ProfileSection />;
       case 'privacy':
         return <PrivacySection />;
+      case 'notifications':
+        return <NotificationSettings />;
       case 'appearance':
         return <AppearanceSection />;
       case 'connectors':

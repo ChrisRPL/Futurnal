@@ -217,10 +217,11 @@ class NormalizationSink:
                     'checksum': element['sha256']
                 }
             })
-        except Exception:
-            # Don't fail ingestion if event creation fails
+            logger.debug(f"Created document_ingested event for {element['path']}")
+        except Exception as e:
+            # Log warning but don't fail ingestion if event creation fails
             # Events are Phase 2 prep, not Phase 1 critical
-            pass
+            logger.warning(f"Failed to create document_ingested event: {e}")
 
         # Create Obsidian-specific events if link graph data is present
         self._create_obsidian_note_events(element, payload, timestamp)
@@ -303,7 +304,7 @@ class NormalizationSink:
                 })
 
         except Exception as e:
-            # Don't fail ingestion if Obsidian event creation fails
+            # Log warning but don't fail ingestion if Obsidian event creation fails
             # These events enhance Phase 2 but aren't critical for Phase 1
-            pass
+            logger.warning(f"Failed to create Obsidian events: {e}")
 

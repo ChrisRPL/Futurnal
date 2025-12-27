@@ -39,6 +39,15 @@ from .interactive_causal import (
     VerificationStatus,
     CausalCandidate,
 )
+from .quality_gates import (
+    InsightQualityGate,
+    QualityGateResult,
+    QualityGateConfig,
+    QualityReport,
+    QualityScore,
+    QualityDimension,
+    get_quality_gate,
+)
 
 __all__ = [
     # Emergent Insights
@@ -65,4 +74,12 @@ __all__ = [
     "CausalResponse",
     "VerificationStatus",
     "CausalCandidate",
+    # Quality Gates (Phase 2F)
+    "InsightQualityGate",
+    "QualityGateResult",
+    "QualityGateConfig",
+    "QualityReport",
+    "QualityScore",
+    "QualityDimension",
+    "get_quality_gate",
 ]

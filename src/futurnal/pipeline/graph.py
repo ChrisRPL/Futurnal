@@ -466,12 +466,12 @@ class Neo4jPKGWriter:
             logger.debug(f"Created/updated aspiration: {parameters['title']}")
 
     def create_experiential_event(self, event_data: Dict[str, Any]) -> None:
-        """Create an ExperientialEvent node in the PKG (Phase 2 prep).
+        """Create an Event node in the PKG for temporal correlation detection.
 
-        Experiential events represent timestamped occurrences in the user's data
-        stream, emphasizing temporal context for Phase 2 correlation detection.
+        Events represent timestamped occurrences in the user's data stream,
+        enabling Phase 2 correlation detection and Phase 3 causal inference.
 
-        Unlike static documents, these events enable:
+        Unlike static documents, events enable:
         - Temporal pattern recognition
         - Behavioral sequence analysis
         - Causal hypothesis generation (Phase 3)
@@ -495,7 +495,7 @@ class Neo4jPKGWriter:
         def _create_event(tx):
             tx.run(
                 """
-                MERGE (e:ExperientialEvent {id: $event_id})
+                MERGE (e:Event {id: $event_id})
                 ON CREATE SET
                     e.timestamp = datetime($timestamp),
                     e.event_type = $event_type,
@@ -510,17 +510,17 @@ class Neo4jPKGWriter:
 
         with self._driver.session(database=self.database) as session:
             session.execute_write(_create_event)
-            logger.debug(f"Created experiential event: {parameters['event_type']} at {parameters['timestamp']}")
+            logger.debug(f"Created event: {parameters['event_type']} at {parameters['timestamp']}")
 
     def link_aspiration_to_event(self, aspiration_id: str, event_id: str, contribution_score: float = 0.0, explanation: str = "") -> None:
-        """Link an aspiration to an experiential event (Phase 3 prep).
+        """Link an aspiration to an event (Phase 3 prep).
 
         Phase 3 uses these links to calculate alignment scores and generate
         Reward Signal Dashboard metrics.
 
         Args:
             aspiration_id: Aspiration identifier
-            event_id: ExperientialEvent identifier
+            event_id: Event identifier
             contribution_score: How much event advances aspiration (-1.0 to 1.0)
             explanation: Human-readable explanation of alignment
         """
@@ -535,7 +535,7 @@ class Neo4jPKGWriter:
             tx.run(
                 """
                 MATCH (a:Aspiration {id: $aspiration_id})
-                MATCH (e:ExperientialEvent {id: $event_id})
+                MATCH (e:Event {id: $event_id})
                 MERGE (e)-[r:SUPPORTS_ASPIRATION]->(a)
                 SET
                     r.contribution_score = $contribution_score,
@@ -577,8 +577,8 @@ class Neo4jPKGWriter:
         def _create_causal(tx):
             tx.run(
                 """
-                MATCH (source:ExperientialEvent {id: $source_id})
-                MATCH (target:ExperientialEvent {id: $target_id})
+                MATCH (source:Event {id: $source_id})
+                MATCH (target:Event {id: $target_id})
                 MERGE (source)-[r:POTENTIALLY_CAUSES]->(target)
                 SET
                     r.confidence = $confidence,
@@ -598,7 +598,7 @@ class Neo4jPKGWriter:
         start_date: str,
         end_date: str
     ) -> List[Dict[str, Any]]:
-        """Query temporal patterns in experiential events (Phase 2 scaffold).
+        """Query temporal patterns in events (Phase 2 scaffold).
 
         Phase 2 will implement sophisticated pattern detection using this method.
 
@@ -624,7 +624,7 @@ class Neo4jPKGWriter:
         def _query_events(tx):
             result = tx.run(
                 """
-                MATCH (e:ExperientialEvent)
+                MATCH (e:Event)
                 WHERE e.event_type = $event_type
                   AND e.timestamp >= datetime($start_date)
                   AND e.timestamp <= datetime($end_date)

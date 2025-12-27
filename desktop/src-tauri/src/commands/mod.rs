@@ -4,6 +4,7 @@
 //! via the futurnal CLI.
 
 pub mod activity;
+pub mod agents;
 pub mod causal;
 pub mod chat;
 pub mod cloud_sync;
@@ -13,6 +14,7 @@ pub mod infrastructure;
 pub mod insights;
 pub mod learning;
 pub mod multimodal;
+pub mod notifications;
 pub mod ollama;
 pub mod orchestrator;
 pub mod papers;
@@ -22,6 +24,7 @@ pub mod schema;
 pub mod search;
 
 pub use activity::*;
+pub use agents::*;
 pub use causal::*;
 pub use chat::*;
 pub use cloud_sync::*;
@@ -31,6 +34,7 @@ pub use infrastructure::*;
 pub use insights::*;
 pub use learning::*;
 pub use multimodal::*;
+pub use notifications::*;
 pub use ollama::*;
 pub use orchestrator::*;
 pub use papers::*;

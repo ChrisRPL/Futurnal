@@ -671,18 +671,20 @@ class AdvancedTripleExtractor:
 
 
 class TripleEnrichedNormalizationSink:
-    """Enhanced normalization sink that extracts semantic triples.
-    
+    """Enhanced normalization sink that extracts semantic triples and creates events.
+
     Supports two extraction modes:
     - Phase 1 (Archivist): Metadata-only extraction (backward compatible)
     - Phase 2 (Analyst): AI-powered extraction with temporal/event/causal analysis
+
+    Also creates Event nodes for Phase 2 temporal correlation detection.
     """
 
     def __init__(self, pkg_writer, vector_writer, enable_advanced_extraction: bool = False):
         """Initialize triple-enriched sink.
-        
+
         Args:
-            pkg_writer: PKG writer instance
+            pkg_writer: PKG writer instance (must support create_experiential_event for Phase 2)
             vector_writer: Vector writer instance
             enable_advanced_extraction: Enable Phase 2 (Analyst) extraction mode
                                        Requires local LLM and additional compute
@@ -691,10 +693,10 @@ class TripleEnrichedNormalizationSink:
 
         self.pkg_writer: PKGWriter = pkg_writer
         self.vector_writer: VectorWriter = vector_writer
-        
+
         # Phase 1 extractor (always available)
         self.metadata_extractor = MetadataTripleExtractor()
-        
+
         # Phase 2 extractor (optional, requires local LLM)
         self.enable_advanced_extraction = enable_advanced_extraction
         if self.enable_advanced_extraction:
@@ -754,7 +756,10 @@ class TripleEnrichedNormalizationSink:
         
         # Write to PKG
         self.pkg_writer.write_document(document_payload)
-        
+
+        # Create experiential event for Phase 2 temporal correlation detection
+        self._create_experiential_event(element, payload)
+
         # Create embedding payload
         embedding_payload = {
             "sha256": element["sha256"],
@@ -764,10 +769,10 @@ class TripleEnrichedNormalizationSink:
         }
         if "embedding" in payload:
             embedding_payload["embedding"] = payload["embedding"]
-            
+
         # Write to vector store
         self.vector_writer.write_embedding(embedding_payload)
-        
+
         logger.debug(
             f"Processed element with {len(all_triples)} semantic triples "
             f"({len(metadata_triples)} metadata, {len(advanced_triples)} advanced)",
@@ -830,5 +835,60 @@ class TripleEnrichedNormalizationSink:
                     "error": str(e),
                 }
             )
+
+    def _create_experiential_event(self, element: dict, payload: dict) -> None:
+        """Create an Event node for Phase 2 temporal correlation detection.
+
+        Events represent timestamped document ingestion occurrences that enable
+        the temporal correlation detector to find patterns in user activity.
+
+        Args:
+            element: Element data with sha256, path, source
+            payload: Parsed payload with metadata and content
+        """
+        # Check if pkg_writer supports event creation
+        if not hasattr(self.pkg_writer, 'create_experiential_event'):
+            logger.debug("PKG writer does not support event creation, skipping")
+            return
+
+        metadata = payload.get("metadata", {})
+
+        # Extract timestamp from metadata (multiple possible sources)
+        timestamp = (
+            metadata.get("modified_at") or
+            metadata.get("created_at") or
+            metadata.get("ingested_at") or
+            datetime.utcnow().isoformat()
+        )
+
+        # Determine event type based on source
+        source = element.get("source", "unknown")
+        event_type_map = {
+            "obsidian": "note_created",
+            "github": "commit_pushed",
+            "imap": "email_received",
+            "local_files": "file_added",
+        }
+        event_type = event_type_map.get(source, "document_ingested")
+
+        try:
+            self.pkg_writer.create_experiential_event({
+                'event_id': f"evt-doc-{element['sha256'][:16]}",
+                'event_type': event_type,
+                'timestamp': timestamp,
+                'source_uri': element['path'],
+                'context': {
+                    'source': source,
+                    'file_type': metadata.get('filetype'),
+                    'size_bytes': metadata.get('file_size') or metadata.get('size_bytes'),
+                    'checksum': element['sha256'],
+                    'title': metadata.get('title', ''),
+                }
+            })
+            logger.debug(f"Created {event_type} event for {element['path']}")
+        except Exception as e:
+            # Log warning but don't fail ingestion if event creation fails
+            # Events are Phase 2 prep, not Phase 1 critical
+            logger.warning(f"Failed to create experiential event: {e}")
 
 

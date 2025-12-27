@@ -390,7 +390,14 @@ class TokenPriorStore:
         return []
 
     def _extract_temporal_patterns(self, result: Any) -> List[str]:
-        """Extract temporal pattern types from extraction result."""
+        """Extract temporal pattern types from extraction result.
+
+        Enhanced to detect various temporal patterns including:
+        - Temporal markers (explicit_date, relative_time, etc.)
+        - Temporal relations (BEFORE, AFTER, CAUSES, etc.)
+        - Events with timestamps
+        - Causal relationships
+        """
         if result is None:
             return []
 
@@ -403,12 +410,45 @@ class TokenPriorStore:
             if marker_type:
                 patterns.append(str(marker_type.value if hasattr(marker_type, "value") else marker_type))
 
-        # Check for events
+        # Check for temporal relations (BEFORE, AFTER, CAUSES, etc.)
+        temporal_relations = getattr(result, "temporal_relations", [])
+        if not temporal_relations:
+            # Try alternate attribute names
+            temporal_relations = getattr(result, "relationships", [])
+            temporal_relations = [
+                r for r in temporal_relations
+                if getattr(r, "relation_type", "").upper() in
+                ("BEFORE", "AFTER", "DURING", "CAUSES", "ENABLES", "PREVENTS", "TRIGGERS", "TEMPORAL")
+            ]
+
+        for rel in temporal_relations:
+            rel_type = getattr(rel, "relation_type", getattr(rel, "type", None))
+            if rel_type:
+                rel_type_str = str(rel_type.value if hasattr(rel_type, "value") else rel_type)
+                # Map to causal_sequence pattern type for causal relations
+                if rel_type_str.upper() in ("CAUSES", "ENABLES", "PREVENTS", "TRIGGERS"):
+                    patterns.append("causal_sequence")
+                else:
+                    patterns.append(f"temporal_{rel_type_str.lower()}")
+
+        # Check for events with timestamps
         events = getattr(result, "events", [])
         if events:
             patterns.append("event_extraction")
+            # Check if events have explicit timestamps
+            for event in events:
+                timestamp = getattr(event, "timestamp", getattr(event, "event_timestamp", None))
+                if timestamp:
+                    patterns.append("explicit_date")
+                    break
 
-        return patterns
+        # Check for causal candidates (from extraction pipeline)
+        causal_candidates = getattr(result, "causal_candidates", [])
+        if causal_candidates:
+            patterns.append("causal_sequence")
+
+        # Deduplicate patterns
+        return list(set(patterns))
 
     def _update_entity_prior(self, entity_type: str, success: bool) -> None:
         """Update or create entity type prior."""

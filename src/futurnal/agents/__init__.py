@@ -38,6 +38,31 @@ from .multi_agent import (
     MessageType,
 )
 
+# Phase 2E: AgentFlow Architecture
+from .memory_buffer import (
+    EvolvingMemoryBuffer,
+    MemoryEntry,
+    MemoryEntryType,
+    MemoryPriority,
+    get_memory_buffer,
+)
+from .correlation_planner import (
+    CorrelationPlanner,
+    CorrelationHypothesis,
+    HypothesisType,
+    HypothesisStatus,
+    QueryPlan,
+    get_correlation_planner,
+)
+from .correlation_verifier import (
+    CorrelationVerifier,
+    VerificationResult,
+    VerificationReport,
+    EvidenceItem,
+    BradfordHillCriterion,
+    get_correlation_verifier,
+)
+
 __all__ = [
     # Web Browser
     "WebBrowsingAgent",
@@ -64,4 +89,22 @@ __all__ = [
     "AgentTask",
     "AgentMessage",
     "MessageType",
+    # Phase 2E: AgentFlow Architecture
+    "EvolvingMemoryBuffer",
+    "MemoryEntry",
+    "MemoryEntryType",
+    "MemoryPriority",
+    "get_memory_buffer",
+    "CorrelationPlanner",
+    "CorrelationHypothesis",
+    "HypothesisType",
+    "HypothesisStatus",
+    "QueryPlan",
+    "get_correlation_planner",
+    "CorrelationVerifier",
+    "VerificationResult",
+    "VerificationReport",
+    "EvidenceItem",
+    "BradfordHillCriterion",
+    "get_correlation_verifier",
 ]

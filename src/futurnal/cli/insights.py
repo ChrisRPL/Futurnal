@@ -60,6 +60,31 @@ def _get_icda_agent():
         return None
 
 
+def _get_pkg_queries():
+    """Get PKG temporal queries service with graceful degradation.
+
+    Returns:
+        Tuple of (TemporalGraphQueries, PKGDatabaseManager) or (None, None) if unavailable.
+
+    The dependency chain is:
+    StorageSettings -> PKGDatabaseManager -> TemporalGraphQueries -> TemporalCorrelationDetector
+    """
+    try:
+        from futurnal.configuration.settings import bootstrap_settings
+        from futurnal.pkg.database.manager import PKGDatabaseManager
+        from futurnal.pkg.queries.temporal import TemporalGraphQueries
+
+        settings = bootstrap_settings()
+        manager = PKGDatabaseManager(settings.workspace.storage)
+        manager.connect()
+        queries = TemporalGraphQueries(manager)
+        logger.info("PKG queries service initialized successfully")
+        return queries, manager
+    except Exception as e:
+        logger.warning(f"PKG queries not available: {e}")
+        return None, None
+
+
 # ============================================================================
 # Insights Commands
 # ============================================================================
@@ -448,22 +473,81 @@ def trigger_insight_scan(
 ) -> None:
     """Trigger a manual insight scan.
 
+    This command connects to the PKG (Neo4j), runs temporal correlation
+    detection, generates emergent insights from correlations, and detects
+    knowledge gaps in the graph structure.
+
     Examples:
         futurnal insights scan
         futurnal insights scan --json
     """
+    scan_error = None
+    correlations_found = 0
+    insights_generated = 0
+    gaps_detected = 0
+
     try:
-        logger.info("Triggering insight scan...")
+        logger.info("Starting insight scan...")
 
-        # Get components
+        # Get PKG queries service (graceful degradation if unavailable)
+        pkg_queries, manager = _get_pkg_queries()
+
+        # Step 1: Run temporal correlation detection if PKG available
+        correlations = []
+        if pkg_queries is not None:
+            try:
+                from datetime import timedelta
+                from futurnal.search.temporal.correlation import TemporalCorrelationDetector
+
+                detector = TemporalCorrelationDetector(pkg_queries)
+                # Use a wide time range to scan all available data
+                # Default: last 365 days, but extend to cover all data
+                end_time = datetime.utcnow()
+                start_time = end_time - timedelta(days=365)
+
+                correlations = detector.scan_all_correlations(
+                    time_range=(start_time, end_time),
+                )
+                correlations_found = len(correlations)
+                logger.info(f"Found {correlations_found} correlations in PKG")
+            except Exception as e:
+                logger.warning(f"Correlation detection failed: {e}")
+                scan_error = f"Correlation detection failed: {e}"
+        else:
+            scan_error = "PKG database not available. Start Neo4j or ingest documents first."
+            logger.warning(scan_error)
+
+        # Step 2: Generate insights from correlations
         generator = _get_insight_generator()
+        if generator is not None:
+            try:
+                new_insights = generator.generate_insights(
+                    correlations=correlations,
+                    patterns=None,
+                    knowledge_gaps=None,
+                    aspirations=None,
+                )
+                insights_generated = len(new_insights)
+                logger.info(f"Generated {insights_generated} insights from correlations")
+            except Exception as e:
+                logger.warning(f"Insight generation failed: {e}")
+                if scan_error is None:
+                    scan_error = f"Insight generation failed: {e}"
+
+        # Step 3: Detect knowledge gaps if PKG available
         engine = _get_curiosity_engine()
+        if engine is not None and manager is not None:
+            try:
+                new_gaps = engine.detect_gaps(pkg_graph=manager)
+                gaps_detected = len(new_gaps)
+                logger.info(f"Detected {gaps_detected} knowledge gaps")
+            except Exception as e:
+                logger.warning(f"Gap detection failed: {e}")
+                if scan_error is None:
+                    scan_error = f"Gap detection failed: {e}"
+
+        # Step 4: Get final counts from cached data
         agent = _get_icda_agent()
-
-        # TODO: In production, trigger actual insight generation
-        # For now, return current stats after "scan"
-
-        # Get real counts from components
         insights = getattr(generator, '_cached_insights', []) if generator else []
         gaps = getattr(engine, '_cached_gaps', []) if engine else []
         pending = agent.get_pending_verifications(max_items=100) if agent else []
@@ -482,17 +566,31 @@ def trigger_insight_scan(
             "pendingVerifications": pending_verifications,
             "verifiedCausalCount": verified_count,
             "lastScanAt": datetime.utcnow().isoformat(),
+            "scanDetails": {
+                "correlationsFound": correlations_found,
+                "insightsGenerated": insights_generated,
+                "gapsDetected": gaps_detected,
+            },
         }
+
+        # Add scan error if any (for frontend to display)
+        if scan_error:
+            stats["scanError"] = scan_error
 
         if output_json:
             print(json.dumps(stats))
         else:
             print("\nInsight Scan Complete")
             print("-" * 40)
-            print(f"New Insights Found: {stats['unreadInsights']}")
-            print(f"Total Insights: {stats['totalInsights']}")
-            print(f"Knowledge Gaps: {stats['totalGaps']}")
-            print(f"Pending Verifications: {stats['pendingVerifications']}")
+            print(f"Correlations Found: {correlations_found}")
+            print(f"Insights Generated: {insights_generated}")
+            print(f"Gaps Detected: {gaps_detected}")
+            print()
+            print(f"Total Insights: {total_insights} ({unread_insights} unread)")
+            print(f"Total Gaps: {total_gaps}")
+            print(f"Pending Verifications: {pending_verifications}")
+            if scan_error:
+                print(f"\nWarning: {scan_error}")
 
     except Exception as e:
         logger.error(f"Scan failed: {e}")
@@ -506,7 +604,125 @@ def trigger_insight_scan(
                 "pendingVerifications": 0,
                 "verifiedCausalCount": 0,
                 "lastScanAt": None,
+                "scanDetails": {
+                    "correlationsFound": 0,
+                    "insightsGenerated": 0,
+                    "gapsDetected": 0,
+                },
             }))
+        else:
+            print(f"Error: {e}")
+
+
+# ============================================================================
+# Phase 2B: Pattern Detection Commands
+# ============================================================================
+
+@insights_app.command("patterns")
+def detect_patterns(
+    pattern_type: str = Option("all", "--type", "-t", help="Pattern type: day-of-week, time-lagged, all"),
+    event_type: Optional[str] = Option(None, "--event-type", "-e", help="Filter by event type"),
+    days: int = Option(365, "--days", "-d", help="Number of days to analyze"),
+    output_json: bool = Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Detect temporal patterns in your activity data.
+
+    Analyzes Event nodes to find:
+    - Day-of-week patterns: "Notes peak on Mondays (+45%)"
+    - Time-lagged correlations: "Meetings precede decisions by 24-48h"
+
+    Examples:
+        futurnal insights patterns
+        futurnal insights patterns --type day-of-week
+        futurnal insights patterns --type time-lagged --event-type note_created
+        futurnal insights patterns --days 90 --json
+    """
+    try:
+        from datetime import timedelta
+
+        # Get PKG queries service
+        pkg_queries, manager = _get_pkg_queries()
+        if pkg_queries is None:
+            msg = "PKG database not available. Start Neo4j or ingest documents first."
+            if output_json:
+                print(json.dumps({"success": False, "error": msg, "patterns": []}))
+            else:
+                print(f"Error: {msg}")
+            return
+
+        # Import detector
+        from futurnal.search.temporal.correlation import TemporalCorrelationDetector
+        detector = TemporalCorrelationDetector(pkg_queries)
+
+        # Set time range
+        end_time = datetime.utcnow()
+        start_time = end_time - timedelta(days=days)
+        time_range = (start_time, end_time)
+
+        results = {
+            "success": True,
+            "timeRange": {"start": start_time.isoformat(), "end": end_time.isoformat()},
+            "patterns": {},
+        }
+
+        # Detect day-of-week patterns
+        if pattern_type in ("all", "day-of-week"):
+            dow_patterns = detector.detect_day_of_week_patterns(
+                time_range=time_range,
+                event_type=event_type,
+            )
+            results["patterns"]["dayOfWeek"] = dow_patterns
+
+            if not output_json and dow_patterns:
+                print("\nDay-of-Week Patterns")
+                print("-" * 40)
+                for p in dow_patterns:
+                    marker = "📈" if p["is_peak"] else "📉" if p["is_trough"] else "  "
+                    print(f"{marker} {p['day_name']}: {p['event_count']} events ({p['deviation_pct']:+.0f}%)")
+
+        # Detect time-lagged correlations (requires two event types)
+        if pattern_type in ("all", "time-lagged"):
+            # Get distinct event types from PKG
+            all_events = pkg_queries.query_events_in_timerange(
+                start=start_time,
+                end=end_time,
+            )
+            event_types = list(set(e.event_type for e in all_events if e.event_type))
+
+            lag_patterns = []
+            if len(event_types) >= 2:
+                # Check first few pairs
+                for i, type_a in enumerate(event_types[:3]):
+                    for type_b in event_types[i+1:4]:
+                        lags = detector.detect_time_lagged_correlations(
+                            event_type_a=type_a,
+                            event_type_b=type_b,
+                            time_range=time_range,
+                        )
+                        lag_patterns.extend(lags)
+
+            results["patterns"]["timeLagged"] = lag_patterns
+
+            if not output_json and lag_patterns:
+                print("\nTime-Lagged Correlations")
+                print("-" * 40)
+                significant = [p for p in lag_patterns if p["is_significant"]]
+                if significant:
+                    for p in significant[:5]:
+                        print(f"  {p['event_type_a']} → {p['event_type_b']}: {p['lag_range']} ({p['occurrence_count']} occurrences)")
+                else:
+                    print("  No significant lag patterns detected")
+
+        if output_json:
+            print(json.dumps(results))
+        elif not results["patterns"].get("dayOfWeek") and not results["patterns"].get("timeLagged"):
+            print("\nNo patterns detected. Need more Event data.")
+            print("Try syncing more documents from your data sources.")
+
+    except Exception as e:
+        logger.error(f"Pattern detection failed: {e}")
+        if output_json:
+            print(json.dumps({"success": False, "error": str(e), "patterns": {}}))
         else:
             print(f"Error: {e}")
 
@@ -593,3 +809,186 @@ def save_user_insight(
                 print(f"Error: {e}")
 
     asyncio.run(_save())
+
+
+# ============================================================================
+# Phase 2C: User Feedback Integration
+# ============================================================================
+
+def _get_feedback_store():
+    """Get FeedbackStore singleton."""
+    try:
+        from futurnal.insights.feedback import get_feedback_store
+        return get_feedback_store()
+    except ImportError as e:
+        logger.warning(f"Feedback store not available: {e}")
+        return None
+
+
+def _get_ranking_model():
+    """Get RankingModel singleton."""
+    try:
+        from futurnal.insights.feedback import get_ranking_model
+        return get_ranking_model()
+    except ImportError as e:
+        logger.warning(f"Ranking model not available: {e}")
+        return None
+
+
+@insights_app.command("feedback")
+def submit_feedback(
+    insight_id: str = Argument(..., help="Insight ID to rate"),
+    rating: str = Argument(..., help="Rating: valuable, not_valuable, dismiss, neutral"),
+    insight_type: Optional[str] = Option(None, "--type", "-t", help="Insight type for learning"),
+    confidence: Optional[float] = Option(None, "--confidence", "-c", help="Original insight confidence"),
+    context: Optional[str] = Option(None, "--context", help="Optional explanation"),
+    output_json: bool = Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Submit feedback on an insight.
+
+    Feedback is used to personalize insight ranking over time.
+    Rating 'valuable' boosts similar insights, 'dismiss' reduces them.
+
+    Examples:
+        futurnal insights feedback <insight_id> valuable
+        futurnal insights feedback <insight_id> not_valuable --context "Too obvious"
+        futurnal insights feedback <insight_id> dismiss --type temporal_correlation --json
+    """
+    try:
+        from futurnal.insights.feedback import (
+            FeedbackRating,
+            InsightFeedback,
+            get_feedback_store,
+            get_ranking_model,
+        )
+
+        # Validate rating
+        try:
+            rating_enum = FeedbackRating(rating)
+        except ValueError:
+            valid = ", ".join(r.value for r in FeedbackRating)
+            raise ValueError(f"Invalid rating '{rating}'. Valid: {valid}")
+
+        # Create feedback entry
+        feedback = InsightFeedback(
+            insight_id=insight_id,
+            rating=rating_enum,
+            context=context,
+            insight_type=insight_type,
+            insight_confidence=confidence,
+        )
+
+        # Store feedback and update ranking model
+        store = get_feedback_store()
+        model = get_ranking_model()
+
+        store.add_feedback(feedback)
+        model.update_from_feedback(feedback)
+
+        # Get updated stats
+        stats = store.get_feedback_stats()
+        weights = model.get_personalized_weights()
+
+        if output_json:
+            print(json.dumps({
+                "success": True,
+                "feedbackId": feedback.feedback_id,
+                "insightId": insight_id,
+                "rating": rating,
+                "stats": stats,
+                "updatedWeights": weights,
+            }))
+        else:
+            print(f"\nFeedback Submitted")
+            print("-" * 40)
+            print(f"Insight: {insight_id}")
+            print(f"Rating: {rating}")
+            if context:
+                print(f"Context: {context}")
+            print()
+            print("Feedback Stats:")
+            for r, count in stats.items():
+                print(f"  {r}: {count}")
+
+    except Exception as e:
+        logger.error(f"Submit feedback failed: {e}")
+        if output_json:
+            print(json.dumps({
+                "success": False,
+                "feedbackId": None,
+                "insightId": insight_id,
+                "rating": rating,
+                "error": str(e),
+            }))
+        else:
+            print(f"Error: {e}")
+
+
+@insights_app.command("feedback-stats")
+def get_feedback_stats(
+    output_json: bool = Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Get feedback statistics and personalized ranking weights.
+
+    Shows how your feedback has shaped the ranking model.
+
+    Examples:
+        futurnal insights feedback-stats
+        futurnal insights feedback-stats --json
+    """
+    try:
+        from futurnal.insights.feedback import get_feedback_store, get_ranking_model
+
+        store = get_feedback_store()
+        model = get_ranking_model()
+
+        stats = store.get_feedback_stats()
+        weights = model.get_personalized_weights()
+        type_prefs = store.get_type_preferences()
+
+        total = sum(stats.values())
+        valuable_pct = (stats.get("valuable", 0) / total * 100) if total > 0 else 0
+
+        if output_json:
+            print(json.dumps({
+                "success": True,
+                "stats": stats,
+                "totalFeedback": total,
+                "valuablePercentage": valuable_pct,
+                "rankingWeights": weights,
+                "typePreferences": type_prefs,
+            }))
+        else:
+            print("\nFeedback Statistics")
+            print("-" * 40)
+            print(f"Total Feedback: {total}")
+            for r, count in stats.items():
+                pct = (count / total * 100) if total > 0 else 0
+                print(f"  {r}: {count} ({pct:.0f}%)")
+
+            print()
+            print("Ranking Weights (personalized):")
+            for factor, weight in sorted(weights.items(), key=lambda x: -x[1]):
+                print(f"  {factor}: {weight:.0%}")
+
+            if type_prefs:
+                print()
+                print("Type Preferences:")
+                for insight_type, score in sorted(type_prefs.items(), key=lambda x: -x[1]):
+                    pref = "👍" if score > 0.3 else "👎" if score < -0.3 else "➖"
+                    print(f"  {pref} {insight_type}: {score:+.2f}")
+
+    except Exception as e:
+        logger.error(f"Get feedback stats failed: {e}")
+        if output_json:
+            print(json.dumps({
+                "success": False,
+                "stats": {},
+                "totalFeedback": 0,
+                "valuablePercentage": 0,
+                "rankingWeights": {},
+                "typePreferences": {},
+                "error": str(e),
+            }))
+        else:
+            print(f"Error: {e}")

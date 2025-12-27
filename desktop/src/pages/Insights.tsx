@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ThemeLogo } from '@/components/ThemeLogo';
-import { InsightsFeed } from '@/components/insights';
+import { InsightsFeed, AgentFlowPanel, PatternVisualization } from '@/components/insights';
 import { useLearningStore } from '@/stores/learningStore';
 import type { EmergentInsight, KnowledgeGap } from '@/stores/insightsStore';
 
@@ -236,6 +236,12 @@ export function InsightsPage() {
             className="flex-1"
           />
         </main>
+
+        {/* Right sidebar - AgentFlow and Patterns */}
+        <aside className="w-96 border-l border-[var(--color-border)] p-4 space-y-4 hidden xl:block overflow-y-auto">
+          <PatternVisualization />
+          <AgentFlowPanel />
+        </aside>
       </div>
     </div>
   );

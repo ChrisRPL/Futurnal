@@ -493,6 +493,119 @@ pub async fn trigger_insight_scan() -> Result<InsightStatsResponse, String> {
 }
 
 // ============================================================================
+// Phase 2B: Pattern Detection
+// ============================================================================
+
+/// Day-of-week pattern data.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DayOfWeekPattern {
+    pub day_index: i32,
+    pub day_name: String,
+    pub event_count: i32,
+    pub average_count: f64,
+    pub deviation_pct: f64,
+    pub is_peak: bool,
+    pub is_trough: bool,
+    pub event_type: String,
+}
+
+/// Time-lagged correlation pattern.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeLaggedPattern {
+    pub lag_hours: i32,
+    pub lag_range: String,
+    pub occurrence_count: i32,
+    pub avg_actual_lag_hours: f64,
+    pub proportion: f64,
+    pub event_type_a: String,
+    pub event_type_b: String,
+    pub is_significant: bool,
+}
+
+/// Response from detect_patterns command.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatternsResponse {
+    pub success: bool,
+    pub time_range: Option<TimeRange>,
+    pub patterns: PatternsData,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Time range for pattern detection.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimeRange {
+    pub start: String,
+    pub end: String,
+}
+
+/// Patterns data container.
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PatternsData {
+    #[serde(default)]
+    pub day_of_week: Vec<DayOfWeekPattern>,
+    #[serde(default)]
+    pub time_lagged: Vec<TimeLaggedPattern>,
+}
+
+/// Detect temporal patterns in activity data.
+///
+/// Phase 2B Feature: Weekly rhythm and time-lagged correlation detection.
+///
+/// Calls: `futurnal insights patterns --json [--type TYPE] [--days N]`
+#[command]
+pub async fn detect_patterns(
+    pattern_type: Option<String>,
+    days: Option<i32>,
+    event_type: Option<String>,
+) -> Result<PatternsResponse, String> {
+    let mut args = vec!["insights".to_string(), "patterns".to_string(), "--json".to_string()];
+
+    if let Some(t) = &pattern_type {
+        args.push("--type".to_string());
+        args.push(t.clone());
+    }
+
+    if let Some(d) = days {
+        args.push("--days".to_string());
+        args.push(d.to_string());
+    }
+
+    if let Some(e) = &event_type {
+        args.push("--event-type".to_string());
+        args.push(e.clone());
+    }
+
+    let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+    let response: PatternsResponse = match crate::python::execute_cli(&args_ref).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            log::warn!("Detect patterns CLI failed: {}", e);
+            return Ok(PatternsResponse {
+                success: false,
+                time_range: None,
+                patterns: PatternsData::default(),
+                error: Some(format!("Failed to detect patterns: {}", e)),
+            });
+        }
+    };
+
+    log::info!(
+        "Detected patterns: {} day-of-week, {} time-lagged",
+        response.patterns.day_of_week.len(),
+        response.patterns.time_lagged.len()
+    );
+
+    Ok(response)
+}
+
+// ============================================================================
 // User Insight Saving (Phase C: Save Insight)
 // ============================================================================
 
@@ -562,6 +675,175 @@ pub async fn save_user_insight(
         "Saved user insight: {:?} (content: {}...)",
         response.insight_id,
         &request.content[..request.content.len().min(50)]
+    );
+
+    Ok(response)
+}
+
+// ============================================================================
+// Phase 2C: User Feedback Integration
+// ============================================================================
+
+/// Feedback rating type.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum FeedbackRating {
+    Valuable,
+    NotValuable,
+    Dismiss,
+    Neutral,
+}
+
+/// Request to submit insight feedback.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitFeedbackRequest {
+    pub insight_id: String,
+    pub rating: FeedbackRating,
+    pub insight_type: Option<String>,
+    pub confidence: Option<f64>,
+    pub context: Option<String>,
+}
+
+/// Response from submitting feedback.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubmitFeedbackResponse {
+    pub success: bool,
+    pub feedback_id: Option<String>,
+    pub insight_id: String,
+    pub rating: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stats: Option<FeedbackStats>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Feedback statistics.
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedbackStats {
+    #[serde(default)]
+    pub valuable: i32,
+    #[serde(default)]
+    pub not_valuable: i32,
+    #[serde(default)]
+    pub dismiss: i32,
+    #[serde(default)]
+    pub neutral: i32,
+}
+
+/// Submit feedback on an insight.
+///
+/// Phase 2C Feature: User feedback for adaptive ranking.
+///
+/// Calls: `futurnal insights feedback <insight_id> <rating> --json [--type TYPE] [--context TEXT]`
+#[command]
+pub async fn submit_insight_feedback(
+    request: SubmitFeedbackRequest,
+) -> Result<SubmitFeedbackResponse, String> {
+    let rating_str = match request.rating {
+        FeedbackRating::Valuable => "valuable",
+        FeedbackRating::NotValuable => "not_valuable",
+        FeedbackRating::Dismiss => "dismiss",
+        FeedbackRating::Neutral => "neutral",
+    };
+
+    let mut args = vec![
+        "insights".to_string(),
+        "feedback".to_string(),
+        request.insight_id.clone(),
+        rating_str.to_string(),
+        "--json".to_string(),
+    ];
+
+    if let Some(t) = &request.insight_type {
+        args.push("--type".to_string());
+        args.push(t.clone());
+    }
+
+    if let Some(c) = request.confidence {
+        args.push("--confidence".to_string());
+        args.push(c.to_string());
+    }
+
+    if let Some(ctx) = &request.context {
+        args.push("--context".to_string());
+        args.push(ctx.clone());
+    }
+
+    let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+    let response: SubmitFeedbackResponse = match crate::python::execute_cli(&args_ref).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            log::warn!("Submit feedback CLI failed: {}", e);
+            return Ok(SubmitFeedbackResponse {
+                success: false,
+                feedback_id: None,
+                insight_id: request.insight_id,
+                rating: rating_str.to_string(),
+                stats: None,
+                error: Some(format!("Failed to submit feedback: {}", e)),
+            });
+        }
+    };
+
+    log::info!(
+        "Submitted feedback for insight {}: {} (feedback_id: {:?})",
+        request.insight_id,
+        rating_str,
+        response.feedback_id
+    );
+
+    Ok(response)
+}
+
+/// Response from get_feedback_stats command.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedbackStatsResponse {
+    pub success: bool,
+    pub stats: FeedbackStats,
+    pub total_feedback: i32,
+    pub valuable_percentage: f64,
+    #[serde(default)]
+    pub ranking_weights: std::collections::HashMap<String, f64>,
+    #[serde(default)]
+    pub type_preferences: std::collections::HashMap<String, f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Get feedback statistics and personalized ranking weights.
+///
+/// Phase 2C Feature: View how feedback shapes ranking.
+///
+/// Calls: `futurnal insights feedback-stats --json`
+#[command]
+pub async fn get_feedback_stats() -> Result<FeedbackStatsResponse, String> {
+    let args = vec!["insights", "feedback-stats", "--json"];
+
+    let response: FeedbackStatsResponse = match crate::python::execute_cli(&args).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            log::warn!("Get feedback stats CLI failed: {}", e);
+            return Ok(FeedbackStatsResponse {
+                success: false,
+                stats: FeedbackStats::default(),
+                total_feedback: 0,
+                valuable_percentage: 0.0,
+                ranking_weights: std::collections::HashMap::new(),
+                type_preferences: std::collections::HashMap::new(),
+                error: Some(format!("Failed to get feedback stats: {}", e)),
+            });
+        }
+    };
+
+    log::info!(
+        "Feedback stats: {} total ({:.0}% valuable)",
+        response.total_feedback,
+        response.valuable_percentage
     );
 
     Ok(response)

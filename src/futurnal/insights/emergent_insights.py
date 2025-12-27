@@ -218,6 +218,7 @@ class InsightGenerator:
         min_confidence: float = MIN_CONFIDENCE,
         min_significance: float = MIN_STATISTICAL_SIGNIFICANCE,
         storage_path: Optional[str] = None,
+        ranking_model: Optional[Any] = None,
     ):
         """Initialize insight generator.
 
@@ -225,6 +226,7 @@ class InsightGenerator:
             min_confidence: Minimum confidence threshold for generating insights
             min_significance: Maximum p-value for statistical significance
             storage_path: Path to persist insights (default: ~/.futurnal/insights/emergent.json)
+            ranking_model: Optional RankingModel for personalized scoring
         """
         import os
         import json
@@ -232,6 +234,15 @@ class InsightGenerator:
 
         self.min_confidence = min_confidence
         self.min_significance = min_significance
+
+        # Phase 2C: Personalized ranking model
+        self._ranking_model = ranking_model
+        if self._ranking_model is None:
+            try:
+                from futurnal.insights.feedback import get_ranking_model
+                self._ranking_model = get_ranking_model()
+            except ImportError:
+                logger.debug("Feedback module not available, using default ranking")
 
         # Persistent storage for emergent insights
         self._storage_path = Path(
@@ -250,7 +261,8 @@ class InsightGenerator:
 
         logger.info(
             f"InsightGenerator initialized "
-            f"(min_confidence={min_confidence}, min_significance={min_significance})"
+            f"(min_confidence={min_confidence}, min_significance={min_significance}, "
+            f"personalized_ranking={'enabled' if self._ranking_model else 'disabled'})"
         )
 
     def generate_insights(
@@ -778,11 +790,14 @@ class InsightGenerator:
     ) -> float:
         """Calculate how relevant an insight is to the user.
 
+        Phase 2C: Uses RankingModel for personalized scoring when available.
+
         Considers:
         - Alignment with user's Aspirational Self
         - Novelty (new pattern vs previously known)
         - Actionability (can user do something about it?)
         - Statistical strength of underlying pattern
+        - User feedback history (Phase 2C)
 
         Args:
             insight: The insight to score
@@ -792,6 +807,36 @@ class InsightGenerator:
         Returns:
             Relevance score (0-1)
         """
+        # Phase 2C: Use personalized ranking model if available
+        if self._ranking_model is not None:
+            try:
+                # Calculate aspiration alignment
+                aspiration_alignment = 0.15 * len(insight.related_aspirations) if insight.related_aspirations else 0.0
+
+                # Calculate age in days
+                age_days = 0
+                if hasattr(insight, 'created_at') and insight.created_at:
+                    age_days = (datetime.utcnow() - insight.created_at).days
+
+                # Get personalized score from ranking model
+                score = self._ranking_model.compute_relevance_score(
+                    insight_type=insight.insight_type.value if hasattr(insight.insight_type, 'value') else str(insight.insight_type),
+                    confidence=insight.confidence,
+                    base_relevance=0.5 + (0.1 if insight.suggested_actions else 0.0),
+                    aspiration_alignment=aspiration_alignment,
+                    age_days=age_days,
+                )
+
+                # Apply dismissed penalty
+                if insight.dismissed:
+                    score -= 0.3
+
+                return max(0.0, min(1.0, score))
+
+            except Exception as e:
+                logger.debug(f"Personalized scoring failed, using default: {e}")
+
+        # Fallback: Default scoring logic
         score = 0.5  # Base relevance
 
         # Boost for aspiration alignment
