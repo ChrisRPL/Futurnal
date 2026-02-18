@@ -513,21 +513,24 @@ fn aggregate_element(
 ) {
     let doc = documents.entry(key.clone()).or_insert_with(|| {
         // Compute ID matching Neo4j's format for consistency
-        // Neo4j uses: SHA256(path)[:16] or SHA256(content)[:16]
+        // Neo4j uses: SHA256(path)[:16] - we must use the SAME ID format
+        // to match causal relationships from Neo4j
+        let path_value = element.metadata.extra.get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
         let id = match &key {
             DocumentKey::ImapEmail { source, uid } => format!("email:{}:{}", source, uid),
             DocumentKey::UnstructuredDoc { parent_id: _ } => {
-                // Use path from metadata to compute Neo4j-compatible ID
-                let path = element.metadata.extra.get("path")
-                    .and_then(|v| v.as_str())
-                    .or_else(|| element.metadata.extra.get("source_file").and_then(|v| v.as_str()))
-                    .unwrap_or_else(|| element.metadata.filename.as_deref().unwrap_or(""));
-
-                if !path.is_empty() {
-                    compute_neo4j_doc_id(path)
+                // Use SHA256(path)[:16] to match Neo4j document IDs
+                // This ensures causal relationships connect properly
+                if !path_value.is_empty() {
+                    compute_neo4j_doc_id(path_value)
                 } else {
-                    // Fallback: hash the element text
-                    compute_neo4j_doc_id(&element.text)
+                    // Fallback: compute from filename if path not available
+                    element.metadata.filename.as_ref()
+                        .map(|f| compute_neo4j_doc_id(f))
+                        .unwrap_or_else(|| element.element_id.clone())
                 }
             },
             DocumentKey::RawEmail { sha256 } => sha256.clone(),
@@ -773,13 +776,23 @@ pub async fn get_knowledge_graph(limit: Option<u32>) -> Result<GraphData, String
 
     // Load causal (RELATED_TO) relationships from Neo4j
     // These connect documents that share entities
+    // IMPORTANT: Filter by weight to avoid unreadable dense mesh
+    // weight = number of shared entities between documents
     let causal_links = load_causal_relationships().await;
+    let min_causal_weight = 3.0; // Only show strong relationships (3+ shared entities)
+    let mut causal_count = 0;
     for link in causal_links {
-        // Only add if both nodes exist in the graph
+        // Only add if both nodes exist AND relationship is strong enough
         if node_ids.contains(&link.source) && node_ids.contains(&link.target) {
-            links.push(link);
+            if let Some(weight) = link.weight {
+                if weight >= min_causal_weight {
+                    links.push(link);
+                    causal_count += 1;
+                }
+            }
         }
     }
+    log::info!("Added {} strong causal relationships (weight >= {})", causal_count, min_causal_weight);
 
     let total_nodes = nodes.len() as u32;
     let has_more = total_nodes >= limit as u32;
