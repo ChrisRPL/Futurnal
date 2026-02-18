@@ -322,6 +322,16 @@ class GitHubRepositoryDescriptor(BaseModel):
             validated.append(branch)
         return validated
 
+    @field_validator("api_base_url")
+    @classmethod
+    def _validate_api_base_url(cls, value: Optional[str]) -> Optional[str]:
+        """Require explicit API base URLs to use HTTPS only."""
+        if value is None:
+            return value
+        if not value.startswith("https://"):
+            raise ValueError("api_base_url must use https://")
+        return value
+
     @model_validator(mode="after")
     def _compute_full_name(self) -> "GitHubRepositoryDescriptor":
         """Compute full_name from owner and repo."""
@@ -375,7 +385,8 @@ class GitHubRepositoryDescriptor(BaseModel):
         privacy_settings: Optional[RepositoryPrivacySettings] = None,
     ) -> "GitHubRepositoryDescriptor":
         """Create descriptor from registration parameters."""
-        repo_id = _deterministic_repository_id(owner, repo, github_host)
+        normalized_host = github_host or "github.com"
+        repo_id = _deterministic_repository_id(owner, repo, normalized_host)
         full_name = f"{owner}/{repo}"
 
         branches_list = list(branches) if branches else ["main", "master"]
@@ -394,7 +405,7 @@ class GitHubRepositoryDescriptor(BaseModel):
             repo=repo,
             full_name=full_name,
             visibility=visibility,
-            github_host=github_host,
+            github_host=normalized_host,
             api_base_url=api_base_url,
             credential_id=credential_id,
             sync_mode=sync_mode,
@@ -906,10 +917,11 @@ class RepositoryRegistry:
 
 
 def _deterministic_repository_id(
-    owner: str, repo: str, host: str = "github.com"
+    owner: str, repo: str, host: Optional[str] = "github.com"
 ) -> str:
     """Generate deterministic repository ID from owner/repo/host."""
-    normalized = f"{owner.lower()}/{repo.lower()}@{host.lower()}"
+    resolved_host = host or "github.com"
+    normalized = f"{owner.lower()}/{repo.lower()}@{resolved_host.lower()}"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"github:{normalized}"))
 
 

@@ -316,7 +316,7 @@ def add_repository(
             owner=owner,
             repo=repo_name,
             github_host=host,
-            api_base_url=api_base_url or repo_info.visibility.value,
+            api_base_url=api_base_url,
             name=name,
             credential_id=credential_id,
             visibility=repo_info.visibility,
