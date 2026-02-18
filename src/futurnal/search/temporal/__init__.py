@@ -18,6 +18,7 @@ from futurnal.search.temporal.types import TemporalQueryType, TemporalQuery
 from futurnal.search.temporal.decay import TemporalDecayScorer
 from futurnal.search.temporal.patterns import TemporalPatternMatcher
 from futurnal.search.temporal.correlation import TemporalCorrelationDetector
+from futurnal.search.temporal.unified_source import UnifiedTemporalSource, TemporalItem
 from futurnal.search.temporal.results import (
     SequenceMatch,
     RecurringPattern,
@@ -37,6 +38,8 @@ __all__ = [
     "TemporalDecayScorer",
     "TemporalPatternMatcher",
     "TemporalCorrelationDetector",
+    "UnifiedTemporalSource",
+    "TemporalItem",
     # Results
     "SequenceMatch",
     "RecurringPattern",
