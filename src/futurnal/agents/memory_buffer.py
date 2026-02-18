@@ -11,6 +11,14 @@ Maintains bounded memory of analysis state across sessions:
 Research Foundation:
 - ProPerSim (2509.21730v1): Multi-turn context preservation
 - Training-Free GRPO (2510.08191v1): Natural language learning
+- H-MEM (arxiv:2507.22925): Hierarchical memory for long-term reasoning
+  - EvolvingMemoryBuffer acts as "Working Memory" in H-MEM terminology
+  - Active context window for current analysis session
+
+Memory Architecture Alignment (H-MEM arxiv:2507.22925):
+- EvolvingMemoryBuffer = Working Memory tier (active context)
+- Max 50 entries with priority-based retention
+- Compresses old entries to make room for new
 
 Option B Compliance:
 - No model parameter updates
@@ -81,35 +89,41 @@ class MemoryEntry:
     last_accessed: Optional[datetime] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for storage."""
+        """Convert to dictionary for API response.
+
+        Returns camelCase keys for compatibility with frontend/Tauri.
+        """
         return {
-            "entry_id": self.entry_id,
-            "entry_type": self.entry_type.value,
+            "entryId": self.entry_id,
+            "entryType": self.entry_type.value,
             "content": self.content,
             "priority": self.priority.value,
             "timestamp": self.timestamp.isoformat(),
-            "related_entries": self.related_entries,
+            "relatedEntries": self.related_entries,
             "metadata": self.metadata,
-            "access_count": self.access_count,
-            "last_accessed": self.last_accessed.isoformat() if self.last_accessed else None,
+            "accessCount": self.access_count,
+            "lastAccessed": self.last_accessed.isoformat() if self.last_accessed else None,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MemoryEntry":
-        """Create from dictionary."""
+        """Create from dictionary.
+
+        Accepts both snake_case and camelCase keys for backwards compatibility.
+        """
         return cls(
-            entry_id=data.get("entry_id", str(uuid4())),
-            entry_type=MemoryEntryType(data.get("entry_type", "insight")),
+            entry_id=data.get("entryId") or data.get("entry_id", str(uuid4())),
+            entry_type=MemoryEntryType(data.get("entryType") or data.get("entry_type", "insight")),
             content=data.get("content", ""),
             priority=MemoryPriority(data.get("priority", "normal")),
             timestamp=datetime.fromisoformat(
                 data.get("timestamp", datetime.utcnow().isoformat())
             ),
-            related_entries=data.get("related_entries", []),
+            related_entries=data.get("relatedEntries") or data.get("related_entries", []),
             metadata=data.get("metadata", {}),
-            access_count=data.get("access_count", 0),
-            last_accessed=datetime.fromisoformat(data["last_accessed"])
-            if data.get("last_accessed")
+            access_count=data.get("accessCount") or data.get("access_count", 0),
+            last_accessed=datetime.fromisoformat(data.get("lastAccessed") or data["last_accessed"])
+            if data.get("lastAccessed") or data.get("last_accessed")
             else None,
         )
 
@@ -531,8 +545,7 @@ class EvolvingMemoryBuffer:
     def get_stats(self) -> Dict[str, Any]:
         """Get buffer statistics.
 
-        Returns:
-            Statistics dictionary
+        Returns camelCase keys for compatibility with frontend/Tauri.
         """
         by_type = {}
         by_priority = {}
@@ -544,11 +557,11 @@ class EvolvingMemoryBuffer:
             )
 
         return {
-            "total_entries": len(self.entries),
-            "max_entries": self.max_entries,
+            "totalEntries": len(self.entries),
+            "maxEntries": self.max_entries,
             "utilization": len(self.entries) / self.max_entries,
-            "by_type": by_type,
-            "by_priority": by_priority,
+            "byType": by_type,
+            "byPriority": by_priority,
         }
 
 
