@@ -22,12 +22,10 @@ import {
   Brain,
   GitBranch,
   RefreshCw,
-  Filter,
   Bell,
   Clock,
   Loader2,
   AlertCircle,
-  ChevronDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useInsightsStore } from '@/stores/insightsStore';
@@ -157,34 +155,66 @@ function TabButton({
 }
 
 /**
- * Empty state component
+ * Empty state component with helpful guidance
  */
 function EmptyState({ type }: { type: TabType }) {
-  const messages: Record<TabType, { icon: typeof Lightbulb; message: string }> = {
+  const messages: Record<TabType, { icon: typeof Lightbulb; message: string; guidance?: string[] }> = {
     all: {
       icon: Bell,
-      message: 'No insights yet. Run a scan to discover patterns.',
+      message: 'No insights yet',
+      guidance: [
+        'Add more documents with timestamps',
+        'Documents need different creation dates',
+        'Minimum 5+ documents recommended for patterns',
+        'Click "Scan Now" after adding more data',
+      ],
     },
     insights: {
       icon: Lightbulb,
-      message: 'No emergent insights detected.',
+      message: 'No emergent insights detected',
+      guidance: [
+        'Insights emerge from recurring patterns',
+        'Add documents with overlapping topics',
+        'Include dated content for temporal patterns',
+      ],
     },
     gaps: {
       icon: Brain,
-      message: 'No knowledge gaps identified.',
+      message: 'No knowledge gaps identified',
+      guidance: [
+        'Gaps are detected between related concepts',
+        'Add more interconnected documents',
+      ],
     },
     verifications: {
       icon: GitBranch,
-      message: 'No causal hypotheses pending verification.',
+      message: 'No causal hypotheses pending',
+      guidance: [
+        'Causal relationships are detected from temporal data',
+        'Add documents with clear cause-effect relationships',
+      ],
     },
   };
 
-  const { icon: Icon, message } = messages[type];
+  const { icon: Icon, message, guidance } = messages[type];
 
   return (
-    <div className="flex flex-col items-center justify-center py-12 text-center">
+    <div className="flex flex-col items-center justify-center py-12 text-center px-6">
       <Icon className="w-8 h-8 text-white/20 mb-3" />
-      <p className="text-sm text-white/40">{message}</p>
+      <p className="text-sm text-white/40 mb-4">{message}</p>
+      {guidance && guidance.length > 0 && (
+        <div className="text-left max-w-xs">
+          <p className="text-xs text-white/30 mb-2">To generate insights:</p>
+          <ul className="space-y-1.5">
+            {guidance.map((item, i) => (
+              <li key={i} className="text-xs text-white/25 flex items-start gap-2">
+                <span className="text-white/20 mt-0.5">•</span>
+                <span>{item}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -352,7 +382,7 @@ export function InsightsFeed({
 
         return (
           <div className="space-y-2 p-3">
-            {allItems.slice(0, 20).map((item, index) => {
+            {allItems.slice(0, 20).map((item) => {
               if (item.type === 'insight') {
                 return (
                   <InsightCard
