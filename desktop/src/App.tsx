@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
+import { Routes, Route, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useOrchestratorStatus, useConnectors, useGraphStats, useEnsureInfrastructure } from '@/hooks/useApi';
 import { useSubscription } from '@/hooks/useSubscription';
 import { useAuth } from '@/contexts/AuthContext';
@@ -34,6 +34,7 @@ import ConnectorsPage from '@/pages/Connectors';
 import SettingsPage from '@/pages/Settings';
 import ActivityPage from '@/pages/Activity';
 import InsightsPage from '@/pages/Insights';
+import CommandPaletteOverlay from '@/pages/CommandPaletteOverlay';
 
 /**
  * Compact stat badge for header
@@ -238,6 +239,20 @@ function RootRedirect() {
  * Main App with routing
  */
 function App() {
+  const location = useLocation();
+
+  // Check if we're in overlay mode (separate window for global hotkey)
+  const isOverlayMode = location.pathname.startsWith('/overlay/');
+
+  // If overlay mode, render only the overlay component without app shell
+  if (isOverlayMode) {
+    return (
+      <Routes>
+        <Route path="/overlay/command-palette" element={<CommandPaletteOverlay />} />
+      </Routes>
+    );
+  }
+
   // Use UI store for command palette state so it can be closed from anywhere
   const isCommandPaletteOpen = useUIStore((state) => state.isCommandPaletteOpen);
   const openCommandPalette = useUIStore((state) => state.openCommandPalette);
