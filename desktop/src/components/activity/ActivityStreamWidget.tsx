@@ -62,7 +62,7 @@ export function ActivityStreamWidget({
   };
 
   // Get total count per group
-  const getGroupSummary = (groupName: string, groupEvents: typeof events) => {
+  const getGroupSummary = (_groupName: string, groupEvents: typeof events) => {
     const counts = new Map<string, number>();
     groupEvents.forEach((e) => {
       counts.set(e.type, (counts.get(e.type) || 0) + 1);
