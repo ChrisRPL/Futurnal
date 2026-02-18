@@ -122,7 +122,7 @@ function MemoryBufferCard() {
           </div>
 
           {/* Entry types */}
-          {Object.keys(memoryStats.byType).length > 0 && (
+          {memoryStats.byType && Object.keys(memoryStats.byType).length > 0 && (
             <div className="flex flex-wrap gap-1 mb-3">
               {Object.entries(memoryStats.byType).map(([type, count]) => (
                 <span
