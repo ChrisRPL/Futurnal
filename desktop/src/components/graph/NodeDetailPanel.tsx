@@ -66,6 +66,7 @@ interface NodeDetailPanelProps {
 
 /** Icon mapping for entity types */
 const ENTITY_ICONS: Record<EntityType, typeof FileText> = {
+  Entity: FileText,
   Event: Calendar,
   Document: FileText,
   Code: Code,
@@ -79,6 +80,7 @@ const ENTITY_ICONS: Record<EntityType, typeof FileText> = {
 
 /** Opacity mapping for entity type badges */
 const TYPE_OPACITIES: Record<EntityType, string> = {
+  Entity: 'bg-white/10',
   Event: 'bg-white/20',
   Person: 'bg-white/16',
   Document: 'bg-white/12',
