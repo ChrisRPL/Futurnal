@@ -66,20 +66,6 @@ interface AuditLogViewerProps {
   onOpenChange: (open: boolean) => void;
 }
 
-interface AuditLog {
-  id: string;
-  timestamp: string;
-  action: string;
-  resource_type: string;
-  resource_id?: string;
-  job_id?: string;
-  source?: string;
-  status?: string;
-  details?: Record<string, unknown>;
-  chain_hash?: string;
-  chain_prev?: string;
-}
-
 const ACTION_VARIANTS: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   search: 'secondary',
   read: 'secondary',
@@ -104,7 +90,7 @@ export function AuditLogViewer({ open, onOpenChange }: AuditLogViewerProps) {
   const [page, setPage] = useState(0);
   const [verificationStatus, setVerificationStatus] = useState<'idle' | 'verifying' | 'valid' | 'invalid'>('idle');
 
-  const { data: logs, isLoading, refetch, totalCount } = useAuditLogs({
+  const { data: logs, isLoading, refetch } = useAuditLogs({
     limit: 1000, // Load more for client-side filtering
     action_filter: actionFilter !== 'all' ? actionFilter : undefined,
   });
@@ -478,7 +464,7 @@ export function AuditLogViewer({ open, onOpenChange }: AuditLogViewerProps) {
         <div className="flex items-center justify-between text-xs text-[var(--color-text-muted)] pb-2">
           <span>
             Showing {paginatedLogs.length} of {filteredLogs.length} logs
-            {totalCount && totalCount > filteredLogs.length && ` (${totalCount} total)`}
+            {logs && logs.length > filteredLogs.length && ` (${logs.length} total)`}
           </span>
           {totalPages > 1 && (
             <div className="flex items-center gap-2">
