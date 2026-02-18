@@ -29,7 +29,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useCausalStore, type CausalCause, type CausalEffect, type CausalPath } from '@/stores/causalStore';
+import { useCausalStore, type CausalCause, type CausalEffect } from '@/stores/causalStore';
 
 interface CausalChainProps {
   /** Event ID to explore from */
@@ -78,9 +78,13 @@ function ConfidenceBar({
  */
 function TemporalMarker({ valid }: { valid: boolean }) {
   return valid ? (
-    <Check className="w-3 h-3 text-white/60" title="Temporal ordering valid" />
+    <span title="Temporal ordering valid">
+      <Check className="w-3 h-3 text-white/60" />
+    </span>
   ) : (
-    <AlertCircle className="w-3 h-3 text-white/40" title="Temporal ordering uncertain" />
+    <span title="Temporal ordering uncertain">
+      <AlertCircle className="w-3 h-3 text-white/40" />
+    </span>
   );
 }
 
