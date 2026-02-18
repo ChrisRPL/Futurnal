@@ -55,8 +55,3 @@ Open a GitHub issue with:
 - Actual behavior
 - Repro steps
 - Environment info (OS, Python version, model/runtime)
-
-## Security Issues
-
-Do not open a public issue for vulnerabilities.
-Follow `SECURITY.md`.
