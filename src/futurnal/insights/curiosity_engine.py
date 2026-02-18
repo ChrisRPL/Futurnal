@@ -154,7 +154,7 @@ class CuriosityEngine:
     # Configuration
     MIN_SEVERITY = 0.3  # Minimum severity to report
     MIN_INFO_GAIN = 0.2  # Minimum info gain to consider
-    MAX_GAPS_PER_TYPE = 5  # Maximum gaps per category
+    MAX_GAPS_PER_TYPE = 3  # Maximum gaps per category (reduced to avoid clutter)
     SYNTHESIS_THRESHOLD_DAYS = 30  # Days before expecting synthesis
 
     def __init__(
@@ -300,10 +300,10 @@ class CuriosityEngine:
                 "title": gap.title,
                 "description": gap.description,
                 "informationGain": gap.information_gain,
-                "relatedTopics": gap.related_topics or [],
-                "explorationPrompts": gap.exploration_prompts or [],
+                "relatedTopics": gap.related_notes or [],  # Fixed: was related_topics
+                "explorationPrompts": gap.suggested_exploration or [],  # Fixed: was exploration_prompts
                 "createdAt": gap.created_at.isoformat() if hasattr(gap.created_at, 'isoformat') else str(gap.created_at),
-                "isAddressed": gap.is_addressed,
+                "isAddressed": gap.addressed,  # Fixed: was is_addressed
             }
             new_entries.append(entry)
 
