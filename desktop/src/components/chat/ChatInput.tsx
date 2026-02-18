@@ -28,7 +28,7 @@ import {
 import { cn } from '@/lib/utils';
 import { multimodalApi } from '@/lib/multimodalApi';
 import { SlashCommandPopover } from './SlashCommandPopover';
-import { filterCommands, parseSlashCommand, getHelpText, type SlashCommand } from '@/data/commands';
+import { parseSlashCommand, getHelpText, type SlashCommand } from '@/data/commands';
 import { useUIStore } from '@/stores/uiStore';
 
 // Supported attachment types
