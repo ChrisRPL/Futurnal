@@ -25,7 +25,14 @@ export type InsightType =
   | 'pattern'
   | 'anomaly'
   | 'trend'
-  | 'knowledge_gap';
+  | 'knowledge_gap'
+  // Extended types from Python backend
+  | 'temporal_correlation'
+  | 'behavioral_pattern'
+  | 'aspiration_misalignment'
+  | 'productivity_pattern'
+  | 'weekly_rhythm'
+  | 'sequence_pattern';
 
 /** Insight priority level */
 export type InsightPriority = 'high' | 'medium' | 'low';
