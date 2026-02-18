@@ -7,6 +7,17 @@ Research Foundation:
 - Event-CausNet (2025): Causal feature extraction from events
 - ACCESS (2025): Causal validation metrics
 - Training-Free GRPO (2510.08191v1): Natural language learning
+- arxiv:2510.07231: LLM causal reasoning limitations (best: 57.6% accuracy)
+
+CRITICAL ARCHITECTURAL NOTE:
+This module generates CORRELATION-based insights. For CAUSAL validation,
+use the CausalBoundary abstraction layer:
+
+    from futurnal.reasoning import CausalBoundary
+
+The InsightGenerator outputs:
+- correlation_confidence: Based on statistical patterns (LLM-assisted)
+- For causal_confidence: Use CausalBoundary with Bradford-Hill validation
 
 Key Innovation:
 Unlike standard reporting systems, the InsightGenerator:
@@ -14,6 +25,7 @@ Unlike standard reporting systems, the InsightGenerator:
 2. Ranks insights by relevance to user's aspirations
 3. Generates actionable suggestions
 4. Maintains insight quality through confidence thresholds
+5. EXPLICITLY labels confidence as "correlation" vs "causal"
 
 Example Emergent Insights:
 - "A pattern has been detected: 75% of your project proposals written on a
@@ -40,6 +52,9 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 from uuid import uuid4
+
+from futurnal.reasoning import CausalBoundary, CausalBoundaryResult
+from futurnal.memory import HierarchicalMemory
 
 if TYPE_CHECKING:
     from futurnal.search.temporal.results import TemporalCorrelationResult
@@ -76,12 +91,19 @@ class EmergentInsight:
     Insights are autonomous discoveries the Ghost makes by analyzing the PKG.
     They are presented to users with supporting evidence and actionable context.
 
+    Phase 2.5 Research Integration:
+    - Explicit separation of correlation vs causal confidence (arxiv:2510.07231)
+    - Uses CausalBoundary for Bradford-Hill validation
+    - Shows both confidence types to users for transparency
+
     Attributes:
         insight_id: Unique identifier
         insight_type: Category of insight
         title: Short, attention-grabbing summary
         description: Detailed explanation of the pattern or discovery
-        confidence: Confidence in the insight (0.0 to 1.0)
+        confidence: Overall confidence (legacy, equals correlation_confidence)
+        correlation_confidence: LLM-detected pattern confidence
+        causal_confidence: Bradford-Hill validated causal confidence
         confidence_level: Categorical confidence (HIGH/MEDIUM/LOW)
         relevance_score: Estimated relevance to user (0.0 to 1.0)
         supporting_evidence: List of event IDs or data points supporting this insight
@@ -97,7 +119,9 @@ class EmergentInsight:
     insight_type: InsightType = InsightType.TEMPORAL_CORRELATION
     title: str = ""
     description: str = ""
-    confidence: float = 0.0
+    confidence: float = 0.0  # Legacy: equals correlation_confidence
+    correlation_confidence: float = 0.0  # Phase 2.5: LLM pattern confidence
+    causal_confidence: float = 0.0  # Phase 2.5: Bradford-Hill validated
     confidence_level: InsightConfidence = InsightConfidence.LOW
     relevance_score: float = 0.0
     supporting_evidence: List[str] = field(default_factory=list)
@@ -116,6 +140,8 @@ class EmergentInsight:
             "title": self.title,
             "description": self.description,
             "confidence": self.confidence,
+            "correlation_confidence": self.correlation_confidence,
+            "causal_confidence": self.causal_confidence,
             "confidence_level": self.confidence_level.value,
             "relevance_score": self.relevance_score,
             "supporting_evidence": self.supporting_evidence,
@@ -141,13 +167,24 @@ class EmergentInsight:
         )
 
     def to_natural_language(self) -> str:
-        """Convert insight to natural language for token priors."""
+        """Convert insight to natural language for token priors.
+
+        Phase 2.5: Shows both correlation and causal confidence for transparency.
+        """
         lines = [
             f"Insight: {self.title}",
             f"Type: {self.insight_type.value}",
             f"Description: {self.description}",
-            f"Confidence: {self.confidence:.0%} ({self.confidence_level.value})",
         ]
+
+        # Phase 2.5: Show both correlation and causal confidence
+        if self.causal_confidence > 0:
+            lines.append(
+                f"Confidence: Correlation {self.correlation_confidence:.0%} | "
+                f"Causal {self.causal_confidence:.0%} ({self.confidence_level.value})"
+            )
+        else:
+            lines.append(f"Confidence: {self.correlation_confidence:.0%} ({self.confidence_level.value})")
 
         if self.statistical_summary:
             lines.append(f"Statistics: {self.statistical_summary}")
@@ -219,6 +256,8 @@ class InsightGenerator:
         min_significance: float = MIN_STATISTICAL_SIGNIFICANCE,
         storage_path: Optional[str] = None,
         ranking_model: Optional[Any] = None,
+        causal_boundary: Optional[CausalBoundary] = None,
+        hierarchical_memory: Optional[HierarchicalMemory] = None,
     ):
         """Initialize insight generator.
 
@@ -227,6 +266,8 @@ class InsightGenerator:
             min_significance: Maximum p-value for statistical significance
             storage_path: Path to persist insights (default: ~/.futurnal/insights/emergent.json)
             ranking_model: Optional RankingModel for personalized scoring
+            causal_boundary: Optional CausalBoundary for causal validation (Phase 2.5)
+            hierarchical_memory: Optional HierarchicalMemory for episodic storage (Phase 2.5)
         """
         import os
         import json
@@ -234,6 +275,14 @@ class InsightGenerator:
 
         self.min_confidence = min_confidence
         self.min_significance = min_significance
+
+        # Phase 2.5: CausalBoundary for correlation vs causal confidence separation
+        # arxiv:2510.07231: LLMs achieve only 57.6% on causal benchmarks
+        self._causal_boundary = causal_boundary or CausalBoundary()
+
+        # Phase 2.5: HierarchicalMemory for episodic insight storage
+        # H-MEM (arxiv:2507.22925): Three-tier memory for long-term reasoning
+        self._hierarchical_memory = hierarchical_memory or HierarchicalMemory()
 
         # Phase 2C: Personalized ranking model
         self._ranking_model = ranking_model
@@ -342,7 +391,11 @@ class InsightGenerator:
         return filtered
 
     def _cache_insights(self, insights: List[EmergentInsight]) -> None:
-        """Cache and persist insights to storage."""
+        """Cache and persist insights to storage.
+
+        Phase 2.5: Also stores insights in episodic memory for later
+        consolidation to semantic memory (token priors).
+        """
         import json
 
         # Convert insights to dictionaries for storage
@@ -354,6 +407,8 @@ class InsightGenerator:
                 "title": insight.title,
                 "description": insight.description,
                 "confidence": insight.confidence,
+                "correlation_confidence": insight.correlation_confidence,  # Phase 2.5
+                "causal_confidence": insight.causal_confidence,  # Phase 2.5
                 "relevance": insight.relevance_score,
                 "priority": "high" if insight.priority_score >= 0.7 else "medium" if insight.priority_score >= 0.4 else "low",
                 "sourceEvents": insight.supporting_evidence or [],
@@ -363,6 +418,18 @@ class InsightGenerator:
                 "isRead": False,
             }
             new_entries.append(entry)
+
+            # Phase 2.5: Store in episodic memory (H-MEM tier 2)
+            # High-confidence insights will be consolidated to semantic memory
+            try:
+                self._hierarchical_memory.add_to_episodic_memory(
+                    event_description=insight.to_natural_language(),
+                    event_type=insight.insight_type.value if hasattr(insight.insight_type, 'value') else str(insight.insight_type),
+                    significance_score=insight.priority_score,
+                    related_entities=insight.supporting_evidence[:5],
+                )
+            except Exception as e:
+                logger.debug(f"Could not add insight to episodic memory: {e}")
 
         # Add to cache (avoid duplicates by insight_id)
         existing_ids = {i.get("insightId") for i in self._cached_insights}
@@ -500,15 +567,28 @@ class InsightGenerator:
             strength,
         )
 
-        # Calculate confidence
-        confidence = self._calculate_correlation_confidence(
+        # Calculate correlation confidence (LLM pattern detection)
+        correlation_confidence = self._calculate_correlation_confidence(
             co_occurrences,
             p_value,
             strength,
         )
 
-        # Determine confidence level
-        confidence_level = self._get_confidence_level(confidence)
+        # Phase 2.5: Apply CausalBoundary discounting for causal confidence
+        # arxiv:2510.07231: LLMs achieve only 57.6% on causal benchmarks
+        # Causal confidence is always <= correlation confidence
+        causal_confidence = self._causal_boundary.compute_causal_discount(
+            correlation_confidence=correlation_confidence,
+            is_causal_candidate=is_causal,
+            co_occurrences=co_occurrences,
+            effect_size=effect_size,
+        )
+
+        # Legacy: confidence equals correlation_confidence for backwards compatibility
+        confidence = correlation_confidence
+
+        # Determine confidence level (based on the higher of the two for display)
+        confidence_level = self._get_confidence_level(correlation_confidence)
 
         # Generate statistical summary
         statistical_summary = self._generate_statistical_summary(
@@ -545,6 +625,8 @@ class InsightGenerator:
             title=title,
             description=description,
             confidence=confidence,
+            correlation_confidence=correlation_confidence,  # Phase 2.5
+            causal_confidence=causal_confidence,  # Phase 2.5
             confidence_level=confidence_level,
             relevance_score=0.5 + 0.1 * len(related),  # Base + aspiration bonus
             supporting_evidence=evidence,
