@@ -6,25 +6,44 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Futurnal</title>
     <meta name="description" content="Privacy-first personal knowledge engine" />
-    <!-- Theme initialization to prevent flash of wrong theme -->
+    <!-- Theme initialization and overlay mode detection -->
     <script>
       (function() {
         try {
-          var stored = localStorage.getItem('futurnal-settings');
-          if (stored) {
-            var settings = JSON.parse(stored);
-            var theme = settings.state && settings.state.theme;
-            if (theme === 'light') {
-              document.documentElement.classList.add('light');
-            } else if (theme === 'system') {
-              if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+          // Check if we're in overlay mode (command palette window)
+          var isOverlay = window.location.hash.indexOf('/overlay/') !== -1;
+
+          if (isOverlay) {
+            // Apply transparent background IMMEDIATELY for overlay windows
+            document.documentElement.classList.add('overlay-transparent');
+            document.documentElement.style.background = 'transparent';
+            document.documentElement.style.backgroundColor = 'transparent';
+          } else {
+            // Normal theme handling for main app
+            var stored = localStorage.getItem('futurnal-settings');
+            if (stored) {
+              var settings = JSON.parse(stored);
+              var theme = settings.state && settings.state.theme;
+              if (theme === 'light') {
                 document.documentElement.classList.add('light');
+              } else if (theme === 'system') {
+                if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+                  document.documentElement.classList.add('light');
+                }
               }
             }
           }
         } catch (e) {}
       })();
     </script>
+    <style>
+      /* Immediate transparent background for overlay windows */
+      html.overlay-transparent,
+      html.overlay-transparent body {
+        background: transparent !important;
+        background-color: transparent !important;
+      }
+    </style>
   </head>
 
   <body>
