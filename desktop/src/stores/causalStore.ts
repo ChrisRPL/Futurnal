@@ -119,7 +119,7 @@ interface CausalState {
   clearError: () => void;
 }
 
-export const useCausalStore = create<CausalState>()((set, get) => ({
+export const useCausalStore = create<CausalState>()((set) => ({
   // Initial state
   anchorEventId: null,
   causes: [],
