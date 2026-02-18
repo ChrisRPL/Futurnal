@@ -291,8 +291,8 @@ export const useSearchStore = create<SearchState>()(
           });
 
           // Extract answer if available (from searchWithAnswer response)
-          const answer = 'answer' in response ? response.answer ?? null : null;
-          const answerSources = 'sources' in response ? response.sources ?? [] : [];
+          const answer: string | null = 'answer' in response && typeof response.answer === 'string' ? response.answer : null;
+          const answerSources: string[] = 'sources' in response && Array.isArray(response.sources) ? response.sources : [];
 
           set({
             results: response.results,
