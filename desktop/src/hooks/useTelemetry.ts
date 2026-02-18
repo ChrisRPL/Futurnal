@@ -12,12 +12,6 @@ import type {
   MetricsQuery,
   AlertsQuery,
   ExportParams,
-  TelemetrySnapshot,
-  MetricSample,
-  QualityGateResult,
-  TelemetryAlert,
-  TimeRange,
-  getTimeRangeFromPreset,
 } from '@/types/telemetry';
 
 // ============================================================================
