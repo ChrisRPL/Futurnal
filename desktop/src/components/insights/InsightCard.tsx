@@ -48,6 +48,13 @@ const TYPE_ICONS: Record<InsightType, typeof Lightbulb> = {
   anomaly: AlertTriangle,
   trend: TrendingUp,
   knowledge_gap: HelpCircle,
+  // Extended types
+  temporal_correlation: Activity,
+  behavioral_pattern: TrendingUp,
+  aspiration_misalignment: AlertTriangle,
+  productivity_pattern: TrendingUp,
+  weekly_rhythm: Clock,
+  sequence_pattern: GitBranch,
 };
 
 /** Color mapping for insight types */
@@ -58,6 +65,13 @@ const TYPE_COLORS: Record<InsightType, string> = {
   anomaly: 'bg-red-500/20 text-red-400',
   trend: 'bg-cyan-500/20 text-cyan-400',
   knowledge_gap: 'bg-amber-500/20 text-amber-400',
+  // Extended types
+  temporal_correlation: 'bg-blue-500/20 text-blue-400',
+  behavioral_pattern: 'bg-green-500/20 text-green-400',
+  aspiration_misalignment: 'bg-orange-500/20 text-orange-400',
+  productivity_pattern: 'bg-emerald-500/20 text-emerald-400',
+  weekly_rhythm: 'bg-indigo-500/20 text-indigo-400',
+  sequence_pattern: 'bg-violet-500/20 text-violet-400',
 };
 
 /** Priority colors */
