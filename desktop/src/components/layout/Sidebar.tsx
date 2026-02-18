@@ -110,9 +110,9 @@ export function Sidebar({ className }: SidebarProps) {
         className
       )}
     >
-      {/* Sources Section */}
-      <div className="flex-shrink-0">
-        <div className="flex items-center justify-between px-3 py-3 border-b border-white/5">
+      {/* Sources Section - scrollable with max height */}
+      <div className="flex flex-col max-h-[40%] min-h-0">
+        <div className="flex-shrink-0 flex items-center justify-between px-3 py-3 border-b border-white/5">
           {!isCollapsed && (
             <span className="text-xs font-medium text-white/50 uppercase tracking-wider">
               Sources
@@ -129,8 +129,8 @@ export function Sidebar({ className }: SidebarProps) {
           )}
         </div>
 
-        {/* Sources List */}
-        <div className="py-1">
+        {/* Sources List - scrollable */}
+        <div className="flex-1 overflow-y-auto py-1">
           {isLoadingConnectors && (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="w-4 h-4 text-white/40 animate-spin" />
@@ -156,7 +156,7 @@ export function Sidebar({ className }: SidebarProps) {
           )}
 
           {connectors?.map((connector) => {
-            const Icon = getConnectorIcon(connector.type);
+            const Icon = getConnectorIcon(connector.connector_type);
             const status = getStatusIndicator(connector.status);
             const StatusIcon = status.icon;
 
@@ -185,7 +185,7 @@ export function Sidebar({ className }: SidebarProps) {
                       {connector.name}
                     </span>
                     <span className="text-[10px] text-white/40">
-                      {connector.documentCount ?? 0}
+                      {connector.stats?.files_processed ?? 0}
                     </span>
                   </>
                 )}
