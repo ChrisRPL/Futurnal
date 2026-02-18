@@ -120,7 +120,6 @@ function getMockSnapshot(): TelemetrySnapshot {
 function getMockMetrics(query: MetricsQuery): MetricSample[] {
   const samples: MetricSample[] = [];
   const now = Date.now();
-  const oneHour = 60 * 60 * 1000;
 
   // Generate 60 samples over the last hour
   for (let i = 59; i >= 0; i--) {
