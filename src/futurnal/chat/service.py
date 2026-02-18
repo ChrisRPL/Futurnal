@@ -893,25 +893,58 @@ Use these evolved instincts to:
     def _extract_entity_refs(
         self, search_results: List[Dict[str, Any]]
     ) -> List[str]:
-        """Extract entity references from search results."""
+        """Extract entity references from search results.
+
+        Prefers human-readable names over UUIDs for display.
+        """
         refs = []
         seen = set()
+
+        # Skip generic/unhelpful values
+        skip_values = {"unknown", "document", "entity", "node", ""}
+
         for result in search_results:
-            # Check for entity_id in result or metadata
-            entity_id = result.get("entity_id") or result.get("metadata", {}).get(
-                "entity_id"
-            )
-            if entity_id and entity_id not in seen:
-                refs.append(entity_id)
-                seen.add(entity_id)
+            metadata = result.get("metadata", {})
+
+            # Prefer human-readable name fields over entity_id (which is often a UUID)
+            # Priority: name > label > title > doc_title > entity_type
+            entity_name = None
+            for field in ["name", "label", "title", "doc_title", "canonical_name"]:
+                val = result.get(field) or metadata.get(field)
+                if val and val.lower() not in skip_values:
+                    entity_name = val
+                    break
+
+            # If no name found, try entity_type (but make it readable)
+            if not entity_name:
+                entity_type = result.get("entity_type") or metadata.get("entity_type")
+                if entity_type and entity_type.lower() not in skip_values:
+                    entity_name = entity_type.replace("_", " ").title()
+
+            # Only use entity_id as last resort if it looks like a name (not a UUID)
+            if not entity_name:
+                entity_id = result.get("entity_id") or metadata.get("entity_id")
+                # Skip if it looks like a UUID (has dashes and is long)
+                if entity_id and "-" not in entity_id and len(entity_id) < 50:
+                    entity_name = entity_id
+
+            if entity_name and entity_name not in seen:
+                refs.append(entity_name)
+                seen.add(entity_name)
 
             # Also check for entities in graph context
             graph_context = result.get("graph_context", {})
             for entity in graph_context.get("related_entities", []):
-                eid = entity.get("id") or entity.get("name")
-                if eid and eid not in seen:
-                    refs.append(eid)
-                    seen.add(eid)
+                # Prefer name over id
+                ename = entity.get("name") or entity.get("canonical_name")
+                if not ename:
+                    eid = entity.get("id")
+                    # Skip UUID-like IDs
+                    if eid and "-" not in eid and len(eid) < 50:
+                        ename = eid
+                if ename and ename not in seen and ename.lower() not in skip_values:
+                    refs.append(ename)
+                    seen.add(ename)
 
         return refs[:10]  # Limit to 10 refs
 
