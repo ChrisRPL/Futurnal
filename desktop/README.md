@@ -175,5 +175,5 @@ GitHub Actions workflows are configured for:
 ## Related Documentation
 
 - [Production Plan](../docs/phase-1/search-desktop-shell-production-plan/)
-- [Frontend Design System](../FRONTEND_DESIGN.md)
-- [System Architecture](../architecture/system-architecture.md)
+- [System Architecture](../docs/architecture/system-architecture.md)
+- [Main Project Docs](../docs/README.md)

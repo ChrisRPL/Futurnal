@@ -1,193 +1,131 @@
-# Futurnal
+<p align="center">
+  <img src="assets/logo_text_horizontal.png" alt="Futurnal logo" width="440">
+</p>
 
-**Privacy-first personal knowledge engine for understanding your digital life.**
+<p align="center"><strong>Privacy-first personal knowledge engine for understanding your digital life.</strong></p>
 
-[![Phase](https://img.shields.io/badge/Phase-1%20Archivist-blue)](docs/phase-1/overview.md)
-[![Python](https://img.shields.io/badge/Python-3.11+-green)](https://python.org)
-[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+<p align="center">
+  <a href="https://github.com/ChrisRPL/Futurnal/actions/workflows/quality-gates.yml"><img src="https://img.shields.io/github/actions/workflow/status/ChrisRPL/Futurnal/quality-gates.yml?branch=main&label=quality%20gates" alt="Quality Gates"></a>
+  <a href="https://github.com/ChrisRPL/Futurnal/actions/workflows/production-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/ChrisRPL/Futurnal/production-release.yml?branch=main&label=release%20pipeline" alt="Release Pipeline"></a>
+  <a href="https://github.com/ChrisRPL/Futurnal/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-0b0b0b.svg" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/desktop-Tauri%202-24C8DB?logo=tauri&logoColor=white" alt="Tauri 2">
+</p>
 
-## What is Futurnal?
+## Why Futurnal
 
-Futurnal transforms your scattered digital knowledge into a connected, searchable intelligence engine. Unlike simple search tools, Futurnal understands relationships between your data, tracks temporal patterns, and helps you discover the "why" behind your thoughts.
+Futurnal turns scattered personal data into a local, queryable intelligence layer.
 
-**Core Philosophy**: Move from "What did I know?" to "Why do I think this?"
+- Hybrid retrieval: semantic + graph + temporal
+- Local-first privacy defaults
+- Chat grounded in your own data
+- Desktop shell for search, graph, insights, and privacy controls
+- Multi-source ingestion: Obsidian, IMAP email, GitHub, local files
 
-### Key Features
-
-- **Intelligent Search**: Semantic + graph-based retrieval with temporal awareness
-- **Conversational AI**: Chat with your knowledge base (grounded, no hallucination)
-- **Privacy-First**: All processing happens locally on your device
-- **Multiple Sources**: Obsidian, Email, GitHub, Local Files
-- **Knowledge Graph**: Visualize connections in your data
-- **Experiential Learning**: Improves with use (without cloud training)
+Core shift: from "What did I know?" to "Why do I think this?"
 
 ## Quick Start
 
-### Prerequisites
+### 1. Prerequisites
 
-1. **Python 3.11+**
-2. **Ollama** for local LLM inference:
-   ```bash
-   # macOS
-   brew install ollama
-
-   # Linux
-   curl -fsSL https://ollama.ai/install.sh | sh
-   ```
-
-3. **Pull a model**:
-   ```bash
-   ollama pull llama3.2:3b
-   ```
-
-### Installation
+- Python 3.11+
+- Ollama
 
 ```bash
-# Clone repository
-git clone https://github.com/futurnal/futurnal.git
-cd futurnal
+# macOS
+brew install ollama
 
-# Create virtual environment
+# Linux
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Pull a local model
+ollama pull llama3.2:3b
+```
+
+### 2. Install Futurnal CLI
+
+```bash
+git clone https://github.com/ChrisRPL/Futurnal.git
+cd Futurnal
+
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 
-# Install
 pip install -e .
-
-# Verify
 futurnal health check
 ```
 
-### Add Your First Data Source
+### 3. Add data and query
 
 ```bash
-# Add an Obsidian vault
-futurnal sources obsidian vault add /path/to/your/vault --name my-notes
+# Add a source
+futurnal sources obsidian vault add /path/to/vault --name my-notes
 
-# Wait for ingestion
+# Ingestion status
 futurnal sources obsidian vault status my-notes
-```
 
-### Search Your Knowledge
+# Query
+futurnal search "what did I work on last week"
 
-```bash
-# Search
-futurnal search "machine learning"
-
-# Temporal search
-futurnal search "what I worked on last week"
-
-# Start chat
+# Chat
 futurnal chat
 ```
 
-## Desktop Application
+## Desktop App
 
-For a graphical interface, use the desktop app:
+Tauri desktop shell lives in `desktop/`.
 
-- **macOS**: Download `.dmg` from [Releases](https://github.com/futurnal/futurnal/releases)
-- **Windows**: Download `.msi` from [Releases](https://github.com/futurnal/futurnal/releases)
-- **Linux**: Download `.AppImage` from [Releases](https://github.com/futurnal/futurnal/releases)
+```bash
+cd desktop
+npm install
+npm run tauri dev
+```
 
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [User Guide](docs/user-guide/README.md) | Complete user documentation |
-| [Installation](docs/user-guide/installation.md) | Detailed installation guide |
-| [Quickstart](docs/user-guide/quickstart.md) | Get started in 5 minutes |
-| [API Reference](docs/api-reference/README.md) | Developer documentation |
-| [Privacy Policy](PRIVACY_POLICY.md) | How we handle your data |
-| [Changelog](CHANGELOG.md) | Version history |
-
-## Privacy
-
-Futurnal is built on privacy-first principles:
-
-- **Local-First**: All processing on your device
-- **No Cloud Default**: Internet not required
-- **Explicit Consent**: Permission required for each data source
-- **Full Control**: Delete your data anytime
-
-Read our [Privacy Policy](PRIVACY_POLICY.md) for details.
+Release artifacts are built in GitHub Actions (`production-release.yml`).
 
 ## Architecture
 
-```
-+------------------+     +------------------+     +---------------+
-|   Data Sources   | --> |   Ingestion      | --> |  Knowledge    |
-| (Obsidian, IMAP, |     |   Pipeline       |     |  Graph (PKG)  |
-|  GitHub, Files)  |     +------------------+     +---------------+
-+------------------+              |                      |
-                                  v                      v
-                          +------------------+    +-----------+
-                          |   Embeddings     |    |  Search   |
-                          |   (ChromaDB)     |    |   API     |
-                          +------------------+    +-----------+
-                                                       |
-                                                       v
-                                              +---------------+
-                                              |   Chat/UI     |
-                                              +---------------+
+```text
+Sources -> Ingestion -> PKG + Embeddings -> Hybrid Search API -> Chat / UI
 ```
 
-## Research Foundation
+- System architecture: `docs/architecture/system-architecture.md`
+- Causal reasoning boundary: `docs/architecture/causal-reasoning.md`
+- Research notes: `docs/research/README.md`
 
-Futurnal is built on 39 SOTA research papers (2024-2025):
+## Documentation
 
-| Feature | Research |
-|---------|----------|
-| Search | GFM-RAG, Personalized Graph-Based Retrieval |
-| Chat | ProPerSim, Causal-Copilot |
-| Temporal | Time-R1 |
-| Schema | AutoSchemaKG |
-| Learning | SEAgent, Training-Free GRPO |
-| Privacy | Federated Prompt Learning (ICLR 2025) |
+- Docs index: `docs/README.md`
+- User guide: `docs/user-guide/README.md`
+- API reference: `docs/api-reference/README.md`
+- Privacy: `PRIVACY.md`
+- Changelog: `CHANGELOG.md`
 
-See [SOTA Research Summary](docs/phase-1/SOTA_RESEARCH_SUMMARY.md) for details.
+## Research Assets Decision
 
-## Development
+Bundled paper PDFs and converted paper dumps were removed from this repository during OSS handoff to keep clone size lean and avoid shipping large third-party artifacts. Research foundations remain documented in `docs/research/` with references.
 
-```bash
-# Run tests
-pytest
+## Project Status
 
-# Run specific tests
-pytest tests/search/
-
-# Run with coverage
-pytest --cov=futurnal
-
-# Type checking
-mypy src/futurnal
-```
-
-See [CLAUDE.md](CLAUDE.md) for development guidelines.
-
-## Roadmap
-
-| Phase | Name | Status | Description |
-|-------|------|--------|-------------|
-| 1 | Archivist | Released | Search, chat, knowledge graph |
-| 2 | Analyst | Planned | Proactive insights, patterns |
-| 3 | Guide | Planned | Causal inference, recommendations |
+| Phase | Name | Status | Focus |
+| --- | --- | --- | --- |
+| 1 | Archivist | In progress | Search, chat, PKG, connectors |
+| 2 | Analyst | Planned | Insights, community detection, pattern analysis |
+| 3 | Guide | Planned | Causal exploration and recommendations |
 
 ## Contributing
 
-Contributions welcome! Please read:
-1. [Development Guide](DEVELOPMENT_GUIDE.md)
-2. [Code of Conduct](CODE_OF_CONDUCT.md)
-3. Open an issue before large changes
+- Read `CONTRIBUTING.md`
+- Follow `CODE_OF_CONDUCT.md`
+- Report vulnerabilities via `SECURITY.md`
+
+## GitHub Pages
+
+A branded project site is included under `site/` and deployable via GitHub Pages workflow:
+
+- Source: `site/index.html`
+- Workflow: `.github/workflows/pages.yml`
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/futurnal/futurnal/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/futurnal/futurnal/discussions)
-
----
-
-**Futurnal**: Know yourself more.
+MIT. See `LICENSE`.

@@ -53,9 +53,9 @@ Futurnal transforms your scattered digital knowledge into a connected, searchabl
 
 ## Quick Links
 
-- [Privacy Policy](../PRIVACY_POLICY.md) - How we handle your data
+- [Privacy](../../PRIVACY.md) - How we handle your data
 - [API Reference](../api-reference/README.md) - For developers
-- [Changelog](../CHANGELOG.md) - Version history
+- [Changelog](../../CHANGELOG.md) - Version history
 
 ## Getting Help
 
@@ -65,5 +65,5 @@ Futurnal transforms your scattered digital knowledge into a connected, searchabl
 
 ---
 
-**Version**: 1.0.0 (Phase 1 - Archivist)
-**Research Foundation**: Built on 39 SOTA papers (2024-2025)
+**Version**: 1.x (Archivist track)
+**Research Foundation**: See `docs/research/`
