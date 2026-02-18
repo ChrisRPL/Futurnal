@@ -264,19 +264,40 @@ class KnowledgeGraphIndexer:
             content = self._extract_text_content(doc)
             metadata = doc.get("metadata", {})
 
+            # Extract original file timestamp (mtime from filesystem)
+            # This preserves the actual document creation/modification date
+            # rather than using the indexing time
+            original_modified_at = metadata.get("modified_at")
+            if original_modified_at:
+                # Validate ISO format - use it if valid, otherwise fall back
+                try:
+                    from datetime import datetime as dt
+                    dt.fromisoformat(original_modified_at.replace("Z", "+00:00"))
+                except (ValueError, AttributeError):
+                    original_modified_at = None
+
             def _create_document_node(tx):
-                # Create Document node
+                # Create Document node with original file timestamps
+                # This is critical for temporal correlation detection
                 tx.run(
                     """
                     MERGE (d:Document {id: $doc_id})
-                    ON CREATE SET d.created_at = datetime()
+                    ON CREATE SET d.created_at = CASE
+                        WHEN $original_modified_at IS NOT NULL
+                        THEN datetime($original_modified_at)
+                        ELSE datetime()
+                    END
                     SET d.content = $content,
                         d.source = $source,
                         d.source_type = $source_type,
                         d.path = $path,
                         d.title = $title,
                         d.indexed_at = datetime(),
-                        d.updated_at = datetime()
+                        d.updated_at = CASE
+                            WHEN $original_modified_at IS NOT NULL
+                            THEN datetime($original_modified_at)
+                            ELSE datetime()
+                        END
                     WITH d
                     MERGE (s:Source {name: $source})
                     SET s.updated_at = datetime()
@@ -289,6 +310,7 @@ class KnowledgeGraphIndexer:
                         "source_type": metadata.get("source_type", "document"),
                         "path": metadata.get("path", ""),
                         "title": metadata.get("title", metadata.get("filename", "")),
+                        "original_modified_at": original_modified_at,
                     },
                 )
 
