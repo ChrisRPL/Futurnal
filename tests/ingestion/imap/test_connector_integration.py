@@ -1,9 +1,6 @@
 """Integration tests for ImapEmailConnector full pipeline."""
 
-import asyncio
-from datetime import datetime
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from futurnal.ingestion.imap.connector import ImapEmailConnector
@@ -12,10 +9,22 @@ from futurnal.ingestion.imap.descriptor import (
     ImapMailboxDescriptor,
     MailboxRegistry,
 )
-from futurnal.ingestion.imap.email_parser import EmailAddress, EmailMessage
 from futurnal.ingestion.imap.sync_state import ImapSyncStateStore, SyncResult
 from futurnal.privacy.audit import AuditLogger
 from futurnal.privacy.consent import ConsentRegistry
+
+
+def _attach_mock_pool(
+    mock_pool: AsyncMock, descriptor: ImapMailboxDescriptor, connection: MagicMock
+) -> None:
+    """Configure a mocked async _get_connection_pool call with async acquire context."""
+    pool = MagicMock()
+    pool.descriptor = descriptor
+    acquire_context = MagicMock()
+    acquire_context.__aenter__ = AsyncMock(return_value=connection)
+    acquire_context.__aexit__ = AsyncMock(return_value=None)
+    pool.acquire.return_value = acquire_context
+    mock_pool.return_value = pool
 
 
 @pytest.fixture
@@ -130,7 +139,7 @@ This is a test email body.
         mock_client.capabilities.return_value = [b'IMAP4rev1']
 
         mock_connection.connect.return_value.__enter__.return_value = mock_client
-        mock_pool.return_value.acquire.return_value.__aenter__.return_value = mock_connection
+        _attach_mock_pool(mock_pool, descriptor, mock_connection)
 
         # Mock Unstructured.io partition
         with patch('futurnal.ingestion.imap.connector.partition') as mock_partition:
@@ -220,7 +229,7 @@ JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5k
         mock_client.capabilities.return_value = [b'IMAP4rev1']
 
         mock_connection.connect.return_value.__enter__.return_value = mock_client
-        mock_pool.return_value.acquire.return_value.__aenter__.return_value = mock_connection
+        _attach_mock_pool(mock_pool, descriptor, mock_connection)
 
         # Mock Unstructured.io partition
         with patch('futurnal.ingestion.imap.connector.partition') as mock_partition:
@@ -237,16 +246,18 @@ JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5k
                 mock_processor_class.return_value = mock_processor
 
                 # Mock attachment processing
-                mock_processor.process_attachment.return_value = asyncio.coroutine(
-                    lambda: [{
-                        "text": "PDF content",
-                        "type": "NarrativeText",
-                        "metadata": {"filename": "test.pdf"},
-                    }]
-                )()
+                mock_processor.process_attachment = AsyncMock(
+                    return_value=[
+                        {
+                            "text": "PDF content",
+                            "type": "NarrativeText",
+                            "metadata": {"filename": "test.pdf"},
+                        }
+                    ]
+                )
 
                 # Run sync
-                results = await connector.sync_mailbox(descriptor.id)
+                await connector.sync_mailbox(descriptor.id)
 
                 # Verify attachment was processed
                 assert element_sink.handle.called
@@ -306,7 +317,7 @@ Reply message.
         mock_client.capabilities.return_value = [b'IMAP4rev1']
 
         mock_connection.connect.return_value.__enter__.return_value = mock_client
-        mock_pool.return_value.acquire.return_value.__aenter__.return_value = mock_connection
+        _attach_mock_pool(mock_pool, descriptor, mock_connection)
 
         # Mock Unstructured.io
         with patch('futurnal.ingestion.imap.connector.partition') as mock_partition:
@@ -318,7 +329,7 @@ Reply message.
             mock_partition.return_value = [mock_element]
 
             # Run sync
-            results = await connector.sync_mailbox(descriptor.id)
+            await connector.sync_mailbox(descriptor.id)
 
             # Verify thread reconstructor received both messages
             assert connector._thread_reconstructor is not None
@@ -370,10 +381,10 @@ async def test_state_persistence(full_setup):
         mock_client.capabilities.return_value = [b'IMAP4rev1', b'CONDSTORE']
 
         mock_connection.connect.return_value.__enter__.return_value = mock_client
-        mock_pool.return_value.acquire.return_value.__aenter__.return_value = mock_connection
+        _attach_mock_pool(mock_pool, descriptor, mock_connection)
 
         # Mock element processing to avoid actual parsing
-        with patch.object(connector, 'process_email', new_callable=lambda: asyncio.coroutine(lambda *args, **kwargs: None)):
+        with patch.object(connector, "process_email", new=AsyncMock(return_value=None)):
             # Run sync
             await connector.sync_folder(descriptor.id, "INBOX")
 
@@ -390,7 +401,6 @@ async def test_privacy_enforcement(full_setup):
     """Test privacy enforcement throughout pipeline."""
     connector = full_setup["connector"]
     descriptor = full_setup["descriptor"]
-    audit_logger = full_setup["audit_logger"]
 
     # Revoke consent
     consent_registry = full_setup["consent_registry"]
@@ -415,7 +425,7 @@ def test_orchestrator_compatibility(full_setup):
     descriptor = full_setup["descriptor"]
 
     # Mock async operations
-    async def mock_sync():
+    async def mock_sync(mailbox_id, *, job_id=None):
         return {
             "INBOX": SyncResult(
                 new_messages=[1, 2, 3],
@@ -460,7 +470,7 @@ async def test_error_handling_and_quarantine(full_setup, workspace_dir):
         mock_client.capabilities.return_value = [b'IMAP4rev1']
 
         mock_connection.connect.return_value.__enter__.return_value = mock_client
-        mock_pool.return_value.acquire.return_value.__aenter__.return_value = mock_connection
+        _attach_mock_pool(mock_pool, descriptor, mock_connection)
 
         # Attempt to process - should quarantine
         try:
