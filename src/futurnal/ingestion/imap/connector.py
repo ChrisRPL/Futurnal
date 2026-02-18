@@ -293,6 +293,14 @@ class ImapEmailConnector:
 
         # Get or create connection pool
         pool = await self._get_connection_pool(descriptor)
+        # Test doubles may return pools without a concrete descriptor id.
+        # Sync engine requires a stable mailbox id for state-store keys.
+        pool_descriptor_id = getattr(getattr(pool, "descriptor", None), "id", None)
+        if not isinstance(pool_descriptor_id, str):
+            try:
+                pool.descriptor = descriptor
+            except Exception:  # pragma: no cover - defensive for atypical pool stubs
+                pass
 
         # Create sync engine
         # Note: consent_manager=None because consent is already checked at the connector level
