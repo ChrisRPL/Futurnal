@@ -130,7 +130,7 @@ export function InsightsPage() {
   const navigate = useNavigate();
 
   // Handle exploring a knowledge gap
-  const handleExploreGap = (prompt: string, gap: KnowledgeGap) => {
+  const handleExploreGap = (prompt: string, _gap: KnowledgeGap) => {
     // Navigate to chat with the exploration prompt
     navigate('/dashboard', { state: { chatPrompt: prompt } });
   };
@@ -238,7 +238,7 @@ export function InsightsPage() {
         </main>
 
         {/* Right sidebar - AgentFlow and Patterns */}
-        <aside className="w-96 border-l border-[var(--color-border)] p-4 space-y-4 hidden xl:block overflow-y-auto">
+        <aside className="w-80 border-l border-[var(--color-border)] p-4 space-y-4 hidden lg:block overflow-y-auto flex-shrink-0">
           <PatternVisualization />
           <AgentFlowPanel />
         </aside>
