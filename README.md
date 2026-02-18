@@ -5,9 +5,11 @@
 <p align="center"><strong>Privacy-first personal knowledge engine for understanding your digital life.</strong></p>
 
 <p align="center">
+  <a href="https://chrisrpl.github.io/Futurnal/"><img src="https://img.shields.io/badge/website-live-0b0b0b.svg" alt="Website"></a>
   <a href="https://github.com/ChrisRPL/Futurnal/actions/workflows/quality-gates.yml"><img src="https://img.shields.io/github/actions/workflow/status/ChrisRPL/Futurnal/quality-gates.yml?branch=main&label=quality%20gates" alt="Quality Gates"></a>
   <a href="https://github.com/ChrisRPL/Futurnal/actions/workflows/production-release.yml"><img src="https://img.shields.io/github/actions/workflow/status/ChrisRPL/Futurnal/production-release.yml?branch=main&label=release%20pipeline" alt="Release Pipeline"></a>
   <a href="https://github.com/ChrisRPL/Futurnal/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-0b0b0b.svg" alt="MIT License"></a>
+  <img src="https://img.shields.io/github/stars/ChrisRPL/Futurnal?style=social" alt="GitHub Stars">
   <img src="https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/desktop-Tauri%202-24C8DB?logo=tauri&logoColor=white" alt="Tauri 2">
 </p>
@@ -125,6 +127,7 @@ A branded project site is included under `site/` and deployable via GitHub Pages
 
 - Source: `site/index.html`
 - Workflow: `.github/workflows/pages.yml`
+- Live site: `https://chrisrpl.github.io/Futurnal/`
 
 ## License
 
