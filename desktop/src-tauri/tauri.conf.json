@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "Futurnal",
@@ -23,7 +24,23 @@
         "decorations": true,
         "transparent": false,
         "center": true,
-        "focus": true
+        "focus": true,
+        "visible": false
+      },
+      {
+        "label": "command-palette",
+        "title": "Futurnal Command Palette",
+        "width": 800,
+        "height": 600,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "center": true,
+        "resizable": false,
+        "skipTaskbar": true,
+        "focus": false,
+        "url": "index.html#/overlay/command-palette"
       }
     ],
     "security": {
