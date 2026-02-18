@@ -45,7 +45,7 @@ jobs:
             --ignore-glob='**/integration/**' \
             --ignore-glob='**/e2e/**' \
             --ignore-glob='**/performance/**' \
-            -m "not integration and not performance" \
+            -m "not integration and not performance and not github_integration and not github_performance and not github_load and not github_manual and not github_security" \
             --import-mode=importlib \
             -x
 
