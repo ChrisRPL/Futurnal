@@ -54,7 +54,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { useConnectors, useConsent, useGrantConsent, useRevokeConsent } from '@/hooks/useApi';
-import { formatDistanceToNow, format, addDays, isPast, differenceInDays } from 'date-fns';
+import { formatDistanceToNow, format, isPast, differenceInDays } from 'date-fns';
 
 const SOURCE_ICONS: Record<string, typeof Folder> = {
   local_folder: Folder,
