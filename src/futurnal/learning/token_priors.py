@@ -8,6 +8,14 @@ Research Foundation:
 - Training-Free GRPO (2510.08191v1): Experiential knowledge as token priors
   instead of parameter updates
 - TOTAL (2510.07499v1): Thought templates with textual gradients
+- A-MEM (arxiv:2502.12110): Zettelkasten-inspired self-organizing memory
+  - This aligns with A-MEM's concept of dynamic memory organization
+  - TokenPriorStore acts as "Semantic Memory" in H-MEM terminology
+
+Memory Architecture Alignment (H-MEM arxiv:2507.22925):
+- TokenPriorStore = Semantic Memory tier (long-term consolidated patterns)
+- Stores learned patterns that persist across sessions
+- Max 100 priors per category (entity, relation, temporal)
 
 CRITICAL CONSTRAINT: All knowledge stored as TEXT (natural language), NOT
 numerical weights. Ghost model MUST remain frozen.
