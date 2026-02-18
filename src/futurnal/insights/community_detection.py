@@ -276,7 +276,7 @@ class PKGCommunityDetector:
     ) -> Tuple[List[str], List[Tuple[str, str]]]:
         """Extract nodes and edges from PKG.
 
-        Handles different graph formats (Neo4j, NetworkX, dict).
+        Handles different graph formats (Neo4j, NetworkX, dict, PKGDatabaseManager).
         """
         nodes: List[str] = []
         edges: List[Tuple[str, str]] = []
@@ -310,6 +310,50 @@ class PKGCommunityDetector:
                 ]
             except Exception as e:
                 logger.warning(f"Error extracting graph structure: {e}")
+
+        elif hasattr(pkg_graph, "get_driver") or hasattr(pkg_graph, "_driver"):
+            # Neo4j PKGDatabaseManager - query graph directly
+            # This enables community detection on the actual knowledge graph
+            try:
+                driver = None
+                if hasattr(pkg_graph, "get_driver"):
+                    driver = pkg_graph.get_driver()
+                elif hasattr(pkg_graph, "_driver"):
+                    driver = pkg_graph._driver
+
+                if driver is not None:
+                    with driver.session() as session:
+                        # Get all document and entity nodes
+                        nodes_result = session.run("""
+                            MATCH (n)
+                            WHERE n:Document OR n:Entity
+                            RETURN n.id AS id, labels(n) AS labels
+                        """)
+                        for record in nodes_result:
+                            node_id = record["id"]
+                            if node_id:
+                                nodes.append(node_id)
+
+                        # Get all relationships between nodes
+                        # Include MENTIONS (doc->entity), RELATED_TO (doc->doc),
+                        # and any entity-to-entity relationships
+                        edges_result = session.run("""
+                            MATCH (a)-[r]->(b)
+                            WHERE (a:Document OR a:Entity) AND (b:Document OR b:Entity)
+                            AND a.id IS NOT NULL AND b.id IS NOT NULL
+                            RETURN DISTINCT a.id AS source, b.id AS target, type(r) AS rel_type
+                        """)
+                        for record in edges_result:
+                            source = record["source"]
+                            target = record["target"]
+                            if source and target:
+                                edges.append((source, target))
+
+                    logger.info(
+                        f"Extracted graph from Neo4j: {len(nodes)} nodes, {len(edges)} edges"
+                    )
+            except Exception as e:
+                logger.warning(f"Error extracting graph from Neo4j: {e}")
 
         return nodes, edges
 
@@ -497,6 +541,7 @@ class PKGCommunityDetector:
         node_id: str,
     ) -> str:
         """Extract title for a node."""
+        # Try custom interface first
         if hasattr(pkg_graph, "get_node"):
             try:
                 node = pkg_graph.get_node(node_id)
@@ -506,6 +551,31 @@ class PKGCommunityDetector:
                     return node.name
             except Exception:
                 pass
+
+        # Try Neo4j PKGDatabaseManager
+        if hasattr(pkg_graph, "get_driver") or hasattr(pkg_graph, "_driver"):
+            try:
+                driver = None
+                if hasattr(pkg_graph, "get_driver"):
+                    driver = pkg_graph.get_driver()
+                elif hasattr(pkg_graph, "_driver"):
+                    driver = pkg_graph._driver
+
+                if driver is not None:
+                    with driver.session() as session:
+                        result = session.run("""
+                            MATCH (n)
+                            WHERE n.id = $node_id
+                            RETURN n.title AS title, n.name AS name
+                            LIMIT 1
+                        """, {"node_id": node_id})
+                        record = result.single()
+                        if record:
+                            title = record.get("title") or record.get("name")
+                            if title:
+                                return title
+            except Exception as e:
+                logger.debug(f"Could not get title for {node_id}: {e}")
 
         return node_id
 
