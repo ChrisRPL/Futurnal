@@ -113,6 +113,24 @@ body {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
+/* Transparent overlay mode for command palette window */
+html.overlay-transparent,
+html.overlay-transparent body,
+html.overlay-transparent #root {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+html.overlay-transparent body {
+  min-height: 100vh;
+}
+
+/* Ensure the root div is also transparent in overlay mode */
+html.overlay-transparent #root {
+  height: 100vh;
+  width: 100vw;
+}
+
 /* ===== SCROLLBAR STYLING ===== */
 ::-webkit-scrollbar {
   width: 6px;
