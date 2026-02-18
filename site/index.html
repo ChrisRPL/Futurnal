@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Futurnal | Privacy-First Knowledge Engine</title>
+    <meta
+      name="description"
+      content="Futurnal is a privacy-first personal knowledge engine combining local ingestion, graph memory, and hybrid search."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Source+Sans+3:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-glow" aria-hidden="true"></div>
+    <header class="site-header">
+      <a class="logo-wrap" href="https://github.com/ChrisRPL/Futurnal">
+        <img src="./assets/logo_text_horizontal.png" alt="Futurnal" />
+      </a>
+      <nav class="site-nav">
+        <a href="#about">About</a>
+        <a href="#features">Features</a>
+        <a href="#architecture">Architecture</a>
+        <a href="https://github.com/ChrisRPL/Futurnal">GitHub</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero reveal">
+        <img src="./assets/logo.png" alt="Futurnal mark" class="hero-mark" />
+        <p class="kicker">Privacy-first personal intelligence</p>
+        <h1>Know your data. Understand your patterns.</h1>
+        <p>
+          Futurnal transforms notes, email, code, and files into a local
+          personal knowledge graph with hybrid search and grounded AI chat.
+        </p>
+        <div class="hero-actions">
+          <a class="button primary" href="https://github.com/ChrisRPL/Futurnal"
+            >Open Repository</a
+          >
+          <a
+            class="button ghost"
+            href="https://github.com/ChrisRPL/Futurnal/blob/main/README.md"
+            >Read Docs</a
+          >
+        </div>
+      </section>
+
+      <section id="about" class="content-card reveal">
+        <h2>What Futurnal is</h2>
+        <p>
+          A local-first engine for personal knowledge: ingestion pipelines,
+          graph memory, embeddings, temporal reasoning, and an interface for
+          search, chat, and insights.
+        </p>
+      </section>
+
+      <section id="features" class="grid reveal">
+        <article class="tile">
+          <h3>Hybrid Search</h3>
+          <p>Semantic, graph, and temporal retrieval in one query flow.</p>
+        </article>
+        <article class="tile">
+          <h3>Grounded Chat</h3>
+          <p>Responses constrained to your indexed corpus and graph context.</p>
+        </article>
+        <article class="tile">
+          <h3>Connectors</h3>
+          <p>Obsidian, IMAP, GitHub, and local files.</p>
+        </article>
+        <article class="tile">
+          <h3>Privacy</h3>
+          <p>Local-first by default with explicit consent boundaries.</p>
+        </article>
+      </section>
+
+      <section id="architecture" class="content-card reveal">
+        <h2>Architecture</h2>
+        <pre>Sources -> Ingestion -> PKG + Embeddings -> Hybrid Search -> Chat/UI</pre>
+        <p>
+          Explore details in
+          <a
+            href="https://github.com/ChrisRPL/Futurnal/blob/main/docs/architecture/system-architecture.md"
+            >system architecture docs</a
+          >.
+        </p>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Futurnal</span>
+      <span>MIT Licensed</span>
+    </footer>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
