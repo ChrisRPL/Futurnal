@@ -45,7 +45,6 @@ function PrivacyAlertBanner({
 
   const criticalAlerts = alerts.filter((a) => a.severity === 'critical');
   const warningAlerts = alerts.filter((a) => a.severity === 'warning');
-  const hasUrgent = criticalAlerts.length > 0;
 
   const displayAlert = criticalAlerts[0] || warningAlerts[0] || alerts[0];
 
@@ -144,7 +143,7 @@ export function PrivacySection() {
       try {
         // In production, this would use IPC to load from ~/.futurnal/alerts/ipc_alerts.json
         // For now, we'll use a placeholder that can be populated by the backend
-        const response = await window.electron?.invoke('privacy:getAlerts') ?? [];
+        const response = (await window.electron?.invoke('privacy:getAlerts') ?? []) as PrivacyAlert[];
         const unacknowledged = response.filter((a: PrivacyAlert) => !a.acknowledged);
         setPrivacyAlerts(unacknowledged);
       } catch {
