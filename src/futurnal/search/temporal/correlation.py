@@ -8,6 +8,11 @@ Detects temporal correlations between event types:
 Production Plan Reference:
 docs/phase-1/hybrid-search-api-production-plan/01-temporal-query-engine.md
 
+Phase 2.5 Research Integration:
+- DOTS (arxiv:2510.24639): Causal ordering before structure learning (F1 0.81 vs 0.63)
+- DOTSCausalOrdering pre-filters correlations to remove implausible causal directions
+- 28% accuracy improvement in causal discovery
+
 Option B Compliance:
 - Critical for Phase 2 correlation detection
 - Results flagged as causal candidates for Phase 3
@@ -33,6 +38,11 @@ from futurnal.search.temporal.statistics import (
     StatisticalCorrelationValidator,
     StatisticalSignificanceResult,
 )
+from futurnal.search.temporal.dots_ordering import (
+    DOTSCausalOrdering,
+    CausalOrder,
+)
+from futurnal.search.temporal.unified_source import UnifiedTemporalSource, TemporalItem
 
 if TYPE_CHECKING:
     from futurnal.pkg.queries.temporal import TemporalGraphQueries
@@ -75,6 +85,8 @@ class TemporalCorrelationDetector:
         config: Optional[TemporalSearchConfig] = None,
         statistical_validation: bool = True,
         significance_threshold: float = 0.05,
+        dots_ordering: bool = True,
+        dots_precedence_threshold: float = 0.6,
     ):
         """Initialize the correlation detector.
 
@@ -83,15 +95,26 @@ class TemporalCorrelationDetector:
             config: Optional configuration
             statistical_validation: Enable rigorous statistical testing
             significance_threshold: P-value threshold for significance
+            dots_ordering: Enable DOTS causal ordering (28% accuracy boost)
+            dots_precedence_threshold: Threshold for DOTS precedence
         """
         self._pkg = pkg_queries
         self._config = config or TemporalSearchConfig()
         self._statistical_validation = statistical_validation
+        self._dots_ordering = dots_ordering
 
         # Statistical validator for rigorous testing (AGI Phase 1 enhancement)
         self._validator = StatisticalCorrelationValidator(
             significance_threshold=significance_threshold,
         ) if statistical_validation else None
+
+        # DOTS causal ordering (Phase 2.5: arxiv:2510.24639)
+        # Establishes causal ordering BEFORE structure learning for 28% accuracy boost
+        self._dots = DOTSCausalOrdering(
+            min_observations=self._config.correlation_min_occurrences,
+            precedence_threshold=dots_precedence_threshold,
+            max_lag_hours=self._config.default_max_gap_days * 24,
+        ) if dots_ordering else None
 
     def detect_correlation(
         self,
@@ -372,11 +395,16 @@ class TemporalCorrelationDetector:
         max_gap: Optional[timedelta] = None,
         apply_multiple_testing_correction: bool = True,
         correction_method: str = "bonferroni",
+        include_documents: bool = True,
     ) -> List[TemporalCorrelationResult]:
         """Scan for all significant correlations in time range.
 
-        Analyzes all pairs of event types to find temporal correlations.
+        Analyzes all pairs of event/document types to find temporal correlations.
         Useful for Phase 2 automated correlation discovery.
+
+        Phase 2.5 P0 Fix: Now uses UnifiedTemporalSource to analyze both
+        Event nodes AND Document nodes, enabling insights from documents
+        when no Event nodes exist.
 
         AGI Phase 1 Enhancement:
         - Applies Bonferroni or FDR correction for multiple hypothesis testing
@@ -389,6 +417,7 @@ class TemporalCorrelationDetector:
             max_gap: Maximum gap for correlation
             apply_multiple_testing_correction: Apply Bonferroni/FDR correction
             correction_method: "bonferroni" (conservative) or "fdr" (less conservative)
+            include_documents: Include Document nodes in analysis (default True)
 
         Returns:
             List of TemporalCorrelationResult for all found correlations,
@@ -413,24 +442,32 @@ class TemporalCorrelationDetector:
             f"Scanning for correlations in {start_time} to {end_time}"
         )
 
-        # Get all events in range
-        all_events = self._pkg.query_events_in_timerange(
+        # Phase 2.5 P0 Fix: Use UnifiedTemporalSource to get events AND documents
+        unified_source = UnifiedTemporalSource(self._pkg)
+        all_items = unified_source.get_temporal_items(
             start=start_time,
             end=end_time,
+            include_events=True,
+            include_documents=include_documents,
         )
 
-        # Group by event type
-        events_by_type: Dict[str, List[EventNode]] = defaultdict(list)
-        for event in all_events:
-            if event.event_type:
-                events_by_type[event.event_type].append(event)
+        logger.info(
+            f"UnifiedTemporalSource returned {len(all_items)} items "
+            f"(events + documents)"
+        )
+
+        # Group by category (event_type or doc_type)
+        items_by_category: Dict[str, List[TemporalItem]] = defaultdict(list)
+        for item in all_items:
+            if item.category:
+                items_by_category[item.category].append(item)
 
         # Sort each group by timestamp
-        for event_type in events_by_type:
-            events_by_type[event_type].sort(key=lambda e: e.timestamp)
+        for category in items_by_category:
+            items_by_category[category].sort(key=lambda i: i.timestamp)
 
-        event_types = list(events_by_type.keys())
-        logger.debug(f"Found {len(event_types)} distinct event types")
+        categories = list(items_by_category.keys())
+        logger.debug(f"Found {len(categories)} distinct categories (event types + doc types)")
 
         # Calculate time range for statistical validation
         time_range_days = (end_time - start_time).days
@@ -438,12 +475,12 @@ class TemporalCorrelationDetector:
         # Check all pairs
         correlations: List[TemporalCorrelationResult] = []
 
-        for i, type_a in enumerate(event_types):
-            for type_b in event_types[i + 1:]:
+        for i, type_a in enumerate(categories):
+            for type_b in categories[i + 1:]:
                 # Check A -> B
-                result_ab = self._check_pair_correlation(
-                    events_a=events_by_type[type_a],
-                    events_b=events_by_type[type_b],
+                result_ab = self._check_pair_correlation_items(
+                    items_a=items_by_category[type_a],
+                    items_b=items_by_category[type_b],
                     type_a=type_a,
                     type_b=type_b,
                     max_gap=max_gap,
@@ -454,9 +491,9 @@ class TemporalCorrelationDetector:
                     correlations.append(result_ab)
 
                 # Check B -> A
-                result_ba = self._check_pair_correlation(
-                    events_a=events_by_type[type_b],
-                    events_b=events_by_type[type_a],
+                result_ba = self._check_pair_correlation_items(
+                    items_a=items_by_category[type_b],
+                    items_b=items_by_category[type_a],
                     type_a=type_b,
                     type_b=type_a,
                     max_gap=max_gap,
@@ -465,6 +502,40 @@ class TemporalCorrelationDetector:
                 )
                 if result_ba.correlation_found:
                     correlations.append(result_ba)
+
+        # Phase 2.5: Apply DOTS causal ordering pre-filter (28% accuracy boost)
+        # This removes correlations with implausible causal directions
+        if self._dots and correlations:
+            # Convert items to DOTS format for causal ordering computation
+            dots_events = []
+            for category, item_list in items_by_category.items():
+                for item in item_list:
+                    dots_events.append({
+                        "event_type": category,
+                        "timestamp": self._normalize_datetime(item.timestamp).isoformat(),
+                    })
+
+            if len(dots_events) >= self._dots.min_observations:
+                # Compute causal ordering from temporal precedence
+                causal_order = self._dots.compute_causal_order(dots_events)
+
+                if causal_order.ordered_events:
+                    # Filter correlations by causal order
+                    pre_filter_count = len(correlations)
+                    correlations = self._dots.filter_by_causal_order(
+                        correlations=[
+                            {"event_type_a": c.event_type_a, "event_type_b": c.event_type_b, "_corr": c}
+                            for c in correlations
+                        ],
+                        order=causal_order,
+                    )
+                    # Extract back the TemporalCorrelationResult objects
+                    correlations = [c["_corr"] for c in correlations]
+
+                    logger.info(
+                        f"DOTS ordering: {pre_filter_count} -> {len(correlations)} correlations "
+                        f"(filtered {pre_filter_count - len(correlations)} implausible directions)"
+                    )
 
         # Apply multiple testing correction (AGI Phase 1)
         if apply_multiple_testing_correction and self._validator and correlations:
@@ -619,6 +690,134 @@ class TemporalCorrelationDetector:
         if dt.tzinfo is not None:
             return dt.replace(tzinfo=None)
         return dt
+
+    # -------------------------------------------------------------------------
+    # TemporalItem-based methods (Phase 2.5 P0 Fix)
+    # -------------------------------------------------------------------------
+
+    def _check_pair_correlation_items(
+        self,
+        items_a: List[TemporalItem],
+        items_b: List[TemporalItem],
+        type_a: str,
+        type_b: str,
+        max_gap: timedelta,
+        min_occurrences: int,
+        time_range_days: float = 365.0,
+    ) -> TemporalCorrelationResult:
+        """Check correlation between a specific pair of item categories.
+
+        Works with TemporalItem (unified events + documents).
+        """
+        co_occurrences = self._find_co_occurrences_items(
+            items_a=items_a,
+            items_b=items_b,
+            max_gap=max_gap,
+        )
+
+        if len(co_occurrences) < min_occurrences:
+            return TemporalCorrelationResult(
+                correlation_found=False,
+                event_type_a=type_a,
+                event_type_b=type_b,
+                co_occurrences=len(co_occurrences),
+            )
+
+        stats = self._calculate_correlation_stats(co_occurrences)
+
+        # Statistical validation (AGI Phase 1)
+        stat_result: Optional[StatisticalSignificanceResult] = None
+        is_statistically_significant = False
+
+        if self._validator and len(co_occurrences) >= 3:
+            gap_values = [gap for _, _, gap in co_occurrences]
+            stat_result = self._validator.validate_correlation(
+                observed_cooccurrences=len(co_occurrences),
+                total_events_a=len(items_a),
+                total_events_b=len(items_b),
+                time_range_days=time_range_days,
+                max_gap_days=max_gap.days,
+                gap_values=gap_values,
+            )
+            is_statistically_significant = stat_result.is_significant
+
+        is_causal_candidate = self._is_causal_candidate(
+            len(co_occurrences), stats["consistency"]
+        )
+
+        # Only flag as causal candidate if statistically significant
+        if self._statistical_validation and stat_result:
+            is_causal_candidate = is_causal_candidate and is_statistically_significant
+
+        return TemporalCorrelationResult(
+            correlation_found=True,
+            event_type_a=type_a,
+            event_type_b=type_b,
+            co_occurrences=len(co_occurrences),
+            avg_gap_days=stats["avg_gap_days"],
+            min_gap_days=stats["min_gap_days"],
+            max_gap_days=stats["max_gap_days"],
+            std_gap_days=stats["std_gap_days"],
+            correlation_strength=stats["strength"],
+            is_causal_candidate=is_causal_candidate,
+            examples=co_occurrences[:5],
+            # Statistical significance fields
+            p_value=stat_result.p_value if stat_result else None,
+            statistical_test=stat_result.test_used if stat_result else None,
+            is_statistically_significant=is_statistically_significant,
+            confidence_interval_95=stat_result.confidence_interval_95 if stat_result else None,
+            effect_size=stat_result.effect_size if stat_result else None,
+            effect_interpretation=stat_result.effect_interpretation if stat_result else None,
+            expected_by_chance=stat_result.expected_by_chance if stat_result else None,
+        )
+
+    def _find_co_occurrences_items(
+        self,
+        items_a: List[TemporalItem],
+        items_b: List[TemporalItem],
+        max_gap: timedelta,
+    ) -> List[Tuple[str, str, float]]:
+        """Find co-occurrences where item A precedes item B within max_gap.
+
+        Works with TemporalItem (unified events + documents).
+        Returns list of (item_a_id, item_b_id, gap_days) tuples.
+        """
+        co_occurrences: List[Tuple[str, str, float]] = []
+        used_b: Set[str] = set()
+
+        b_idx = 0
+        for item_a in items_a:
+            a_time = self._normalize_datetime(item_a.timestamp)
+
+            # Move b_idx forward to items after a_time
+            while b_idx < len(items_b):
+                b_time = self._normalize_datetime(items_b[b_idx].timestamp)
+                if b_time > a_time:
+                    break
+                b_idx += 1
+
+            # Check B items starting from b_idx
+            for i in range(b_idx, len(items_b)):
+                item_b = items_b[i]
+
+                # Skip if already matched
+                if item_b.item_id in used_b:
+                    continue
+
+                b_time = self._normalize_datetime(item_b.timestamp)
+                gap = b_time - a_time
+
+                # Check if within max_gap
+                if gap > max_gap:
+                    break  # No more valid B items for this A
+
+                if gap.total_seconds() > 0:  # Must be strictly after
+                    gap_days = gap.total_seconds() / 86400.0
+                    co_occurrences.append((item_a.item_id, item_b.item_id, gap_days))
+                    used_b.add(item_b.item_id)
+                    break  # Found match for this A, move to next A
+
+        return co_occurrences
 
     def get_correlation_summary(
         self,
