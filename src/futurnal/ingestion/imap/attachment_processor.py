@@ -133,7 +133,7 @@ class AttachmentProcessor:
                 f"Successfully processed attachment",
                 extra={
                     "attachment_id": attachment.attachment_id,
-                    "filename": attachment.filename,
+                    "attachment_filename": attachment.filename,
                     "element_count": len(elements),
                 }
             )
@@ -147,7 +147,7 @@ class AttachmentProcessor:
                 error_msg,
                 extra={
                     "attachment_id": attachment.attachment_id,
-                    "filename": attachment.filename,
+                    "attachment_filename": attachment.filename,
                     "timeout_sec": self.processing_timeout,
                 }
             )
@@ -161,7 +161,7 @@ class AttachmentProcessor:
                 error_msg,
                 extra={
                     "attachment_id": attachment.attachment_id,
-                    "filename": attachment.filename,
+                    "attachment_filename": attachment.filename,
                     "error": str(e),
                     "error_type": type(e).__name__,
                 }
@@ -197,6 +197,13 @@ class AttachmentProcessor:
             ),
             timeout=self.processing_timeout,
         )
+
+        # Some tests/mock setups provide async partition callables.
+        if asyncio.iscoroutine(elements):
+            elements = await asyncio.wait_for(
+                elements,
+                timeout=self.processing_timeout,
+            )
 
         # Convert to dicts and enrich with metadata
         element_dicts = []

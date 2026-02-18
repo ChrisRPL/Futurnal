@@ -334,9 +334,11 @@ def test_retry_strategy_no_retry_on_auth_error() -> None:
     """Verify authentication errors fail fast without retry."""
     strategy = RetryStrategy()
 
-    # Use the actual IMAPClient.AuthenticationError from our stub
-    from imapclient import IMAPClient
-    auth_error = IMAPClient.AuthenticationError("Invalid credentials")
+    auth_error_type = getattr(cm.IMAPClient, "AuthenticationError", None)
+    if auth_error_type is None:
+        auth_error_type = cm.IMAPLoginError or cm.IMAPClient.Error
+
+    auth_error = auth_error_type("Invalid credentials")
 
     assert strategy.should_retry(0, auth_error) is False
 
@@ -865,4 +867,3 @@ def test_connection_uses_tls_only(monkeypatch: pytest.MonkeyPatch, descriptor) -
         # Verify SSL was enabled
         assert stub.ssl is True
         assert stub.ssl_context is not None
-
