@@ -26,6 +26,7 @@ interface TimelineAxisProps {
  * Entity type display labels
  */
 const ENTITY_TYPE_LABELS: Record<EntityType, string> = {
+  Entity: 'Entities',
   Source: 'Sources',
   Mailbox: 'Mailboxes',
   Document: 'Documents',
