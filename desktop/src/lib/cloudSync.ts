@@ -20,10 +20,8 @@ import {
   setDoc,
   serverTimestamp,
   query,
-  orderBy,
   limit,
   Timestamp,
-  type DocumentData,
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
 import { graphApi } from './api';
@@ -387,10 +385,8 @@ export async function deleteAllCloudData(): Promise<number> {
 export async function getCloudSyncStatus(): Promise<SyncStatusDoc | null> {
   try {
     const userId = getCurrentUserId();
-    const statusRef = getSyncStatusDoc(userId);
-    const statusSnap = await getDocs(query(collection(statusRef.parent, statusRef.id)));
 
-    // Actually get the single document
+    // Get the single status document
     const docRef = doc(db, `users/${userId}/sync_status/current`);
     const { getDoc } = await import('firebase/firestore');
     const docSnap = await getDoc(docRef);
