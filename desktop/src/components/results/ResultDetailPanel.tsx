@@ -26,6 +26,7 @@ import {
   Inbox,
   Database,
   Building,
+  type LucideIcon,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { cn, highlightTerms, formatTimestampRelative } from '@/lib/utils';
@@ -79,28 +80,14 @@ export function ResultDetailPanel({
   const [copySuccess, setCopySuccess] = useState(false);
 
   // Defensive icon lookup with fallback
-  const EntityIcon = (() => {
-    if (!result.entity_type) return FileText;
-    const icon = ENTITY_ICONS[result.entity_type];
-    if (!icon) {
-      console.warn('[ResultDetailPanel] Unknown entity_type:', result.entity_type);
-      return FileText;
-    }
-    return icon;
-  })();
-
-  const SourceIcon = (() => {
-    if (!result.source_type) return FileText;
-    const icon = SOURCE_ICONS[result.source_type];
-    if (!icon) {
-      console.warn('[ResultDetailPanel] Unknown source_type:', result.source_type);
-      return FileText;
-    }
-    return icon;
-  })();
+  const EntityIcon: LucideIcon = (result.entity_type && ENTITY_ICONS[result.entity_type]) || FileText;
+  const SourceIcon: LucideIcon = (result.source_type && SOURCE_ICONS[result.source_type]) || FileText;
 
   // Highlight query terms in content
   const highlightedContent = highlightTerms(result.content, query);
+
+  // Entity type label for display (explicitly typed to avoid TS inference issues)
+  const entityTypeLabel: string = result.entity_type ?? 'Unknown';
 
   // Handle copy action
   const handleCopy = useCallback(async () => {
@@ -152,15 +139,13 @@ export function ResultDetailPanel({
           {/* Badges Row */}
           <div className="flex items-center gap-2 flex-wrap mb-2">
             {/* Entity Type Badge */}
-            {result.entity_type && (
-              <span className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-white/10 text-white/80 rounded">
-                <EntityIcon className="h-3.5 w-3.5" />
-                {result.entity_type}
-              </span>
-            )}
+            <span className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-white/10 text-white/80 rounded">
+              <EntityIcon className="h-3.5 w-3.5" />
+              {entityTypeLabel}
+            </span>
 
             {/* Graph Enhanced Badge - shown for GraphRAG results */}
-            {result.metadata?.graph_enhanced && (
+            {Boolean(result.metadata?.graph_enhanced) && (
               <span className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-blue-500/20 text-blue-300 rounded border border-blue-500/30">
                 <Database className="h-3.5 w-3.5" />
                 Graph Enhanced
