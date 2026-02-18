@@ -17,15 +17,24 @@ use tauri::command;
 // ============================================================================
 
 /// Insight type classification.
+/// Must match Python InsightType enum in emergent_insights.py
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum InsightType {
+    // Core types
     Correlation,
     CausalHypothesis,
     Pattern,
     Anomaly,
     Trend,
     KnowledgeGap,
+    // Extended types from Python backend
+    TemporalCorrelation,
+    BehavioralPattern,
+    AspirationMisalignment,
+    ProductivityPattern,
+    WeeklyRhythm,
+    SequencePattern,
 }
 
 /// Insight priority level.
