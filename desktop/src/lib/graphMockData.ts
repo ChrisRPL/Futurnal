@@ -12,6 +12,13 @@ import type { GraphData, GraphNode, GraphLink, EntityType } from '@/types/api';
  * Sample labels for each entity type to create realistic-looking nodes.
  */
 const SAMPLE_LABELS: Record<EntityType, string[]> = {
+  Entity: [
+    'Generic Entity',
+    'Abstract Item',
+    'Unknown Object',
+    'Unclassified Node',
+    'Misc Item',
+  ],
   Event: [
     'Project Kickoff Meeting',
     'Code Review Session',
@@ -190,6 +197,7 @@ function randomTimestamp(daysBack: number = 90): string {
 export function generateMockGraphData(nodeCount: number = 50): GraphData {
   // Track node counts per type for label generation
   const typeCounts: Record<EntityType, number> = {
+    Entity: 0,
     Event: 0,
     Document: 0,
     Person: 0,
