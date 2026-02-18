@@ -384,9 +384,16 @@ class HybridSearchAPI:
                             )
                         return results
 
-            # Standard routing
-            if self.router:
-                # Use route_query which returns QueryPlan
+            # Phase 2.5 P0 Fix: Check relationship intent FIRST (before router)
+            # Relationship queries have explicit patterns that LLM routing may miss
+            simple_intent = self._detect_simple_intent(query)
+            if simple_intent == "relationship":
+                logger.info(f"Relationship query detected, bypassing router")
+                intent_type = "relationship"
+                self.last_strategy = intent_type
+                results = await self._relationship_search(query, top_k, filters)
+            elif self.router:
+                # Standard routing for non-relationship queries
                 plan = self.router.route_query(query)
                 intent_type = plan.intent.value if plan and plan.intent else "exploratory"
                 self.last_strategy = intent_type
@@ -395,7 +402,7 @@ class HybridSearchAPI:
                 results = await self._execute_by_intent(query, plan, top_k, filters)
             else:
                 # Fallback with simple intent detection
-                intent_type = self._detect_simple_intent(query)
+                intent_type = simple_intent  # Reuse already-detected intent
                 self.last_strategy = intent_type
                 results = await self._execute_by_intent_type(query, intent_type, top_k, filters)
 
@@ -573,8 +580,35 @@ class HybridSearchAPI:
         }
 
     def _detect_simple_intent(self, query: str) -> str:
-        """Simple rule-based intent detection fallback."""
+        """Simple rule-based intent detection fallback.
+
+        Phase 2.5 P0 Fix: Added relationship intent detection for
+        "How is X connected to Y?" queries.
+        """
+        import re
+
         query_lower = query.lower()
+
+        # Phase 2.5 P0 Fix: Check relationship patterns FIRST
+        # These are queries asking about connections between entities
+        # IMPORTANT: Patterns must handle various phrasings:
+        # - "How is X connected to Y?"
+        # - "How are X related with Y?"  (note: "with" not just "to")
+        # - "How my X are related to Y?" (note: "my" before subject)
+        relationship_patterns = [
+            r'\bconnected\s+(to|with)\b',         # "connected to" or "connected with"
+            r'\brelated\s+(to|with)\b',           # "related to" or "related with"
+            r'\blinks?\s+(between|to)\b',
+            r'\brelationship\s+(between|with)\b',
+            r'\bhow\s+.*\s+(connected|related)\b',  # More flexible: "how ... connected/related"
+            r'\bwhat\s+(connects|links)\b',
+            r'\bare\s+.*\s+related\b',            # "are X related" anywhere
+            r'\bare\s+.*\s+connected\b',          # "are X connected" anywhere
+        ]
+
+        for pattern in relationship_patterns:
+            if re.search(pattern, query_lower):
+                return "relationship"
 
         if any(w in query_lower for w in ["when", "yesterday", "last week", "today", "between"]):
             return "temporal"
@@ -586,6 +620,72 @@ class HybridSearchAPI:
             return "factual"
         else:
             return "exploratory"
+
+    def _extract_entities_from_query(self, query: str) -> List[str]:
+        """Extract entity/document names from relationship query.
+
+        Phase 2.5 P0 Fix: Extracts the two entities being asked about
+        in a relationship query.
+
+        Examples:
+            "How are MMM subtasks connected to Literature papers?" -> ["MMM subtasks", "Literature papers"]
+            "How my subtasks from MMM project are related with literature papers?" -> ["subtasks from MMM project", "literature papers"]
+        """
+        import re
+
+        query_lower = query.lower()
+        entities = []
+
+        # Pattern 1: "How is/are X connected/related to/with Y"
+        pattern = r'how\s+(?:is|are)\s+(.+?)\s+(?:connected|related)\s+(?:to|with)\s+(.+?)(?:\?|$)'
+        match = re.search(pattern, query_lower)
+        if match:
+            entities = [match.group(1).strip(), match.group(2).strip()]
+            return self._clean_entity_names(entities)
+
+        # Pattern 2: "How my X are connected/related to/with Y" (handles "my" before subject)
+        pattern = r'how\s+(?:my|the)?\s*(.+?)\s+(?:is|are)\s+(?:connected|related)\s+(?:to|with)\s+(.+?)(?:\?|$)'
+        match = re.search(pattern, query_lower)
+        if match:
+            entities = [match.group(1).strip(), match.group(2).strip()]
+            return self._clean_entity_names(entities)
+
+        # Pattern 3: "relationship between X and Y"
+        pattern = r'relationship\s+between\s+(.+?)\s+and\s+(.+?)(?:\?|$)'
+        match = re.search(pattern, query_lower)
+        if match:
+            return self._clean_entity_names([match.group(1).strip(), match.group(2).strip()])
+
+        # Pattern 4: "X connected/related to/with Y" (without "how")
+        pattern = r'(.+?)\s+(?:connected|related)\s+(?:to|with)\s+(.+?)(?:\?|$)'
+        match = re.search(pattern, query_lower)
+        if match:
+            return self._clean_entity_names([match.group(1).strip(), match.group(2).strip()])
+
+        # Fallback: split on "to" or "with"
+        for separator in [" to ", " with "]:
+            if separator in query_lower:
+                parts = query_lower.split(separator, 1)
+                if len(parts) == 2:
+                    # Extract last noun phrase from first part
+                    first_words = parts[0].split()
+                    first = first_words[-3:] if len(first_words) >= 3 else first_words
+                    second = parts[1].split()[:3]  # First 3 words after separator
+                    return self._clean_entity_names([" ".join(first), " ".join(second).rstrip("?")])
+
+        return entities
+
+    def _clean_entity_names(self, entities: List[str]) -> List[str]:
+        """Clean up extracted entity names by removing common prefixes."""
+        import re
+        cleaned = []
+        for entity in entities:
+            # Remove common prefixes
+            entity = re.sub(r'^(my|the|a|an|your|their)\s+', '', entity)
+            # Remove trailing punctuation
+            entity = entity.rstrip('?.!')
+            cleaned.append(entity.strip())
+        return cleaned
 
     async def _graphrag_search(
         self,
@@ -683,6 +783,9 @@ class HybridSearchAPI:
             return await self._temporal_search(query, top_k, filters)
         elif intent_type == "causal":
             return await self._causal_search(query, top_k, filters)
+        elif intent_type == "relationship":
+            # Phase 2.5 P0 Fix: Relationship query handling
+            return await self._relationship_search(query, top_k, filters)
         elif intent_type == "code":
             self.last_embedding_model = "codebert"
             return await self._code_search(query, top_k, filters)
@@ -700,10 +803,19 @@ class HybridSearchAPI:
         # QueryPlan has .intent which is a QueryIntent enum
         intent_type = plan.intent.value if plan and hasattr(plan, 'intent') and plan.intent else "exploratory"
 
+        # Phase 2.5 P0 Fix: Also check for relationship intent via simple detection
+        # QueryRouter may not detect relationship intent, so we double-check
+        if intent_type == "exploratory":
+            simple_intent = self._detect_simple_intent(query)
+            if simple_intent == "relationship":
+                intent_type = "relationship"
+
         if intent_type == "temporal":
             return await self._temporal_search(query, top_k, filters)
         elif intent_type == "causal":
             return await self._causal_search(query, top_k, filters)
+        elif intent_type == "relationship":
+            return await self._relationship_search(query, top_k, filters)
         elif intent_type == "code":
             self.last_embedding_model = "codebert"
             return await self._code_search(query, top_k, filters)
@@ -925,6 +1037,144 @@ class HybridSearchAPI:
                 "action_required": "Connect to PKG database",
             },
         }]
+
+    async def _relationship_search(
+        self,
+        query: str,
+        top_k: int,
+        filters: Optional[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Execute relationship query search.
+
+        Phase 2.5 P0 Fix: Handles "How is X connected to Y?" queries
+        by traversing the knowledge graph WITHOUT temporal filtering.
+
+        Uses query_entity_connections() to find all paths between entities.
+
+        Args:
+            query: Natural language query about relationships
+            top_k: Number of results to return
+            filters: Optional search filters
+
+        Returns:
+            List of results showing relationship paths
+        """
+        # Extract entities from query
+        entities = self._extract_entities_from_query(query)
+
+        if len(entities) < 2:
+            logger.warning(f"Could not extract 2 entities from query: {query}")
+            # Fall back to general search
+            return await self._general_search(query, top_k, filters)
+
+        entity_a, entity_b = entities[0], entities[1]
+        logger.info(f"Relationship search: '{entity_a}' <-> '{entity_b}'")
+
+        # Try to use PKG queries if available
+        if self._pkg_manager is not None:
+            try:
+                from futurnal.pkg.queries.temporal import TemporalGraphQueries
+
+                pkg_queries = TemporalGraphQueries(db_manager=self._pkg_manager)
+
+                # Query entity connections (NO temporal filtering)
+                connections = pkg_queries.query_entity_connections(
+                    entity_a=entity_a,
+                    entity_b=entity_b,
+                    max_hops=3,
+                    limit=top_k * 2,  # Get more, then dedupe
+                )
+
+                if connections:
+                    return self._format_relationship_results(
+                        connections=connections,
+                        entity_a=entity_a,
+                        entity_b=entity_b,
+                        query=query,
+                        top_k=top_k,
+                    )
+                else:
+                    logger.info(f"No direct connections found between '{entity_a}' and '{entity_b}'")
+
+            except Exception as e:
+                logger.warning(f"Relationship search via PKG failed: {e}")
+
+        # Fallback to GraphRAG with exploratory intent
+        logger.debug("Falling back to GraphRAG for relationship query")
+        graphrag_results = await self._graphrag_search(query, top_k, filters, intent="exploratory")
+        if graphrag_results:
+            return graphrag_results
+
+        # Final fallback to keyword search
+        return await self._legacy_keyword_search(query, top_k, filters)
+
+    def _format_relationship_results(
+        self,
+        connections: List[Dict[str, Any]],
+        entity_a: str,
+        entity_b: str,
+        query: str,
+        top_k: int,
+    ) -> List[Dict[str, Any]]:
+        """Format relationship query results for display.
+
+        Converts graph path data into user-friendly results.
+        """
+        results: List[Dict[str, Any]] = []
+        seen_paths = set()
+
+        for conn in connections:
+            path = conn.get("path", [])
+            rels = conn.get("relationships", [])
+            hops = conn.get("total_hops", len(path) - 1)
+
+            # Create path description
+            path_names = [node.get("name", "?") for node in path]
+            path_str = " → ".join(path_names)
+
+            # Skip duplicates
+            if path_str in seen_paths:
+                continue
+            seen_paths.add(path_str)
+
+            # Calculate score based on path length (shorter = better)
+            score = 1.0 / (1 + hops * 0.2)
+
+            # Build content description
+            content_parts = [f"**Connection Path**: {path_str}"]
+            if rels:
+                content_parts.append(f"**Relationships**: {' → '.join(rels)}")
+            content_parts.append(f"**Hops**: {hops}")
+
+            # Add node details
+            for i, node in enumerate(path):
+                node_name = node.get("name", "Unknown")
+                node_labels = node.get("labels", [])
+                node_type = node_labels[0] if node_labels else "Node"
+                content_parts.append(f"  {i+1}. [{node_type}] {node_name}")
+
+            results.append({
+                "id": f"path_{hash(path_str)}",
+                "content": "\n".join(content_parts),
+                "score": score,
+                "confidence": 0.9,
+                "entity_type": "RelationshipPath",
+                "source_type": "graph",
+                "metadata": {
+                    "entity_a": entity_a,
+                    "entity_b": entity_b,
+                    "path": path_names,
+                    "relationships": rels,
+                    "hops": hops,
+                    "is_relationship_result": True,
+                },
+            })
+
+        # Sort by score (shorter paths first)
+        results.sort(key=lambda x: x["score"], reverse=True)
+
+        logger.info(f"Formatted {len(results)} relationship results")
+        return results[:top_k]
 
     async def _code_search(
         self,
