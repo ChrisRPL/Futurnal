@@ -228,6 +228,7 @@ export interface ConsentRecord {
   granted: boolean;
   granted_at?: string;
   expires_at?: string;
+  retention_days?: number;
 }
 
 // Common consent types - the backend supports arbitrary scope strings
@@ -237,6 +238,7 @@ export interface GrantConsentRequest {
   source_id: string;
   consent_type: string; // Flexible to support Python backend scope-based types
   duration_days?: number;
+  retention_days?: number;
 }
 
 export interface AuditLogEntry {
@@ -246,6 +248,12 @@ export interface AuditLogEntry {
   resource_type: string;
   resource_id?: string;
   details?: Record<string, unknown>;
+  // Additional fields used by AuditLogViewer
+  source?: string;
+  job_id?: string;
+  status?: string;
+  chain_hash?: string;
+  chain_prev?: string;
 }
 
 export interface AuditLogQuery {
