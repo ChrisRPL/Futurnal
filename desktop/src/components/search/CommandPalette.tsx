@@ -78,8 +78,8 @@ export function CommandPalette({
   const totalItems = hasResults
     ? results.length
     : hasSearchHistory
-    ? searchHistory.length
-    : 0;
+      ? searchHistory.length
+      : 0;
 
   // Reset selection when results change
   useEffect(() => {
@@ -208,27 +208,34 @@ export function CommandPalette({
           )}
         />
 
-        {/* Content */}
+        {/* Content - Glassmorphism styling matching overlay */}
         <Dialog.Content
           onKeyDown={handleKeyDown}
           className={cn(
             'fixed z-50 left-1/2 top-[12%] -translate-x-1/2',
-            'rounded-xl border bg-black shadow-2xl',
+            'rounded-3xl',
+            'bg-black/40',
+            'backdrop-blur-3xl backdrop-saturate-150',
+            'border border-white/10',
+            'shadow-2xl shadow-black/50',
+            'ring-1 ring-inset ring-white/5',
             'data-[state=open]:animate-scale-in',
-            'outline-none overflow-hidden',
+            'outline-none',
             'transition-all duration-200',
-            // Visual indicator for AI mode
-            generateAnswers
-              ? 'border-white/20'
-              : 'border-white/10',
             // Wider when detail panel is open
             selectedResult
               ? 'w-[min(960px,calc(100%-2rem))]'
               : 'w-[min(680px,calc(100%-2rem))]'
           )}
+          style={{
+            // Ensure backdrop filter works with WebKit prefix
+            WebkitBackdropFilter: 'blur(40px) saturate(150%)',
+            backdropFilter: 'blur(40px) saturate(150%)',
+            borderRadius: '24px',
+          }}
         >
-          {/* Header */}
-          <div className="flex items-center gap-3 border-b border-white/10 p-4">
+          {/* Header - Glass style with rounded top */}
+          <div className="flex items-center gap-3 border-b border-white/[0.1] p-5 bg-white/[0.02] rounded-t-[24px]">
             <Search className="h-5 w-5 text-white/40" />
             <SearchInput
               value={query}
@@ -277,20 +284,20 @@ export function CommandPalette({
             </Dialog.Close>
           </div>
 
-          {/* Filters - hide when AI mode to reduce clutter */}
+          {/* Filters - Glass style */}
           {!generateAnswers && (
-            <div className="border-b border-white/10 px-4 py-2">
+            <div className="border-b border-white/[0.08] px-5 py-3 bg-white/[0.01]">
               <FilterChips filters={filters} onChange={setFilters} />
             </div>
           )}
 
           {/* Content - flex layout for side panel */}
-          <div className="flex max-h-[65vh]">
+          <div className="flex max-h-[55vh]">
             {/* Results area */}
             <div
               className={cn(
-                'flex-1 overflow-y-auto p-3',
-                selectedResult && 'border-r border-white/10'
+                'flex-1 overflow-y-auto p-4',
+                selectedResult && 'border-r border-white/[0.08]'
               )}
             >
               {/* AI-generated answer - prominent when in AI mode */}
@@ -406,9 +413,9 @@ export function CommandPalette({
               )}
             </div>
 
-            {/* Detail panel - slide in from right */}
+            {/* Detail panel - slide in from right with glass style */}
             {selectedResult && (
-              <div className="w-[320px] flex-shrink-0 animate-slide-in-right">
+              <div className="w-[320px] flex-shrink-0 animate-slide-in-right bg-white/[0.03]">
                 <ResultDetailPanel
                   result={selectedResult}
                   query={query}
@@ -418,22 +425,21 @@ export function CommandPalette({
             )}
           </div>
 
-          {/* Footer with keyboard hints */}
-          <div className="flex items-center justify-between border-t border-white/10 px-4 py-2 text-xs text-white/40">
-            <div className="flex items-center gap-4">
-              <span className="flex items-center gap-1">
-                <kbd className="rounded bg-white/5 px-1.5 py-0.5">↵</kbd>
+          {/* Footer with keyboard hints - Glass style with rounded bottom */}
+          <div className="flex items-center justify-between border-t border-white/[0.1] px-5 py-3 text-xs text-white/50 bg-white/[0.02] rounded-b-[24px]">
+            <div className="flex items-center gap-5">
+              <span className="flex items-center gap-2">
+                <kbd className="rounded-lg bg-white/[0.1] px-2 py-1 text-white/60 font-medium">↵</kbd>
                 {generateAnswers ? 'to ask' : 'to search'}
               </span>
-              <span className="flex items-center gap-1">
-                <kbd className="rounded bg-white/5 px-1.5 py-0.5">↑</kbd>
-                <kbd className="rounded bg-white/5 px-1.5 py-0.5">↓</kbd>
-                to navigate
+              <span className="flex items-center gap-2">
+                <kbd className="rounded-lg bg-white/[0.1] px-2 py-1 text-white/60 font-medium">↑↓</kbd>
+                navigate
               </span>
             </div>
-            <span className="flex items-center gap-1">
-              <kbd className="rounded bg-white/5 px-1.5 py-0.5">esc</kbd>
-              to close
+            <span className="flex items-center gap-2">
+              <kbd className="rounded-lg bg-white/[0.1] px-2 py-1 text-white/60 font-medium">esc</kbd>
+              close
             </span>
           </div>
         </Dialog.Content>
