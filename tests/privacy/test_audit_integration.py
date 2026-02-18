@@ -15,27 +15,27 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.futurnal.privacy.audit import AuditLogger, AuditEvent
-from src.futurnal.privacy.consent import ConsentRegistry, ConsentRequiredError
-from src.futurnal.privacy.policy_engine import (
+from futurnal.privacy.audit import AuditLogger, AuditEvent
+from futurnal.privacy.consent import ConsentRegistry, ConsentRequiredError
+from futurnal.privacy.policy_engine import (
     PolicyEngine,
     PolicyDecision,
     configure_policy_engine,
     reset_policy_engine,
     get_policy_engine,
 )
-from src.futurnal.privacy.decorators import (
+from futurnal.privacy.decorators import (
     requires_consent,
     audit_action,
     privacy_protected,
     ConsentDeniedError,
 )
-from src.futurnal.privacy.anomaly_detector import (
+from futurnal.privacy.anomaly_detector import (
     AnomalyDetector,
     AnomalyConfig,
     AnomalyType,
 )
-from src.futurnal.privacy.purge import DataPurgeService, create_purge_service
+from futurnal.privacy.purge import DataPurgeService, create_purge_service
 
 
 class TestConsentPolicyIntegration:

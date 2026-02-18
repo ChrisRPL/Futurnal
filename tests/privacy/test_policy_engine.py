@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.futurnal.privacy.policy_engine import (
+from futurnal.privacy.policy_engine import (
     PolicyEngine,
     PolicyResult,
     PolicyDecision,
@@ -20,7 +20,7 @@ from src.futurnal.privacy.policy_engine import (
     create_scope_restriction_rule,
     create_emergency_lockdown_rule,
 )
-from src.futurnal.privacy.consent import ConsentRegistry, ConsentRequiredError
+from futurnal.privacy.consent import ConsentRegistry, ConsentRequiredError
 
 
 class TestConsentCache:
@@ -404,7 +404,7 @@ class TestPredefinedRules:
         )
 
         # Test at midnight (should deny)
-        with patch("src.futurnal.privacy.policy_engine.datetime") as mock_dt:
+        with patch("futurnal.privacy.policy_engine.datetime") as mock_dt:
             mock_now = MagicMock()
             mock_now.hour = 0  # Midnight
             mock_dt.now.return_value = mock_now
@@ -419,7 +419,7 @@ class TestPredefinedRules:
         )
 
         # Test at noon (should allow)
-        with patch("src.futurnal.privacy.policy_engine.datetime") as mock_dt:
+        with patch("futurnal.privacy.policy_engine.datetime") as mock_dt:
             mock_now = MagicMock()
             mock_now.hour = 12  # Noon
             mock_dt.now.return_value = mock_now

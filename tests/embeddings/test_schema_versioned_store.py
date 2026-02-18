@@ -511,7 +511,11 @@ class TestSchemaVersionedEmbeddingStore:
         where_filter = call_args.kwargs.get("where")
 
         assert where_filter is not None
-        assert where_filter["needs_reembedding"] is False
+        needs_reembedding_filter = where_filter["needs_reembedding"]
+        if isinstance(needs_reembedding_filter, dict):
+            assert needs_reembedding_filter.get("$eq") is False
+        else:
+            assert needs_reembedding_filter is False
 
     def test_current_schema_version_property(self, mock_store):
         """Validate current_schema_version property."""

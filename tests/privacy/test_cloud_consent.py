@@ -8,7 +8,7 @@ import pytest
 from datetime import datetime
 from typing import List
 
-from src.futurnal.privacy.cloud_consent import (
+from futurnal.privacy.cloud_consent import (
     CloudSyncScope,
     CloudSyncConsentStatus,
     PKGMetadataExport,

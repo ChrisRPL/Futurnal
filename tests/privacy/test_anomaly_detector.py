@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.futurnal.privacy.anomaly_detector import (
+from futurnal.privacy.anomaly_detector import (
     AnomalyDetector,
     AnomalyConfig,
     Anomaly,
@@ -312,7 +312,7 @@ class TestAnomalyDetectorWithAuditLogger:
     """Test integration with audit logger."""
 
     def test_anomaly_logged_to_audit(self, tmp_path):
-        from src.futurnal.privacy.audit import AuditLogger
+        from futurnal.privacy.audit import AuditLogger
 
         audit_dir = tmp_path / "audit"
         audit_dir.mkdir()

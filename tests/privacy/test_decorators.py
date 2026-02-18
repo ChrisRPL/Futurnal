@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.futurnal.privacy.decorators import (
+from futurnal.privacy.decorators import (
     requires_consent,
     audit_action,
     privacy_protected,
@@ -14,14 +14,14 @@ from src.futurnal.privacy.decorators import (
     bypass_consent_for_testing,
     _is_safe_for_audit,
 )
-from src.futurnal.privacy.policy_engine import (
+from futurnal.privacy.policy_engine import (
     PolicyEngine,
     PolicyResult,
     PolicyDecision,
     configure_policy_engine,
     reset_policy_engine,
 )
-from src.futurnal.privacy.consent import ConsentRegistry
+from futurnal.privacy.consent import ConsentRegistry
 
 
 class TestRequiresConsent:

@@ -7,14 +7,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.futurnal.privacy.alerts import (
+from futurnal.privacy.alerts import (
     AlertManager,
     AlertConfig,
     Alert,
     AlertChannel,
     create_alert_manager,
 )
-from src.futurnal.privacy.anomaly_detector import (
+from futurnal.privacy.anomaly_detector import (
     Anomaly,
     AnomalyType,
     AnomalySeverity,

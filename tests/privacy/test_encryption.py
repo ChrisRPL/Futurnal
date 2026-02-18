@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.futurnal.privacy.encryption import (
+from futurnal.privacy.encryption import (
     EncryptionManager,
     EncryptedPayload,
     EncryptionError,
@@ -274,7 +274,7 @@ class TestAuditLoggerWithEncryption:
     """Test AuditLogger with encryption enabled."""
 
     def test_audit_logger_with_encryption(self, mock_keyring, tmp_path):
-        from src.futurnal.privacy.audit import AuditLogger, AuditEvent
+        from futurnal.privacy.audit import AuditLogger, AuditEvent
         from datetime import datetime
 
         manager = EncryptionManager(service_name="test_audit")
@@ -307,7 +307,7 @@ class TestAuditLoggerWithEncryption:
         assert events[0]["job_id"] == "test_job_1"
 
     def test_audit_logger_without_encryption(self, tmp_path):
-        from src.futurnal.privacy.audit import AuditLogger, AuditEvent
+        from futurnal.privacy.audit import AuditLogger, AuditEvent
         from datetime import datetime
 
         audit_dir = tmp_path / "audit_plain"
@@ -333,7 +333,7 @@ class TestConsentRegistryWithEncryption:
     """Test ConsentRegistry with encryption enabled."""
 
     def test_consent_registry_with_encryption(self, mock_keyring, tmp_path):
-        from src.futurnal.privacy.consent import ConsentRegistry
+        from futurnal.privacy.consent import ConsentRegistry
 
         manager = EncryptionManager(service_name="test_consent")
         manager.initialize()
@@ -363,7 +363,7 @@ class TestConsentRegistryWithEncryption:
         assert retrieved.granted
 
     def test_consent_registry_without_encryption(self, tmp_path):
-        from src.futurnal.privacy.consent import ConsentRegistry
+        from futurnal.privacy.consent import ConsentRegistry
 
         consent_dir = tmp_path / "consent_plain"
         registry = ConsentRegistry(directory=consent_dir)

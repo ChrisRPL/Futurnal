@@ -5,7 +5,7 @@ from pathlib import Path
 import json
 import pytest
 
-from src.futurnal.search.audit_events import (
+from futurnal.search.audit_events import (
     SearchAuditEvents,
     log_search_executed,
     log_hybrid_search_executed,
@@ -18,7 +18,7 @@ from src.futurnal.search.audit_events import (
     log_feedback_recorded,
     _hash_id,
 )
-from src.futurnal.privacy.audit import AuditLogger
+from futurnal.privacy.audit import AuditLogger
 
 
 @pytest.fixture

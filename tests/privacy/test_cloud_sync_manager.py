@@ -9,15 +9,15 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from src.futurnal.privacy.cloud_consent import (
+from futurnal.privacy.cloud_consent import (
     CloudSyncScope,
     CloudSyncConsentStatus,
 )
-from src.futurnal.privacy.cloud_sync_manager import (
+from futurnal.privacy.cloud_sync_manager import (
     CloudSyncConsentManager,
 )
-from src.futurnal.privacy.consent import ConsentRegistry, ConsentRequiredError
-from src.futurnal.privacy.audit import AuditLogger
+from futurnal.privacy.consent import ConsentRegistry, ConsentRequiredError
+from futurnal.privacy.audit import AuditLogger
 
 
 class TestCloudSyncConsentManagerBasics:

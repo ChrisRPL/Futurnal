@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from src.futurnal.privacy.audit import AuditLogger, AuditEvent
-from src.futurnal.privacy.consent import ConsentRegistry
-from src.futurnal.privacy.purge import (
+from futurnal.privacy.audit import AuditLogger, AuditEvent
+from futurnal.privacy.consent import ConsentRegistry
+from futurnal.privacy.purge import (
     DataPurgeService,
     PurgeResult,
     PurgeConfirmationRequired,

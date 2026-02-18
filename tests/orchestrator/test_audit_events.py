@@ -5,7 +5,7 @@ from pathlib import Path
 import json
 import pytest
 
-from src.futurnal.orchestrator.audit_events import (
+from futurnal.orchestrator.audit_events import (
     OrchestratorAuditEvents,
     log_system_start,
     log_system_shutdown,
@@ -21,7 +21,7 @@ from src.futurnal.orchestrator.audit_events import (
     _hash_path,
     _sanitize_error_message,
 )
-from src.futurnal.privacy.audit import AuditLogger
+from futurnal.privacy.audit import AuditLogger
 
 
 @pytest.fixture
