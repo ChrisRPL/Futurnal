@@ -202,7 +202,6 @@ export function TemporalQuery({
 }: TemporalQueryProps) {
   const {
     temporalRange,
-    parsedTemporalExpression,
     setTemporalRange,
     clearTemporalRange,
   } = useSearchStore();
