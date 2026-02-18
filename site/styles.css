@@ -163,6 +163,38 @@ h1 {
   color: var(--muted);
 }
 
+.roadmap-grid {
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 0.9rem;
+}
+
+.roadmap-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.95rem;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.roadmap-card span {
+  display: inline-block;
+  color: var(--muted);
+  font-size: 0.76rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 0.3rem;
+}
+
+.roadmap-card h3 {
+  font-size: 1.15rem;
+}
+
+.roadmap-card p {
+  margin: 0.45rem 0 0;
+  color: var(--muted);
+}
+
 pre {
   margin: 0.9rem 0;
   padding: 0.9rem;
@@ -204,6 +236,10 @@ a {
   }
 
   .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .roadmap-grid {
     grid-template-columns: 1fr;
   }
 
