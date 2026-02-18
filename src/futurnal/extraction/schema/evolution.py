@@ -25,6 +25,7 @@ SEMANTIC_ALIGNMENT_THRESHOLD = 0.90
 
 if TYPE_CHECKING:
     from futurnal.extraction.schema.models import SchemaDiscovery
+    from futurnal.extraction.schema.discovery import SchemaDiscoveryEngine
     from futurnal.extraction.schema.templates import TemplateDatabase
 
 

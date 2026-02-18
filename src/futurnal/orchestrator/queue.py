@@ -8,10 +8,13 @@ import threading
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Iterator, List, Optional
+from typing import TYPE_CHECKING, Iterator, List, Optional
 
 from .models import IngestionJob, JobPriority, JobType
 from .exceptions import InvalidStateTransitionError, StateTransitionRaceError, JobNotFoundError
+
+if TYPE_CHECKING:
+    from .state_machine import StateMachineValidator
 
 
 class JobStatus(str, Enum):
@@ -553,5 +556,4 @@ class JobQueue:
                 }
             )
         return entries
-
 

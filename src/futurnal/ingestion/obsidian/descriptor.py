@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional
 from enum import Enum
 
 from filelock import FileLock
@@ -25,6 +25,9 @@ from pydantic import BaseModel, Field, field_validator
 from futurnal import __version__ as FUTURNAL_VERSION
 from ..local.config import LocalIngestionSource
 from ...privacy.redaction import RedactionPolicy, redact_path
+
+if TYPE_CHECKING:
+    from ...privacy.redaction import RedactedPath
 
 
 class PrivacyLevel(str, Enum):
@@ -761,5 +764,4 @@ class VaultRegistry:
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(payload)
         os.replace(tmp, path)
-
 

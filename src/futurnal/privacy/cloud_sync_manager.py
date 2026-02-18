@@ -29,6 +29,7 @@ from .cloud_consent import (
 
 if TYPE_CHECKING:
     from .audit import AuditLogger
+    from .encryption import EncryptionManager
 
 logger = logging.getLogger(__name__)
 
