@@ -541,6 +541,219 @@ class TemporalGraphQueries:
             ) from e
 
     # -------------------------------------------------------------------------
+    # Document Temporal Queries (Phase 2.5 P0 Fix)
+    # -------------------------------------------------------------------------
+
+    def query_documents_in_timerange(
+        self,
+        start: datetime,
+        end: datetime,
+        doc_types: Optional[List[str]] = None,
+        limit: int = 1000,
+        offset: int = 0,
+    ) -> List[DocumentNode]:
+        """Find all documents within time range.
+
+        Uses best available timestamp: modified_at > updated_at > created_at > ingested_at.
+        This enables insights generation from Documents (not just Events).
+
+        Phase 2.5 P0 Fix: Extends temporal analysis beyond Event nodes to include
+        all timestamped content in the PKG.
+
+        Args:
+            start: Start of time range (inclusive)
+            end: End of time range (inclusive)
+            doc_types: Optional document type filter (e.g., ['note', 'paper'])
+            limit: Maximum results to return (default 1000)
+            offset: Offset for pagination (default 0)
+
+        Returns:
+            List of DocumentNode instances ordered by timestamp ascending.
+
+        Raises:
+            InvalidTimeRangeError: If start > end
+            TemporalQueryError: If query fails
+        """
+        if start > end:
+            raise InvalidTimeRangeError(start, end)
+
+        start_time = time.perf_counter()
+
+        # Build Cypher query - checks multiple timestamp fields
+        # Priority: modified_at > updated_at > created_at > ingested_at
+        query = """
+        MATCH (d:Document)
+        WHERE (
+            (d.modified_at IS NOT NULL AND d.modified_at >= datetime($start) AND d.modified_at <= datetime($end))
+            OR (d.modified_at IS NULL AND d.updated_at IS NOT NULL AND d.updated_at >= datetime($start) AND d.updated_at <= datetime($end))
+            OR (d.modified_at IS NULL AND d.updated_at IS NULL AND d.created_at IS NOT NULL AND d.created_at >= datetime($start) AND d.created_at <= datetime($end))
+            OR (d.modified_at IS NULL AND d.updated_at IS NULL AND d.created_at IS NULL AND d.ingested_at IS NOT NULL AND d.ingested_at >= datetime($start) AND d.ingested_at <= datetime($end))
+        )
+        """
+
+        params: Dict[str, Any] = {
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+        }
+
+        if doc_types:
+            query += " AND d.doc_type IN $doc_types"
+            params["doc_types"] = doc_types
+
+        query += """
+        RETURN d
+        ORDER BY COALESCE(d.modified_at, d.updated_at, d.created_at, d.ingested_at) ASC
+        SKIP $offset
+        LIMIT $limit
+        """
+        params["offset"] = offset
+        params["limit"] = limit
+
+        try:
+            with self._db.session() as session:
+                result = session.run(query, params)
+                documents = []
+                for record in result:
+                    doc_data = dict(record["d"])
+                    doc_node = self._parse_document_node(doc_data)
+                    if doc_node:
+                        documents.append(doc_node)
+
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            logger.debug(
+                f"Document time range query returned {len(documents)} documents in {elapsed_ms:.1f}ms"
+            )
+            self._audit_query("document_time_range", elapsed_ms, len(documents))
+
+            return documents
+
+        except Exception as e:
+            logger.error(f"Document time range query failed: {e}")
+            raise TemporalQueryError(
+                f"Document time range query failed: {e}",
+                query_type="document_time_range"
+            ) from e
+
+    def get_document_timestamp(self, doc: DocumentNode) -> Optional[datetime]:
+        """Get the best available timestamp for a document.
+
+        Priority: modified_at > updated_at > created_at > ingested_at
+
+        Args:
+            doc: DocumentNode to get timestamp from
+
+        Returns:
+            The best available timestamp, or None if none exist.
+        """
+        for field in ['modified_at', 'updated_at', 'created_at', 'ingested_at']:
+            ts = getattr(doc, field, None)
+            if ts is not None:
+                return self._strip_timezone(ts) if isinstance(ts, datetime) else ts
+        return None
+
+    # -------------------------------------------------------------------------
+    # Entity Connection Queries (Phase 2.5 P0 Fix)
+    # -------------------------------------------------------------------------
+
+    def query_entity_connections(
+        self,
+        entity_a: str,
+        entity_b: str,
+        relationship_types: Optional[List[str]] = None,
+        max_hops: int = 3,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Find all paths between two entities/documents.
+
+        NO temporal filtering - relationships don't have timestamps.
+        Used for answering "How is X connected to Y?" queries.
+
+        Phase 2.5 P0 Fix: Enables RAG to answer relationship queries by
+        traversing the graph without temporal constraints.
+
+        Args:
+            entity_a: Name/title fragment of first entity
+            entity_b: Name/title fragment of second entity
+            relationship_types: Optional filter for relationship types
+            max_hops: Maximum path length (default 3)
+            limit: Maximum paths to return (default 50)
+
+        Returns:
+            List of dicts containing:
+            - path: List of node info dicts
+            - relationships: List of relationship types
+            - total_hops: Path length
+        """
+        start_time = time.perf_counter()
+
+        # Clamp max_hops
+        max_hops = min(max(1, max_hops), 5)
+
+        # Build query - searches by name, title, or doc_title
+        if relationship_types:
+            rel_filter = ":" + "|".join(relationship_types)
+        else:
+            rel_filter = ""
+
+        query = f"""
+        MATCH path = (a)-[*1..{max_hops}]-(b)
+        WHERE (
+            toLower(a.name) CONTAINS toLower($entity_a)
+            OR toLower(a.title) CONTAINS toLower($entity_a)
+            OR toLower(a.doc_title) CONTAINS toLower($entity_a)
+        )
+        AND (
+            toLower(b.name) CONTAINS toLower($entity_b)
+            OR toLower(b.title) CONTAINS toLower($entity_b)
+            OR toLower(b.doc_title) CONTAINS toLower($entity_b)
+        )
+        AND a <> b
+        RETURN
+            [n IN nodes(path) | {{
+                id: n.id,
+                name: COALESCE(n.name, n.title, n.doc_title, 'Unknown'),
+                labels: labels(n)
+            }}] as node_info,
+            [r IN relationships(path) | type(r)] as rel_types,
+            length(path) as hops
+        ORDER BY hops ASC
+        LIMIT $limit
+        """
+
+        params = {
+            "entity_a": entity_a,
+            "entity_b": entity_b,
+            "limit": limit,
+        }
+
+        try:
+            with self._db.session() as session:
+                result = session.run(query, params)
+                paths = []
+
+                for record in result:
+                    paths.append({
+                        "path": record["node_info"],
+                        "relationships": record["rel_types"],
+                        "total_hops": record["hops"],
+                    })
+
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            logger.debug(
+                f"Entity connection query found {len(paths)} paths in {elapsed_ms:.1f}ms"
+            )
+            self._audit_query("entity_connections", elapsed_ms, len(paths))
+
+            return paths
+
+        except Exception as e:
+            logger.error(f"Entity connection query failed: {e}")
+            raise TemporalQueryError(
+                f"Entity connection query failed: {e}",
+                query_type="entity_connections"
+            ) from e
+
+    # -------------------------------------------------------------------------
     # Additional Temporal Queries
     # -------------------------------------------------------------------------
 
@@ -713,6 +926,39 @@ class TemporalGraphQueries:
             return EventNode.model_validate(converted)
         except Exception as e:
             logger.debug(f"Failed to parse event node: {e}")
+            return None
+
+    def _parse_document_node(self, data: Dict[str, Any]) -> Optional[DocumentNode]:
+        """Parse Neo4j node data into DocumentNode model.
+
+        Handles schema mismatches between Neo4j stored documents and
+        DocumentNode Pydantic model by providing defaults for missing
+        required fields.
+        """
+        try:
+            converted = self._convert_neo4j_props(data)
+
+            # Provide defaults for required fields that may be missing
+            # in documents stored by older versions or different pipelines
+            if "source_id" not in converted:
+                # Use 'source' field or 'id' as fallback
+                converted["source_id"] = converted.get("source", converted.get("id", "unknown"))
+
+            if "content_hash" not in converted:
+                # Generate a hash from available content or ID
+                import hashlib
+                content = converted.get("content", converted.get("id", ""))
+                if isinstance(content, str):
+                    converted["content_hash"] = hashlib.sha256(content.encode()).hexdigest()[:16]
+                else:
+                    converted["content_hash"] = "unknown"
+
+            if "source_type" not in converted:
+                converted["source_type"] = "document"
+
+            return DocumentNode.model_validate(converted)
+        except Exception as e:
+            logger.debug(f"Failed to parse document node: {e}")
             return None
 
     def _parse_node_by_labels(
