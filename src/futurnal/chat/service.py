@@ -895,7 +895,7 @@ Use these evolved instincts to:
     ) -> List[str]:
         """Extract entity references from search results.
 
-        Prefers human-readable names over UUIDs for display.
+        Prefer stable entity identifiers; fallback to readable names.
         """
         refs = []
         seen = set()
@@ -906,10 +906,18 @@ Use these evolved instincts to:
         for result in search_results:
             metadata = result.get("metadata", {})
 
-            # Prefer human-readable name fields over entity_id (which is often a UUID)
-            # Priority: name > label > title > doc_title > entity_type
+            # Prefer explicit entity identifiers first.
             entity_name = None
+            for field in ["entity_id", "id"]:
+                val = result.get(field) or metadata.get(field)
+                if val and "-" not in val and len(val) < 50:
+                    entity_name = val
+                    break
+
+            # Fallback to human-readable name fields.
             for field in ["name", "label", "title", "doc_title", "canonical_name"]:
+                if entity_name:
+                    break
                 val = result.get(field) or metadata.get(field)
                 if val and val.lower() not in skip_values:
                     entity_name = val
@@ -935,13 +943,13 @@ Use these evolved instincts to:
             # Also check for entities in graph context
             graph_context = result.get("graph_context", {})
             for entity in graph_context.get("related_entities", []):
-                # Prefer name over id
-                ename = entity.get("name") or entity.get("canonical_name")
+                # Prefer stable ID for references, fallback to name.
+                ename = None
+                eid = entity.get("id") or entity.get("entity_id")
+                if eid and "-" not in eid and len(eid) < 50:
+                    ename = eid
                 if not ename:
-                    eid = entity.get("id")
-                    # Skip UUID-like IDs
-                    if eid and "-" not in eid and len(eid) < 50:
-                        ename = eid
+                    ename = entity.get("name") or entity.get("canonical_name")
                 if ename and ename not in seen and ename.lower() not in skip_values:
                     refs.append(ename)
                     seen.add(ename)
