@@ -724,11 +724,28 @@ class ImapEmailConnector:
         """
         active_job_id = job_id or uuid.uuid4().hex
 
-        # Run async sync in event loop
-        loop = asyncio.get_event_loop()
-        results = loop.run_until_complete(
-            self.sync_mailbox(mailbox_id, job_id=active_job_id)
-        )
+        # Run async sync in an event loop (Python 3.11+ may not have a current loop by default).
+        try:
+            loop = asyncio.get_event_loop()
+            created_loop = False
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            created_loop = True
+
+        try:
+            if loop.is_running():
+                raise RuntimeError(
+                    "ingest() cannot run inside an active event loop; "
+                    "use sync_mailbox() from async contexts"
+                )
+            results = loop.run_until_complete(
+                self.sync_mailbox(mailbox_id, job_id=active_job_id)
+            )
+        finally:
+            if created_loop:
+                asyncio.set_event_loop(None)
+                loop.close()
 
         # Yield summary result
         total_new = sum(len(r.new_messages) for r in results.values())
