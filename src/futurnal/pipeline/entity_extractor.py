@@ -186,9 +186,10 @@ class EntityExtractor:
 
         Priority:
         1. Frontmatter title
-        2. First markdown heading
-        3. Email subject
-        4. None (will use LLM or filename later)
+        2. Paper metadata title (from PapersConnector)
+        3. First markdown heading
+        4. Email subject
+        5. None (will use LLM or filename later)
         """
         # Try frontmatter title
         frontmatter = metadata.get("frontmatter", {})
@@ -198,6 +199,11 @@ class EntityExtractor:
 
         if frontmatter.get("title"):
             return str(frontmatter["title"])
+
+        # Try paper_metadata.title (from PapersConnector for academic papers)
+        paper_metadata = metadata.get("paper_metadata", {})
+        if paper_metadata.get("title"):
+            return str(paper_metadata["title"])
 
         # Try first markdown heading
         heading_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
@@ -381,8 +387,15 @@ class EntityExtractor:
     def extract_from_document(self, element: Dict[str, Any]) -> DocumentEntities:
         """Extract entities from a document element."""
         metadata = element.get("metadata", {})
-        # Use parent_id to match graph.rs document aggregation (doc:{parent_id})
-        doc_id = metadata.get("parent_id") or element.get("element_id") or element.get("sha256", "unknown")
+        # Compute doc_id matching Neo4j format: SHA256(path)[:16]
+        # This ensures entity relationships connect to document nodes in graph
+        source_path = metadata.get("path", "")
+        if source_path:
+            import hashlib
+            doc_id = hashlib.sha256(source_path.encode()).hexdigest()[:16]
+        else:
+            # Fallback for documents without path
+            doc_id = metadata.get("sha256", element.get("element_id", "unknown"))[:16]
         source = metadata.get("source")
         content = element.get("text", "") or element.get("content", "")
 
