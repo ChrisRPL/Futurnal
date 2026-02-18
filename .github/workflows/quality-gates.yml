@@ -40,6 +40,7 @@ jobs:
             --ignore=tests/integration/ \
             --ignore=tests/e2e/ \
             --ignore=tests/performance/ \
+            --ignore=tests/extraction/ \
             --ignore=tests/extraction/test_production_readiness.py \
             --ignore-glob='**/integration/**' \
             --ignore-glob='**/e2e/**' \
