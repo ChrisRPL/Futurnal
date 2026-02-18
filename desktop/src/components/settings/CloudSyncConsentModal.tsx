@@ -70,7 +70,7 @@ export function CloudSyncConsentModal({ open, onOpenChange }: CloudSyncConsentMo
     setError(null);
 
     try {
-      await grantConsent(selectedScopes, user?.email);
+      await grantConsent(selectedScopes, user?.email ?? undefined);
       handleClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to grant consent');
