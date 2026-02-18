@@ -30,6 +30,7 @@ interface GraphFilterPanelProps {
 
 /** Icons/labels for each entity type */
 const ENTITY_TYPE_INFO: Record<EntityType, { label: string; shortLabel: string }> = {
+  Entity: { label: 'Entities', shortLabel: 'ENT' },
   Event: { label: 'Events', shortLabel: 'EVT' },
   Person: { label: 'People', shortLabel: 'PER' },
   Document: { label: 'Documents', shortLabel: 'DOC' },
