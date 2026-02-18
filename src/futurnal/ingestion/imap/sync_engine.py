@@ -123,6 +123,9 @@ class ImapSyncEngine:
                         result = await self._full_resync(
                             client, folder, current_uidvalidity
                         )
+                        # _full_resync persists a fresh state snapshot; reload it to avoid
+                        # writing stale pre-resync fields back to storage.
+                        state = self._load_sync_state(self.descriptor.id, folder)
                     else:
                         # Detect server capabilities if not already known
                         if not state.supports_idle:
