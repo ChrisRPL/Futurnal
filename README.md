@@ -117,7 +117,7 @@ Bundled paper PDFs and converted paper dumps were removed from this repository d
 
 - Read `CONTRIBUTING.md`
 - Follow `CODE_OF_CONDUCT.md`
-- Report vulnerabilities via `SECURITY.md`
+- Open issues for bugs and feature requests
 
 ## GitHub Pages
 
