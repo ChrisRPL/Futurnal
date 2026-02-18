@@ -55,8 +55,8 @@ class TemporalSearchConfig:
     """Maximum pattern length to consider. Default: 5."""
 
     # Correlation detection configuration
-    correlation_min_occurrences: int = 3
-    """Minimum co-occurrences for correlation significance. Default: 3."""
+    correlation_min_occurrences: int = 2
+    """Minimum co-occurrences for correlation significance. Default: 2 (lowered for personal datasets)."""
 
     correlation_significance_threshold: float = 0.5
     """Minimum correlation strength to report. Default: 0.5."""
