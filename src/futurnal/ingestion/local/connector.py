@@ -218,59 +218,60 @@ class LocalFilesConnector:
                 )
                 continue
             had_failure = False
-            for element in elements:
+            # Combine all elements into a single document to avoid overwriting
+            # when partition() returns multiple elements for one file
+            try:
+                parsed = self._persist_combined_elements(source, record, elements)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "Persist failed during ingestion",
+                    extra=_log_extra(
+                        job_id=active_job_id,
+                        source=source.name,
+                        record=record,
+                        policy=policy,
+                        event="persist_failed",
+                    ),
+                )
+                self._quarantine(record.path, "persist_error", str(exc), source.name, policy)
+                self._log_file_event(
+                    job_id=active_job_id,
+                    source=source,
+                    record=record,
+                    action="persist",
+                    status="failed",
+                    policy=policy,
+                    metadata={"detail": str(exc)},
+                )
+                had_failure = True
+                continue
+            if self._element_sink is not None:
                 try:
-                    parsed = self._persist_element(source, record, element)
+                    self._element_sink.handle(parsed)
                 except Exception as exc:  # noqa: BLE001
                     logger.exception(
-                        "Persist failed during ingestion",
+                        "Element sink reported a failure",
                         extra=_log_extra(
                             job_id=active_job_id,
                             source=source.name,
                             record=record,
                             policy=policy,
-                            event="persist_failed",
+                            event="sink_failed",
                         ),
                     )
-                    self._quarantine(record.path, "persist_error", str(exc), source.name, policy)
+                    self._quarantine(record.path, "sink_error", str(exc), source.name, policy)
                     self._log_file_event(
                         job_id=active_job_id,
                         source=source,
                         record=record,
-                        action="persist",
+                        action="sink",
                         status="failed",
                         policy=policy,
                         metadata={"detail": str(exc)},
                     )
                     had_failure = True
                     continue
-                if self._element_sink is not None:
-                    try:
-                        self._element_sink.handle(parsed)
-                    except Exception as exc:  # noqa: BLE001
-                        logger.exception(
-                            "Element sink reported a failure",
-                            extra=_log_extra(
-                                job_id=active_job_id,
-                                source=source.name,
-                                record=record,
-                                policy=policy,
-                                event="sink_failed",
-                            ),
-                        )
-                        self._quarantine(record.path, "sink_error", str(exc), source.name, policy)
-                        self._log_file_event(
-                            job_id=active_job_id,
-                            source=source,
-                            record=record,
-                            action="sink",
-                            status="failed",
-                            policy=policy,
-                            metadata={"detail": str(exc)},
-                        )
-                        had_failure = True
-                        continue
-                yield parsed
+            yield parsed
             if not had_failure:
                 self._log_file_event(
                     job_id=active_job_id,
@@ -291,7 +292,77 @@ class LocalFilesConnector:
                     ),
                 )
 
+    def _persist_combined_elements(self, source: LocalIngestionSource, record: FileRecord, elements: list) -> dict:
+        """Persist all elements from a file as a single combined document.
+
+        Combines text from all elements to avoid overwriting when partition()
+        returns multiple elements for one file.
+
+        Args:
+            source: Ingestion source configuration
+            record: File record with path and hash
+            elements: List of elements from unstructured.partition()
+
+        Returns:
+            Dictionary with parsed document info including element_path
+        """
+        storage_path = self._parsed_dir / f"{record.sha256}.json"
+
+        # Extract and combine text from all elements
+        text_parts = []
+        element_dicts = []
+        for element in elements:
+            if hasattr(element, "to_dict"):
+                el_dict = element.to_dict()
+            elif isinstance(element, dict):
+                el_dict = element
+            else:
+                el_dict = {"text": str(element)}
+
+            element_dicts.append(el_dict)
+            if "text" in el_dict and el_dict["text"]:
+                text_parts.append(el_dict["text"])
+
+        # Build combined payload
+        combined_text = "\n\n".join(text_parts)
+
+        # Use first element's metadata as base, but update with combined info
+        if element_dicts:
+            payload = element_dicts[0].copy()
+        else:
+            payload = {}
+
+        # Store combined text as the document content
+        payload["text"] = combined_text
+
+        # Store individual elements for downstream processing
+        payload["elements"] = element_dicts
+
+        # Ensure metadata exists and add ingestion info
+        payload.setdefault("metadata", {})
+        payload["metadata"].update(
+            {
+                "source": source.name,
+                "path": str(record.path),
+                "sha256": record.sha256,
+                "size_bytes": record.size,
+                "modified_at": datetime.utcfromtimestamp(record.mtime).isoformat(),
+                "ingested_at": datetime.utcnow().isoformat(),
+                "element_count": len(element_dicts),
+            }
+        )
+
+        storage_path.write_text(json.dumps(payload, ensure_ascii=False))
+        return {
+            "source": source.name,
+            "path": str(record.path),
+            "sha256": record.sha256,
+            "element_path": str(storage_path),
+            "size_bytes": record.size,
+        }
+
     def _persist_element(self, source: LocalIngestionSource, record: FileRecord, element) -> dict:
+        """Persist a single element (deprecated - use _persist_combined_elements)."""
         storage_path = self._parsed_dir / f"{record.sha256}.json"
         if hasattr(element, "to_dict"):
             payload = element.to_dict()
