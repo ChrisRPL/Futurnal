@@ -133,7 +133,13 @@ def list_insights(
             for insight in insights:
                 status = "[NEW]" if not insight.get("isRead") else "     "
                 print(f"{status} [{insight['insightType']}] {insight['title']}")
-                print(f"       Confidence: {insight['confidence']:.0%}, Relevance: {insight['relevance']:.0%}")
+                # Phase 2.5: Show both correlation and causal confidence
+                corr_conf = insight.get('correlation_confidence', insight['confidence'])
+                causal_conf = insight.get('causal_confidence', 0)
+                if causal_conf > 0:
+                    print(f"       Correlation: {corr_conf:.0%} | Causal: {causal_conf:.0%}, Relevance: {insight['relevance']:.0%}")
+                else:
+                    print(f"       Confidence: {corr_conf:.0%}, Relevance: {insight['relevance']:.0%}")
                 print()
 
     except Exception as e:
