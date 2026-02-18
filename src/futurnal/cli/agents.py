@@ -75,13 +75,13 @@ def memory_stats(
         else:
             print("\nMemory Buffer Statistics")
             print("-" * 40)
-            print(f"Total entries: {stats['total_entries']}/{stats['max_entries']}")
+            print(f"Total entries: {stats['totalEntries']}/{stats['maxEntries']}")
             print(f"Utilization: {stats['utilization']:.0%}")
             print("\nBy Type:")
-            for entry_type, count in stats.get("by_type", {}).items():
+            for entry_type, count in stats.get("byType", {}).items():
                 print(f"  {entry_type}: {count}")
             print("\nBy Priority:")
-            for priority, count in stats.get("by_priority", {}).items():
+            for priority, count in stats.get("byPriority", {}).items():
                 print(f"  {priority}: {count}")
 
     except Exception as e:
