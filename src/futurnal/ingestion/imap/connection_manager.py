@@ -31,6 +31,11 @@ except Exception as exc:  # pragma: no cover - missing optional dependency
         "imapclient must be installed to use the IMAP connection manager"
     ) from exc
 
+try:
+    from imapclient.exceptions import LoginError as IMAPLoginError  # type: ignore
+except Exception:  # pragma: no cover - optional across imapclient versions
+    IMAPLoginError = None
+
 import certifi
 
 from futurnal.privacy.audit import AuditEvent, AuditLogger
@@ -125,7 +130,10 @@ class RetryStrategy:
                 # Authentication errors should not be retried automatically
                 if "AUTHENTICATIONFAILED" in message.upper():
                     return False
-        if isinstance(exc, IMAPClient.AuthenticationError):
+        auth_error_type = getattr(IMAPClient, "AuthenticationError", None)
+        if isinstance(auth_error_type, type) and isinstance(exc, auth_error_type):
+            return False
+        if IMAPLoginError is not None and isinstance(exc, IMAPLoginError):
             return False
         if isinstance(exc, (socket.error, OSError)):
             return True

@@ -62,9 +62,14 @@ class StubIMAPClient:
 
     # Use the proper exception hierarchy from our stub
     from imapclient import IMAPClient as IMAPClientStub
+    try:
+        from imapclient.exceptions import LoginError as IMAPLoginError
+    except Exception:
+        IMAPLoginError = getattr(IMAPClientStub, "AuthenticationError", IMAPClientStub.Error)
+
     Error = IMAPClientStub.Error
-    AuthenticationError = IMAPClientStub.AuthenticationError
-    AbortError = IMAPClientStub.AbortError
+    AuthenticationError = IMAPLoginError
+    AbortError = getattr(IMAPClientStub, "AbortError", IMAPClientStub.Error)
 
     def __init__(
         self,
@@ -860,5 +865,4 @@ def test_connection_uses_tls_only(monkeypatch: pytest.MonkeyPatch, descriptor) -
         # Verify SSL was enabled
         assert stub.ssl is True
         assert stub.ssl_context is not None
-
 

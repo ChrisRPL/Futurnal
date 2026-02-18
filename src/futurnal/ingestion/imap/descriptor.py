@@ -19,7 +19,7 @@ from datetime import datetime
 from enum import Enum
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional
 
 from filelock import FileLock
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -28,6 +28,9 @@ from futurnal import __version__ as FUTURNAL_VERSION
 from ..local.config import LocalIngestionSource
 from ...privacy.audit import AuditEvent
 from ...privacy.redaction import RedactionPolicy, redact_path
+
+if TYPE_CHECKING:
+    from ...privacy.redaction import RedactedPath
 
 
 # ---------------------------------------------------------------------------
@@ -586,5 +589,4 @@ __all__ = [
     "create_credential_id",
     "generate_mailbox_id",
 ]
-
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import sys
 import time
 from datetime import datetime
@@ -27,6 +28,7 @@ from .sync_state import ImapSyncStateStore
 # Rich console for formatted output
 console = Console()
 error_console = Console(stderr=True)  # For error messages to be captured by Tauri
+logger = logging.getLogger(__name__)
 
 # Create Typer app for IMAP commands
 imap_app = typer.Typer(help="IMAP email connector commands")
