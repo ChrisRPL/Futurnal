@@ -60,6 +60,9 @@ interface KnowledgeGraphProps {
  * - Technical (cyan): Code - stands out as technical
  */
 const NODE_COLORS: Record<EntityType, string> = {
+  // Generic entities - Orange (abstract)
+  Entity: '#F59E0B',      // Amber-500
+
   // Sources - Purple (anchor points)
   Source: '#A855F7',      // Purple-500
   Mailbox: '#A855F7',     // Purple-500 (same as Source)
@@ -85,6 +88,9 @@ const NODE_COLORS: Record<EntityType, string> = {
  * Sources are largest (anchor points), entities are smallest (many of them)
  */
 const NODE_SIZES: Record<EntityType, number> = {
+  // Generic entities - Small
+  Entity: 9,
+
   // Sources - Largest (22px anchor points)
   Source: 22,
   Mailbox: 22,
@@ -109,6 +115,7 @@ const NODE_SIZES: Record<EntityType, number> = {
  * Node opacity for monochrome mode
  */
 const NODE_OPACITIES: Record<EntityType, number> = {
+  Entity: 0.6,
   Source: 0.95,
   Mailbox: 0.95,
   Document: 0.7,
@@ -125,9 +132,9 @@ const NODE_OPACITIES: Record<EntityType, number> = {
  */
 const LINK_STYLES: Record<string, { color: string; width: number; dashed: boolean }> = {
   contains: { color: 'rgba(168, 85, 247, 0.35)', width: 1, dashed: true },   // Purple, structural
-  mentions: { color: 'rgba(59, 130, 246, 0.5)', width: 2, dashed: false },   // Blue, semantic
-  related_to: { color: 'rgba(16, 185, 129, 0.6)', width: 2, dashed: false }, // Green, causal (document-to-document)
-  default: { color: 'rgba(255, 255, 255, 0.25)', width: 1.5, dashed: false },
+  mentions: { color: 'rgba(59, 130, 246, 0.5)', width: 1.5, dashed: false }, // Blue, semantic
+  related_to: { color: 'rgba(16, 185, 129, 0.5)', width: 0.8, dashed: false }, // Green, document-to-document (thinner to avoid mesh)
+  default: { color: 'rgba(255, 255, 255, 0.25)', width: 1, dashed: false },
 };
 
 /**
@@ -794,7 +801,10 @@ export const KnowledgeGraph = forwardRef<KnowledgeGraphRef, KnowledgeGraphProps>
       const isColored = colorMode === 'colored';
 
       // Calculate line width (scale with zoom but maintain minimum visibility)
-      const baseWidth = style.width * (link.weight || 1);
+      // Use logarithmic scaling for weight to prevent thick mesh lines
+      const weight = link.weight || 1;
+      const weightFactor = 1 + Math.log2(Math.max(1, weight)) * 0.3; // Gentle scaling: weight 4 → 1.6x, weight 8 → 1.9x
+      const baseWidth = style.width * weightFactor;
       const lineWidth = Math.max(0.5, baseWidth / Math.sqrt(globalScale));
 
       ctx.beginPath();
